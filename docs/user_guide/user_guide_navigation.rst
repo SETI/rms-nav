@@ -232,7 +232,7 @@ cannot be read, does not parse as JSON, or does not parse to a JSON object
 satisfies no error filter read from the tree either, as the paragraph on the
 results tree above says, so the two answer alike about it. One that parses to a
 JSON object the index will not take -- contents that do not carry what the index
-requires (see :doc:`user_guide_statistics`), or a JSON object that was never a
+requires (see :doc:`user_guide_results_index`), or a JSON object that was never a
 navigation document at all -- is read from the tree as it stands, and its
 ``status`` answers every error filter there. Those are the images an error
 filter answered from an index drops and the same filter answered from the tree

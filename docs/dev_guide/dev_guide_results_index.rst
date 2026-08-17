@@ -203,7 +203,7 @@ version gate is what makes that happen rather than being discovered later.
    itself agrees with every value it could be given, which is why the number
    is written down beside the columns as well as in the schema.
 6. Update the schema tables in
-   :doc:`/user_guide/user_guide_statistics`, which document the index for
+   :doc:`/user_guide/user_guide_results_index`, which document the index for
    somebody writing SQL against it.
 
 Dropping a column is the same list, and the same version bump.
