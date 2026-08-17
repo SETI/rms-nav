@@ -2230,6 +2230,34 @@ the modules the later phases add. Updates: `user_guide_statistics.rst` (per sect
 layer, the concurrency model, the branch-local import exception, and how to
 add a column (increment the version). No issue numbers in any of it.
 
+Details settled during execution, none of them a change of intent:
+
+- **The dev-guide section is a chapter of its own,**
+  `docs/dev_guide/dev_guide_results_index.rst`, rather than a section inside an
+  existing chapter. The dev guide is
+  organized one chapter per subsystem, and the four subjects this phase names --
+  the Core layer, the concurrency model, the import exception and the column
+  recipe -- are that subsystem's contracts. It sits between the C-kernel and the
+  PDS4 chapters, where the subsystem sits in the pipeline.
+- **`docs/api_reference/api_results_index.rst` needed nothing.** Phase 1 created
+  it with the package, and each later phase added its module to it in the commit
+  that added the module, which is what the phase asked for; the check here found
+  all eight names already present. Nothing was added for
+  `spindoctor.cli.stats.ingest`: whether the `spindoctor.cli` subpackages belong
+  in the API reference at all is an open question (#443), and answering it for
+  one package in a documentation phase would settle it by accident.
+- **`user_guide_logging.rst` needed nothing either.** The program table gained
+  the three statistics programs when each was written, since that table is
+  validated against the program registry.
+- **The two guides divide by audience rather than by subject.** The new user-guide
+  chapter is the index as a whole -- what it promises, which programs read it,
+  when to rebuild it -- and the statistics chapter stays the reference for the
+  two programs and the schema, each pointing at the other. Writing the whole
+  subject twice was the alternative and is how the two come to disagree.
+- **The nitpicky build was run** (`sphinx -n`) and the two chapters this phase
+  adds produce no warnings of their own. The repository-wide nitpick backlog is
+  untouched and remains #438's.
+
 ---
 
 ## 5. Acceptance criteria
@@ -2373,6 +2401,11 @@ File as tracking issues alongside the implementation issue:
   widening for one out-of-package tool, wanted only if triage's ten
   rglobs-per-frame remain a practical pain after the pipeline consumers are
   converted.
+- **`sd_create_ck` reads one document per image** (#507). Every field its report
+  and its segment writer take from a document is already a column, so it is the
+  last high-volume reader of the tree outside bundle generation; converting it
+  is the Phase 4 shape again -- declare the option, resolve the URL, read
+  records through a source object.
 - **Shipping the index to cloud workers** (#466). Publishing the SQLite file to the
   results bucket and having each worker download it once is the alternative
   to a PostgreSQL instance, and needs a documented workflow either way.

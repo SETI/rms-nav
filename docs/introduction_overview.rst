@@ -73,7 +73,7 @@ Navigation Phase
   :doc:`/user_guide/user_guide_navigation`).
 
 * ``sd_stats_ingest`` - Read per-image navigation metadata JSON files into the
-  results index (see :doc:`/user_guide/user_guide_statistics`).
+  results index (see :doc:`/user_guide/user_guide_results_index`).
 
 * ``sd_stats_report`` - Generate success/failure, technique-usage, offset, and
   agreement reports from the results index (see
@@ -128,7 +128,7 @@ distributed processing:
 * ``sd_stats_ingest_cloud_tasks`` - Cloud tasks worker that reads one share of
   a navigation-results root into the results index. ``sd_stats_ingest`` lists
   each root and divides it into shares, and adds the workers' tallies up again
-  when they have run; see :doc:`/user_guide/user_guide_statistics`.
+  when they have run; see :doc:`/user_guide/user_guide_results_index`.
 
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud
