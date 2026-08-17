@@ -669,48 +669,62 @@ empty completes normally.
 **Every way a directory refuses to be listed is one way.** The walk treats any
 `OSError` as "could not be listed": not there, not a directory, unreadable by
 this user, a share that stopped answering. A permission error is the commonest
-of them on a shared tree, and enumerating only some of the others ends the pass
-on it -- skipping every later root of a multi-root run and never reaching the
-closing summary. A directory that could not be listed costs the files under it
-and nothing else; the pass continues over the rest of the root, and the prune is
-refused for that root because the listing no longer covers all of it.
+of them on a shared tree, and telling them apart would only decide which of them
+ends the pass, since all of them mean the walk can see no result file there,
+which is not the same as there being none.
 
-**A directory the walk did not list is counted, not merely logged.** The pass
-carries a `directories_missed` count, reports it in the closing summary, and
-records it on the `ingest_runs` row. Absence of an `images` row is the
-load-bearing claim of the whole design -- every consumer reads it as "this image
-was never navigated" -- and under a directory nobody enumerated that reading is
-simply false. A run that missed a directory still completes, because the rows it did
-write are as good as any other run's, so the count is the only place the gap
-shows; a consumer that means to read absence as an answer has it on the run row
-rather than in a log file nobody kept. A pass whose count is zero listed the
-whole root and absence means what it says everywhere under it.
+**A directory under a root that will not list ends the pass.** The walk raises
+where it meets the directory; nothing catches it before the driver's console
+entry point, which reports the directory as a fatal error and exits 1. The root
+it was under keeps its NULL finish time, every root named after it on the same
+command line is left without a run at all, and both are therefore roots every
+consumer refuses. Absence of an `images` row is the load-bearing claim of the
+whole design -- every consumer reads it as "this image was never navigated" --
+and under a directory nobody enumerated that reading is simply false; a pass
+that completed around one stamped the root as ingested and made that reading an
+answer, permanently, since a pass with no evidence about the stubs it did not
+see must also remove no row. Every completed run is now a run that listed its
+whole root, which is what lets the prune act on every one of them.
 
-**A directory already walked is not walked again.** The walk records each local
-directory's device and inode as it enters it and skips one it has already
-listed. A link from a subdirectory back to an ancestor otherwise writes the same
-document under a new stub at every level, until the filesystem's own limit on
-link traversal stops it -- forty-one rows for one document, forty of them
-answering for images at paths no consumer will ask about, and the count of
-navigated images wrong by all of them. A directory skipped this way is counted
-as missed, since the walk did not enumerate it there, which is also what refuses
-the prune for that pass. The identity is taken only for a local directory: a
-cloud location has no links to go round in, and asking a bucket about a prefix
-is a paid round trip per directory per run.
+It is raised **at discovery, in the walk**, and not where the prune would
+otherwise be skipped. The walk happens before any document is read, so a pass
+stopped there throws away a listing; a pass stopped at prune time throws away
+every retrieval of an archive-scale root, which is hours of work to reach the
+same conclusion. The cost of the rule is that a transient failure -- a share
+that stops answering for a moment, a permission fixed a minute later -- ends a
+run instead of degrading it. That is the trade, taken deliberately: an ingest is
+reproducible from the tree and cheap to repeat, and the answer the alternative
+leaves behind is one no later pass corrects.
+
+**A directory already walked is not walked again, and is not a gap.** The walk
+records each local directory's device and inode as it enters it and skips one it
+has already listed. A link from a subdirectory back to an ancestor otherwise
+writes the same document under a new stub at every level, until the filesystem's
+own limit on link traversal stops it -- forty-one rows for one document, forty
+of them answering for images at paths no consumer will ask about, and the count
+of navigated images wrong by all of them. Declining the second path is not the
+same as failing to reach it: every document under that directory is in the
+listing already, under the path the walk met first, and the stubs the second
+path would produce name a directory no consumer's lookup spells. So the walk
+logs it and goes on, the root counts as wholly listed, and the pass completes
+and prunes. The identity is taken only for a local directory: a cloud location
+has no links to go round in, and asking a bucket about a prefix is a paid round
+trip per directory per run.
 
 **Rows of documents that have left the tree are removed.** Presence has to mean
 what absence means, so the stubs recorded for a root that this walk did not
 find are deleted, and the count is reported and recorded in `ingest_runs` as
 `files_removed`. The delete cascades to the child tables. This is sound only on
-the evidence of a **complete listing of the root**: the prune reads the walk's
-own listing and refuses one that does not cover the whole root, which is the
-case whenever the root could not be listed or any directory under it could not.
-Section 2.8 states the consequence for a worker that covers a share of a root.
+the evidence of a **listing of the whole root**: the prune reads the walk's own
+listing and refuses one of a root the walk could not list. A listing missing a
+directory under the root never reaches it, because such a walk raises instead of
+returning. Section 2.8 states the consequence for a worker that covers a share
+of a root.
 
 **Per-root bookkeeping.** An `ingest_runs` table records, per root:
 `root_url`, `started_utc`, `finished_utc` (NULL while running),
 `files_seen` / `files_ingested` / `files_skipped` / `files_failed` /
-`files_removed` / `directories_missed`, and `schema_version`, under a surrogate
+`files_removed`, and `schema_version`, under a surrogate
 `run_id` primary key
 (a root legitimately has many runs, and a consumer reads the newest). The row
 is written at
@@ -768,7 +782,8 @@ duplicates apart would put a technique nobody ran into the operator's report.
 **The driver's exit status says whether the pass completed**, not what it found:
 0 when every named root was walked, whatever mix of documents was read, skipped
 and refused, and 1 when the run could not complete -- no index or no root
-resolvable, the index unopenable, or a root that could not be listed. A status
+resolvable, the index unopenable, a root that could not be listed, or a
+directory under one that could not be. A status
 read from a count of ingested documents flips between two passes over one
 unchanged tree, since what one pass ingests or refuses the next one skips, and a
 scheduled run would then see a failure once and never again. **The driver always
@@ -1537,8 +1552,10 @@ Details settled during execution, none of them a change of intent:
   from an earlier state of this phase would otherwise pass the version gate and
   then fail on a column that is not there, which is exactly what the gate exists
   to prevent. Phase 5 raises it again, to 5, on the same reasoning, and the
-  column set changed once more after it -- the summary-PNG flag left both file
-  tables -- which is what makes the current version 6.
+  column set changed twice more after it -- the summary-PNG flag left both file
+  tables, and `directories_missed` left `ingest_runs` when a walk that cannot
+  list a directory began to stop rather than complete -- which is what makes the
+  current version 7.
 - **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
   the export now names LF. The frozen `images.csv` blobs are LF, so what the
   export writes matches them byte for byte, which the previous implementation's
@@ -1586,12 +1603,15 @@ Details settled during execution, none of them a change of intent:
   root for the key while walking the string as typed made a relative root -- a
   documented spelling -- a traceback out of the driver, with the run row already
   written and its finish time left NULL.
-- **A directory the walk did not list is counted** (section 2.7), reported in
-  the summary and recorded on the `ingest_runs` row, and the walk skips a
-  directory it has already listed rather than descending into it again. The
-  first is what keeps "absence means never navigated" honest for the consumers
-  of Phase 4; the second stops a link back into a tree from writing one
-  document as forty-one rows.
+- **A directory the walk cannot list ends the pass** (section 2.7), and the
+  walk skips a directory it has already listed rather than descending into it
+  again. The first is what keeps "absence means never navigated" honest for the
+  consumers of Phase 4: no run that completes has a gap in it. The second stops
+  a link back into a tree from writing one document as forty-one rows, and is
+  not a gap, so it stops nothing. (Both arrived here as a count of missed
+  directories on the run row, reported by every consumer; the count went with
+  the change that made the first of them stop the pass, which left it always
+  zero.)
 - **Ingest is a package, on the treatment section 3 names for the report.**
   Everything section 2.7 asks of one pass carries `spindoctor/cli/stats/ingest`
   past the 1000-line cap, so it is `ingest/` split along the stages a pass runs
@@ -1626,15 +1646,20 @@ Details settled during execution, none of them a change of intent:
   the workers' writes cannot touch the same stub. Within one fan-out this is an
   ordering guarantee rather than only a set argument: the prune runs before the
   task descriptions are built, so no worker of that pass exists while it runs.
-  Two limits are worth recording. The disjointness is a claim about **one**
-  fan-out: two overlapping fan-outs against one root can leave a stale row, when
-  a worker of the first writes a stub after the second's snapshot of what is
-  recorded and before its delete, for a document that left the tree between the
-  two listings. It is narrow, and the next pass removes the row. And the prune
-  is destructive before any document has been read, so a fan-out that is
-  abandoned shrinks the index -- but only by rows whose documents have genuinely
-  left the tree, and the run is unfinished throughout, so no consumer reads the
-  root either way.
+  Two limits are worth recording, and both are **documented limits** rather
+  than open questions: each is stated in the statistics guide, and each was
+  decided rather than left. The disjointness is a claim about **one** fan-out:
+  two overlapping fan-outs against one root can leave a stale row, when a worker
+  of the first writes a stub after the second's snapshot of what is recorded and
+  before its delete, for a document that left the tree between the two listings.
+  It is narrow, both runs are unfinished while the window is open, and the next
+  pass removes the row; refusing or warning about a fan-out over a root whose
+  newest run is unfinished was considered and not done. And the prune is
+  destructive before any document has been read, so a fan-out that is abandoned
+  shrinks the index -- but only by rows whose documents have genuinely left the
+  tree, and the run is unfinished throughout, so no consumer reads the root
+  either way; what it costs an operator is a full re-ingest of that root, which
+  is the sentence the guide gives them.
 - **Each task's report is counted once, under its `task_id`**; a share counts
   toward a run only when it names that run's root; the account must match the
   listing exactly rather than merely reach it; and a run whose listing was never
@@ -1709,10 +1734,9 @@ Details settled during execution, none of them a change of intent:
   read as a broken ingest rather than as the ordinary thing it is, which is why
   the whole-root pass keeps one example per reason in the first place.
 - **A run row carries what the fan-out found before it is finished.**
-  `files_seen`, `files_removed` and `directories_missed` are written at fan-out
-  with the finish time left NULL, because nothing later in the pass can find
-  them out again and the completion step must not have to list the root to learn
-  them.
+  `files_seen` and `files_removed` are written at fan-out with the finish time
+  left NULL, because nothing later in the pass can find them out again and the
+  completion step must not have to list the root to learn them.
 - **`sd_stats_ingest` and `sd_stats_ingest_cloud_tasks` joined the program
   identity tests** in `tests/spindoctor/config/test_logging_keys.py`, which named
   neither. The interactive driver has declared `PROGRAM_NAME` since Phase 2 and
@@ -2118,31 +2142,15 @@ Details settled during execution, none of them a change of intent:
      came out of is refused too and is not one of these: the tree excludes such
      a file from every error filter as well.
   2. A file that exists and **has no row at all** reads as absent, which is what
-     the absence filters read as "this image was never navigated". Three passes
-     end that way: a file the pass could not retrieve; a document the pass read
-     whose rows the database would not store (section 2.7's isolated write
-     failure); and a file under a directory the walk did not list. The first two
-     are deliberate -- a recorded row would be skipped for as long as the file
-     did not change, and the next pass would never retry it. The third is
-     counted rather than invisible: `ingest_runs.directories_missed` is read
-     with the same query, handed back with the answer, and reported by
-     `ResultsFilter` as a warning naming the root, which is the consumer section
-     2.7 wrote that count for.
-  3. A document **the tree no longer holds** keeps its row and reads as present,
-     so `--has-offset-file` hands on an image whose metadata file is gone and
-     `--has-no-offset-file` skips one nothing has been written for. A row leaves
-     the index only when a pass that listed the whole root does not find a file
-     for it (`_prune_missing`, gated on `covers_whole_root`), and a pass that
-     missed one directory anywhere under the root removes no row at all, having
-     no evidence about the stubs it did not see. One unlistable subdirectory
-     therefore holds every stale row of the root for as long as it stays
-     unlistable, across any number of completed passes -- so this is a live
-     consequence of the prune guard and not only the snapshot's age, and the
-     missed-directory warning says both halves. The prune is the ingest's, and
-     narrowing it to the directories a pass did list is a change to what a
-     listing has to report about itself, which sits with the ingest phases and
-     with the sharded pass that also prunes on partial evidence.
-  4. A document **rewritten in place, keeping the length and the modification
+     the absence filters read as "this image was never navigated". Two passes
+     end that way: a file the pass could not retrieve, and a document the pass
+     read whose rows the database would not store (section 2.7's isolated write
+     failure). Both are deliberate -- a recorded row would be skipped for as
+     long as the file did not change, and the next pass would never retry it. A
+     file under a directory nobody listed is not a third: a walk that cannot
+     list a directory raises where it meets it (section 2.7), so no root a
+     consumer reads has a completed pass that skipped one.
+  3. A document **rewritten in place, keeping the length and the modification
      time it had before,** is skipped by the incremental comparison
      (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` to go on), so its
      row goes on recording what the document before it said and an error filter
@@ -2155,9 +2163,9 @@ Details settled during execution, none of them a change of intent:
      retrieving every document to find out is exactly the cost the skip exists
      to avoid -- a content digest would be paid on every file of every pass to
      catch a case a times-preserving restore produces. `--force` is the remedy
-     and is what the documentation points at. Like member 3, this one is not
-     the snapshot's age: a pass that finished a second ago answers from the
-     document before the rewrite.
+     and is what the documentation points at. This one is not the snapshot's
+     age: a pass that finished a second ago answers from the document before
+     the rewrite.
 - **The answer says how old it is, and what that does not cover.**
   `ingest_runs.finished_utc` is read by the same query as the missed count and
   returned with the stubs, and `ResultsFilter` reports it with the count of what
@@ -2258,9 +2266,7 @@ add a column (increment the version). No issue numbers in any of it.
       status;
    2. a file that has no row at all in the index, because no pass could read or
       record it;
-   3. a document the tree no longer holds, whose row survives every pass that
-      did not list the whole root;
-   4. a document rewritten in place with the length and the modification time it
+   3. a document rewritten in place with the length and the modification time it
       had before, whose row goes on recording what the document before it said.
 
    Each carve-out is stated in the plan, in the module docstring, in the
@@ -2373,13 +2379,15 @@ File as tracking issues alongside the implementation issue:
 - **A `--since` selector for ingest** (#467). The stat-pair skip makes a re-scan
   cheap in reads but not in listings; a time-bounded scan would cut the
   listing too.
-- **Two overlapping ingest passes over one root can leave a stale row** (#479).
-  A worker of the first writes a stub after the second has read what is
-  recorded and before its delete, for a document that left the tree between the
-  two listings. Narrow, self-healing on the next pass, and invisible to
-  consumers while it is open, since both runs are unfinished; what is undecided
-  is whether a fan-out over a root whose newest run is unfinished should be
-  refused, warned about, or left as it is.
+- **Two overlapping ingest passes over one root can leave a stale row** (#479),
+  **closed as a documented limit.** A worker of the first writes a stub after
+  the second has read what is recorded and before its delete, for a document
+  that left the tree between the two listings. Narrow, self-healing on the next
+  pass, and invisible to consumers while it is open, since both runs are
+  unfinished. Refusing or warning about a fan-out over a root whose newest run
+  is unfinished was considered and not done; the statistics guide says so in
+  those terms, so that a later reader sees a choice rather than a question
+  nobody reached.
 - **A hand-written ingest task file can name a stub outside its root** (#489).
   A task file is an operator-visible artifact, and the worker accepts any string
   as a stub, so a hand-edited one reads a document outside the root it names and
@@ -2389,20 +2397,23 @@ File as tracking issues alongside the implementation issue:
   half of the key was closed for the same threat model; what is undecided is
   whether the worker should validate the stub domain as the log-path and offset
   readers already validate theirs.
-- **An abandoned fan-out has already removed rows** (#480). The prune runs
-  before any document is read, so a pass that is given up on after step 1 has
-  shrunk the index. Only rows whose documents have genuinely left the tree go,
-  and the run is unfinished throughout, so nothing valid is lost and no consumer
-  reads the root; the way back is a full ingest.
-- **One unlistable directory stops the prune for the whole root** (#481).
-  `_prune_missing` runs only for a listing that covers the whole root, so a
-  single directory a walk could not list -- or one it had already walked under
-  another name -- keeps every stale row of that root across any number of
-  completed passes, and a document deleted from the tree goes on reading as
-  present. Phase 5 enumerates it, tests both directions of it, and says so in
-  the missed-directory warning; narrowing the prune means recording which
-  directories a pass did list, which is a change to the listing contract and
-  belongs with the sharded ingest that prunes on the same rule.
+- **An abandoned fan-out has already removed rows** (#480), **closed as a
+  documented limit.** The prune runs before any document is read, so a pass that
+  is given up on after step 1 has shrunk the index. Only rows whose documents
+  have genuinely left the tree go, and the run is unfinished throughout, so
+  nothing valid is lost and no consumer reads the root. The statistics guide
+  states the operator-visible consequence, which is that abandoning a fan-out
+  costs a full re-ingest of that root.
+- **One unlistable directory stopped the prune for the whole root** (#481),
+  **closed.** A pass that could not list one directory completed all the same
+  and removed no row anywhere under its root, so a deleted document went on
+  reading as present across any number of finished passes. The walk now raises
+  where it meets such a directory: the pass ends, the root keeps no finish time,
+  and every run that does complete listed its whole root and pruned. A directory
+  reached a second way is no longer counted as a gap either, since its documents
+  are in the listing under the path met first. `ingest_runs.directories_missed`
+  and everything that reported it went with the change, which is what raised the
+  schema version to 7.
 - **A document rewritten in place with the same length and modification time is
   never read again** (#488). Those two metrics are everything a listing supplies,
   so `_is_unchanged` cannot tell such a file from the one already read, and its

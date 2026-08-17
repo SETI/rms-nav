@@ -9,9 +9,9 @@ by a trailing slash or by being relative to the working directory.
 These are assertions about the functions' contracts rather than about any one
 backend's behavior: that two spellings of one root produce one string, that the
 filesystem root -- the one root whose separator is its whole name -- survives
-intact, that what one pass recorded about its own reach is read from the runs
-over the root it was asked about, and that the refusal of a root nobody ingested
-names its index without its password and its roots exactly as they were given.
+intact, that when a pass finished is read from the runs over the root it was
+asked about, and that the refusal of a root nobody ingested names its index
+without its password and its roots exactly as they were given.
 """
 
 from pathlib import Path
@@ -23,7 +23,7 @@ from tests.spindoctor.results_index.conftest import opened, sqlite_url_for
 from spindoctor.results_index import (
     INGEST_RUNS,
     SCHEMA_VERSION,
-    newest_pass,
+    newest_finish_time,
     normalize_root_url,
     open_index,
     require_ingested_roots,
@@ -170,9 +170,9 @@ def _index_with_two_passed_over_roots(tmp_path: Path) -> str:
     """Build an index whose two roots were each passed over, the second one last.
 
     The second root's pass is therefore the newest run in the index, and it
-    records a finish time and a missed count the first root's never records.  A
-    query that read the newest run of the table rather than the newest run of
-    the root it was asked about would answer with that one.
+    records a finish time of its own.  A query that read the newest run of the
+    table rather than the newest run of the root it was asked about would
+    answer with that one.
 
     Parameters:
         tmp_path: Directory the index file is written into.
@@ -189,58 +189,43 @@ def _index_with_two_passed_over_roots(tmp_path: Path) -> str:
                     'root_url': root_url,
                     'started_utc': finished,
                     'finished_utc': finished,
-                    'directories_missed': missed,
                     'schema_version': SCHEMA_VERSION,
                 }
-                for root_url, finished, missed in (
-                    (FIRST_ROOT, FIRST_FINISHED, 0),
-                    (SECOND_ROOT, SECOND_FINISHED, 4),
+                for root_url, finished in (
+                    (FIRST_ROOT, FIRST_FINISHED),
+                    (SECOND_ROOT, SECOND_FINISHED),
                 )
             ],
         )
     return url
 
 
-def test_the_missed_count_is_read_from_the_root_it_was_asked_about(tmp_path: Path) -> None:
-    """One index serves several roots, and the newest run in it is routinely another's."""
-    url = _index_with_two_passed_over_roots(tmp_path)
-    with opened(url) as engine, engine.connect() as connection:
-        assert newest_pass(connection, FIRST_ROOT).directories_missed == 0
-
-
 def test_the_finish_time_is_read_from_the_root_it_was_asked_about(tmp_path: Path) -> None:
     """How old one root's answer is has nothing to do with when another was walked."""
     url = _index_with_two_passed_over_roots(tmp_path)
     with opened(url) as engine, engine.connect() as connection:
-        assert newest_pass(connection, FIRST_ROOT).finished_utc == FIRST_FINISHED
+        assert newest_finish_time(connection, FIRST_ROOT) == FIRST_FINISHED
 
 
 def test_the_other_root_is_answered_for_on_the_same_terms(tmp_path: Path) -> None:
-    """The gap the second root does have is reported when the second root is asked about."""
+    """And the root whose pass is the newest in the table is answered for as itself."""
     url = _index_with_two_passed_over_roots(tmp_path)
     with opened(url) as engine, engine.connect() as connection:
-        assert newest_pass(connection, SECOND_ROOT).directories_missed == 4
-
-
-def test_a_root_with_no_run_row_has_no_gap(tmp_path: Path) -> None:
-    """A root this index never passed over borrows no other root's coverage."""
-    url = _index_with_two_passed_over_roots(tmp_path)
-    with opened(url) as engine, engine.connect() as connection:
-        assert newest_pass(connection, '/data/never-ingested').directories_missed == 0
+        assert newest_finish_time(connection, SECOND_ROOT) == SECOND_FINISHED
 
 
 def test_a_root_with_no_run_row_has_no_finish_time(tmp_path: Path) -> None:
-    """Nothing was recorded for it, which is a different thing from a recorded zero."""
+    """Nothing was recorded for it, which is a different thing from a recorded time."""
     url = _index_with_two_passed_over_roots(tmp_path)
     with opened(url) as engine, engine.connect() as connection:
-        assert newest_pass(connection, '/data/never-ingested').finished_utc is None
+        assert newest_finish_time(connection, '/data/never-ingested') is None
 
 
-def test_a_pass_that_recorded_no_count_reads_as_no_gap(tmp_path: Path) -> None:
-    """The column is nullable, and a NULL there is not a gap of unknown size.
+def test_a_run_that_never_finished_has_no_finish_time(tmp_path: Path) -> None:
+    """The column is nullable, and a NULL there is a pass that did not reach the end.
 
-    A run row is written when the pass starts and its count is stamped when the
-    pass ends, so a NULL is a pass that did not reach the end -- which the
+    A run row is written when the pass starts and stamped when the pass ends, so
+    a NULL is a pass still in flight or one that died -- which the
     completed-ingest check refuses before any of this is read.
     """
     url = sqlite_url_for(tmp_path / 'index.sqlite3')
@@ -252,10 +237,9 @@ def test_a_pass_that_recorded_no_count_reads_as_no_gap(tmp_path: Path) -> None:
                     'root_url': FIRST_ROOT,
                     'started_utc': FIRST_FINISHED,
                     'finished_utc': None,
-                    'directories_missed': None,
                     'schema_version': SCHEMA_VERSION,
                 }
             ],
         )
     with opened(url) as engine, engine.connect() as connection:
-        assert newest_pass(connection, FIRST_ROOT).directories_missed == 0
+        assert newest_finish_time(connection, FIRST_ROOT) is None

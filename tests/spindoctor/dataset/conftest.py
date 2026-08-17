@@ -326,16 +326,6 @@ def one_image_tree(tmp_path: Path) -> tuple[Path, list[ImageFile]]:
     ]
 
 
-OTHER_ROOT_MISSED = 5
-"""How many directories the second root's pass did not list.
-
-The second root is ingested last, so its run is the newest in the index: a count
-read from the newest run of the table rather than from the newest run over the
-root being enumerated is this one, and reports a gap the enumerated root does
-not have -- or, with the two the other way round, reports none where it does.
-"""
-
-
 def stamp_run(url: str, root: Path, **values: Any) -> None:
     """Record something about the pass over one root, and about no other root.
 
@@ -360,20 +350,16 @@ def stamp_run(url: str, root: Path, **values: Any) -> None:
         engine.dispose()
 
 
-def index_of_two_roots(tmp_path: Path, root: Path, *, missed: int) -> str:
-    """Ingest a tree, and a second tree whose pass missed directories after it.
+def index_of_two_roots(tmp_path: Path, root: Path) -> str:
+    """Ingest a tree, and a second tree passed over after it.
 
-    The count is written rather than provoked, so that the test is about what a
-    consumer does with a count and not about what makes a walk record one.  The
-    second root carries a count of its own for the same reason the fixture tree
-    is ingested beside a decoy: a query answering from the wrong root's run row
-    passes every single-root assertion.
+    The fixture tree is ingested beside a decoy because a query answering from
+    the wrong root's run row passes every single-root assertion, and the decoy's
+    pass is the newest in the index.
 
     Parameters:
         tmp_path: Directory the index file is written into.
         root: The results root to ingest and describe.
-        missed: How many directories the pass over that root is recorded as
-            having missed.
 
     Returns:
         The connection URL of the index.
@@ -382,8 +368,6 @@ def index_of_two_roots(tmp_path: Path, root: Path, *, missed: int) -> str:
     write_metadata(decoy, SECOND_SUCCESS, metadata_document(image_name='N1000000002_1.IMG'))
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root, decoy], logger=null_logger())
-    stamp_run(url, root, directories_missed=missed)
-    stamp_run(url, decoy, directories_missed=OTHER_ROOT_MISSED)
     return url
 
 
@@ -394,32 +378,6 @@ def reporting_logger() -> pdslogger.PdsLogger:
         A logger of its own, so raising its level cannot affect another test.
     """
     return pdslogger.PdsLogger(f'results_filter_test_{uuid.uuid4().hex}')
-
-
-UNLISTABLE = 'COISS_2001/data/c'
-"""A directory under the root that one pass cannot list."""
-
-
-def refusing_to_list(monkeypatch: pytest.MonkeyPatch, directory: Path) -> None:
-    """Make one directory refuse to be listed, as a permission or a share can.
-
-    Provoked rather than written into the run row, because what is under test is
-    what the prune does when the walk comes back incomplete, and that is decided
-    by the walk and not by the count it records.
-
-    Parameters:
-        monkeypatch: Fixture the refusal is installed through.
-        directory: The directory that will refuse.
-    """
-    listing = FCPath.iterdir_metadata
-    refused = directory.as_posix()
-
-    def refuse(self: FCPath) -> Any:
-        if self.as_posix() == refused:
-            raise OSError('this directory may not be listed')
-        return listing(self)
-
-    monkeypatch.setattr(FCPath, 'iterdir_metadata', refuse)
 
 
 def index_without_a_table(tmp_path: Path, root: Path, table: str) -> str:

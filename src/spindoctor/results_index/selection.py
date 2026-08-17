@@ -35,27 +35,17 @@ never shown answers nobody's question about the selection they got.
   alike about it.
 - **A file that exists and has no row at all in the index** reads as absent,
   which is what the absence filters read as "this image was never navigated".
-  Three passes end that way, and the first two do so deliberately, because a
-  recorded row would be skipped for as long as the file did not change and the
-  next pass would never retry it:
+  Two passes end that way, and both do so deliberately, because a recorded row
+  would be skipped for as long as the file did not change and the next pass
+  would never retry it:
 
   - a file the pass could not retrieve;
-  - a document the pass read whose rows the database would not store;
-  - a file under a directory the walk did not list, either because it could not
-    be listed or because it had already been listed under another name.  That
-    one is counted rather than invisible: the count is on the run row, it is
-    returned as :attr:`ResultStubs.directories_missed`, and the caller reports
-    it rather than reading absence under it in silence.
+  - a document the pass read whose rows the database would not store.
 
-- **A document the tree no longer holds** keeps its row, and reads as present
-  where the tree reads it as absent, which also makes ``--has-no-offset-file``
-  skip an image nothing has been written for.  A row leaves the index only when
-  a pass that listed the whole root finds no file for it, and a pass that missed
-  a single directory anywhere under the root removes no row at all: the stubs it
-  did not see are the ones it has no evidence about.  So one unlistable
-  subdirectory holds every stale row of the root for as long as it stays
-  unlistable, however many passes complete in the meantime, and the count of
-  missed directories is what says so.
+  A file under a directory nobody listed is not a third: an ingest that cannot
+  list a directory stops there rather than completing, so a root with a
+  completed pass is a root every directory of which was listed.
+
 - **A document rewritten in place, keeping the length and the modification time
   it had before,** keeps the row the document before it produced, so an error
   filter answers from what that one recorded.  Those two metrics are everything
@@ -88,7 +78,7 @@ from filecache import FCPath
 from spindoctor.results_index.engine import open_index
 from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.roots import (
-    newest_pass,
+    newest_finish_time,
     normalize_root_url,
     require_ingested_roots,
 )
@@ -128,16 +118,13 @@ class ResultStubs:
             exists under the root.
         matching_error: Stubs whose document satisfies the error filters that
             were asked for, and empty when none were.
-        directories_missed: How many directories the newest pass over the root
-            did not list, so a caller reading absence as an answer can say that
-            the answer does not cover all of the root.
-        ingested_utc: When that pass finished, so a caller can say how old the
-            answer is, and None when the index recorded no finish time.
+        ingested_utc: When the newest pass over the root finished, so a caller
+            can say how old the answer is, and None when the index recorded no
+            finish time.
     """
 
     with_metadata: frozenset[str]
     matching_error: frozenset[str]
-    directories_missed: int = 0
     ingested_utc: str | None = None
 
 
@@ -319,8 +306,7 @@ def read_result_stubs(
 
     Returns:
         The stubs the root holds, in the two sets the filters test membership
-        in, with how much of the root the pass that recorded them missed and
-        when it finished.
+        in, with when the pass that recorded them finished.
 
     Raises:
         ValueError: If the index cannot be opened, is stamped with another
@@ -347,7 +333,7 @@ def read_result_stubs(
     try:
         with reporting_a_failed_read(url), engine.connect() as connection:
             require_ingested_roots(connection, [root_url], url=url)
-            newest = newest_pass(connection, root_url)
+            ingested_utc = newest_finish_time(connection, root_url)
             for stub, matches_error in connection.execute(query):
                 stub_text = str(stub)
                 with_metadata.add(stub_text)
@@ -358,6 +344,5 @@ def read_result_stubs(
     return ResultStubs(
         with_metadata=frozenset(with_metadata),
         matching_error=frozenset(matching_error),
-        directories_missed=newest.directories_missed,
-        ingested_utc=newest.finished_utc,
+        ingested_utc=ingested_utc,
     )

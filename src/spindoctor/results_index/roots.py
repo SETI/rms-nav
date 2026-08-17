@@ -20,10 +20,10 @@ have to be asked: a document the ingest refused is a file that exists, and it
 has a row in ``failed_files`` and none in ``images``, so a consumer reading the
 absence from ``images`` alone reports a navigated image as one nothing
 navigated.  What a completed run makes true is that absence from *both* tables
-means no file was there to read -- for every directory that run listed.
+means no file was there to read: a pass that could not list a directory stops
+rather than finishing, so a run that has a finish time listed the whole root.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import sqlalchemy
@@ -33,9 +33,8 @@ from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.schema import INGEST_RUNS
 
 __all__ = [
-    'NewestPass',
     'ingested_roots',
-    'newest_pass',
+    'newest_finish_time',
     'normalize_root_url',
     'require_ingested_roots',
 ]
@@ -110,35 +109,14 @@ def ingested_roots(connection: sqlalchemy.Connection) -> list[str]:
     return [str(row.root_url) for row in connection.execute(completed)]
 
 
-@dataclass(frozen=True)
-class NewestPass:
-    """What the newest ingest pass over one root recorded about its own reach.
+def newest_finish_time(connection: sqlalchemy.Connection, root_url: str) -> str | None:
+    """Return when the newest pass over one root finished.
 
-    Parameters:
-        finished_utc: When that pass finished, as it stamped it, and None when
-            the root has no run row or the run never finished.  It is the age
-            of the answer a consumer reads out of the index, which is the one
-            fact that says whether the tree has moved on since.
-        directories_missed: How many directories that pass did not list.
-    """
+    The index answers as of that moment and detects no change since, so a
+    consumer reports the moment with the answer rather than leaving it in the
+    head of whoever exported the URL.
 
-    finished_utc: str | None
-    directories_missed: int
-
-
-def newest_pass(connection: sqlalchemy.Connection, root_url: str) -> NewestPass:
-    """Return what the newest pass over one root recorded about itself.
-
-    A directory nobody enumerated holds files nobody recorded, and absence of a
-    row under it therefore says nothing about the image whose document is there.
-    A consumer that reads absence as a positive answer -- "this image was never
-    navigated" -- asks for this and says so when the count is not zero, because
-    the run completed all the same and nothing else in the index shows the gap.
-    It asks for the finish time in the same breath and for the same reason: the
-    index answers as of that moment and detects no change since, so the moment
-    belongs with the answer rather than in the head of whoever exported the URL.
-
-    Both come from the newest run row of the named root alone.  One database
+    It comes from the newest run row of the named root alone.  One database
     serves several roots, and the newest run in the table is routinely another
     root's.
 
@@ -147,23 +125,19 @@ def newest_pass(connection: sqlalchemy.Connection, root_url: str) -> NewestPass:
         root_url: The normalized root to ask about.
 
     Returns:
-        What that pass recorded, with no finish time and a count of zero when
-        the root has no run row at all.
+        The finish time that pass stamped, and None when the root has no run
+        row at all or its newest run never finished.
     """
     newest = (
-        sqlalchemy.select(INGEST_RUNS.c.finished_utc, INGEST_RUNS.c.directories_missed)
+        sqlalchemy.select(INGEST_RUNS.c.finished_utc)
         .where(INGEST_RUNS.c.root_url == root_url)
         .order_by(INGEST_RUNS.c.run_id.desc())
         .limit(1)
     )
     row = connection.execute(newest).first()
-    if row is None:
-        return NewestPass(finished_utc=None, directories_missed=0)
-    missed = row.directories_missed
-    return NewestPass(
-        finished_utc=None if row.finished_utc is None else str(row.finished_utc),
-        directories_missed=0 if missed is None else int(missed),
-    )
+    if row is None or row.finished_utc is None:
+        return None
+    return str(row.finished_utc)
 
 
 def require_ingested_roots(

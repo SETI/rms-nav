@@ -1,8 +1,8 @@
 """One ingest pass over each of the named results roots.
 
 Each root is walked once; the files the index has already read are dropped from
-what the pass reads; the rest are ingested in chunks; and a root that was
-listed completely is pruned of the rows whose documents have left the tree.
+what the pass reads; the rest are ingested in chunks; and the root is pruned of
+the rows whose documents have left the tree.
 
 What a row is keyed by
 ----------------------
@@ -39,8 +39,14 @@ leaves a row that would answer for an image the tree no longer holds, so the
 rows of one root whose stub the walk did not find are deleted with it.  That is
 sound only for a pass that listed the whole root: a worker handed a share of a
 root has no evidence about the stubs outside its share, and deleting on that
-evidence would delete its peers' work.  The prune therefore reads a complete
+evidence would delete its peers' work.  The prune therefore reads a whole-root
 listing and refuses anything else.
+
+A walk supplies one or it stops: a directory it cannot list ends the pass where
+it finds it, so a run that reaches the prune at all listed every directory
+under its root.  Every completed pass therefore prunes, which is what keeps one
+unreadable subdirectory from holding a root's stale rows across any number of
+passes that finished.
 """
 
 from collections.abc import Sequence
@@ -193,14 +199,14 @@ def _prune_missing(
         How many image rows were deleted.
 
     Raises:
-        ValueError: If the listing covers part of a root rather than all of it.
-            A pass over a share of a root knows nothing about the stubs outside
-            its share, and would delete another worker's rows on that evidence.
+        ValueError: If the listing is not one of the whole root.  A pass over a
+            share of a root knows nothing about the stubs outside its share,
+            and would delete another worker's rows on that evidence.
     """
-    if not listing.covers_whole_root:
+    if not listing.root_listed:
         raise ValueError(
-            f'{root_url}: rows may only be removed on the evidence of a complete listing '
-            f'of the root, and this walk did not produce one'
+            f'{root_url}: rows may only be removed on the evidence of a listing of the '
+            f'whole root, and this walk did not produce one'
         )
     found = {listed.results_path_stub for listed in listing.metadata_files}
     gone = sorted(stub for stub in recorded if stub not in found)
@@ -240,11 +246,11 @@ def ingest_metadata_files(
     read as a current-schema navigation document is counted against its own
     file and the run continues.
 
-    A root this walk lists completely is also pruned: the rows of documents the
-    tree no longer holds are deleted, so that presence of a row means what
-    absence of one means.  A root the walk could not list is left alone
-    entirely, and its ingest run is deliberately not completed, because a
-    mistyped or unmounted root is not an empty one.
+    Each root walked is also pruned: the rows of documents the tree no longer
+    holds are deleted, so that presence of a row means what absence of one
+    means.  A root the walk could not list is left alone entirely, and its
+    ingest run is deliberately not completed, because a mistyped or unmounted
+    root is not an empty one.
 
     Two spellings of one root are one root, and are walked once.
 
@@ -265,6 +271,13 @@ def ingest_metadata_files(
 
     Returns:
         What the pass did, summed over every root.
+
+    Raises:
+        UnlistableDirectoryError: If a directory under any root could not be
+            listed.  The whole pass ends there: the roots already walked keep
+            what they ingested and their completed runs, this root and every
+            root named after it keep no completed run at all, and no consumer
+            reads absence under one of those as an answer.
     """
     total = IngestCounts()
     # The normalized form is what is walked, not the string as typed.  It is
@@ -280,7 +293,6 @@ def ingest_metadata_files(
         logger.info('Ingesting %s', root_url)
         listing = _walk_root(root, logger=logger)
         counts.files_seen = len(listing.metadata_files)
-        counts.directories_missed = listing.directories_missed
         if not listing.root_listed:
             # The run row keeps its NULL finish time, so every consumer treats
             # this root as one nobody has ingested rather than as one that
@@ -306,10 +318,7 @@ def ingest_metadata_files(
                 counts=counts,
                 logger=logger,
             )
-        if listing.covers_whole_root:
-            counts.files_removed = _prune_missing(
-                engine, root_url, listing, recorded, logger=logger
-            )
+        counts.files_removed = _prune_missing(engine, root_url, listing, recorded, logger=logger)
         _finish_run(engine, run_id, counts)
         logger.info(
             'Ingested %d, skipped %d unchanged, failed %d, removed %d of %d file(s) under %s',

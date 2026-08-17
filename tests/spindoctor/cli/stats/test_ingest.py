@@ -729,25 +729,22 @@ def test_a_file_that_is_not_a_document_is_not_a_file_this_pass_saw(
 def test_a_file_that_is_not_a_document_is_no_part_of_what_the_walk_found(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """Both tallies the entry loop can add to, over a tree of ordinary clutter.
+    """What the entry loop collects, over a tree of ordinary clutter.
 
     Every entry is a directory to descend into, a document to collect, or a
-    file to pass over, and only the last leaves both tallies as they were.  A
-    name that ends in the document suffix is what says which, and neither half
-    of that is enough on its own: a file that merely ends in ``.json`` is not a
+    file to pass over, and only the last leaves the listing as it was.  A name
+    that ends in the document suffix is what says which, and neither half of
+    that is enough on its own: a file that merely ends in ``.json`` is not a
     navigation document, and one that merely contains the suffix yields a stub
     with the suffix's length cut off the end of a longer name, naming nothing,
     which the pass then retrieves, fails on, records nothing for, and retrieves
-    again on every pass afterwards.  The missed count is the other half, because
-    a directory in it stops the pass removing rows anywhere under the root, and
-    a file passed over is not a directory that went unlisted.
+    again on every pass afterwards.
     """
     root = _tree_with_a_file_that_is_not_a_document(tmp_path)
     listing = walk_module._walk_root(FCPath(root), logger=quiet_logger)
     assert [found.results_path_stub for found in listing.metadata_files] == [
         'VOL/N1454725799_1_CALIB'
     ]
-    assert listing.directories_missed == 0
 
 
 def test_re_ingesting_an_image_replaces_its_child_rows(

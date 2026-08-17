@@ -152,10 +152,7 @@ results tree also holds ``*_metadata.json`` files that are not per-image
 navigation documents at all; each is counted as an error for its own file, the
 run continues, and the closing summary tallies the failures by reason and names
 one file per reason, so several hundred files that were never navigation results
-read as exactly that rather than as a broken ingest. A directory the walk cannot
-list -- one this user may not read, a share that stopped answering -- costs the
-files under it and nothing else: the pass continues over the rest of the root
-and removes no row from it.
+read as exactly that rather than as a broken ingest.
 
 That tally is what this pass read, and not what the root holds. A refused file
 is recorded in ``failed_files``, and every pass after it skips the file
@@ -176,24 +173,49 @@ from the index comes than the tree would have made it, and
 ``sd_stats_ingest --force`` reads every document again, which puts the reasons
 and the example files back into the summary.
 
-**A directory the walk did not list is counted, and absence under it is not an
-answer.** The closing summary reports how many directories a pass did not
-enumerate, and each pass records the number on its ``ingest_runs`` row. Two
-things put a directory in that count: one the walk could not list, and one it
-had already walked under another name, which is what a link pointing back into
-a tree produces. Such a pass still completes, and the rows it wrote are as good
-as any other pass's -- but under one of those directories the index holds no
-rows at all, and **no row there means the walk never looked, not that the image
-was never navigated**. Read a nonzero count as a question about the tree before
-reading any absence beneath it as a result. A pass whose count is zero listed
-every directory of the root, and absence means what it says everywhere.
+**A directory under a root that the walk cannot list stops the ingest.** One
+this user may not read, or on a share that stopped answering, is reported as an
+error naming the directory, and the pass ends there: the root it was under gets
+no finish time, no root named after it on the same command line is walked, and
+``sd_stats_ingest`` exits 1. Fix what stopped the walk and run it again.
+
+**A root that cannot be listed does not stop it.** That is the case above --
+the mistyped path, the unmounted share -- and it is charged to the root it is
+about: that root is reported, left unfinished and ingested not at all, every
+other root named on the command line is still walked, and the status is 1 at the
+end. The difference is what the walk knows. A root nobody can list is a root
+this pass has said nothing about, and the next root has nothing to do with it; a
+directory nobody can list sits inside a root the pass is otherwise about to
+declare it has read.
+
+The alternative was tried and is worse. A pass that finished around the gap
+completed, stamped its root as ingested, and left every image under that
+directory reading as one nothing had ever navigated -- and, because such a pass
+must not remove rows on evidence it does not have, left every document deleted
+since the pass before it reading as present, across any number of later passes
+that completed the same way. Stopping costs an ingest, which is cheap and
+repeatable; finishing cost a wrong answer that no later pass corrected.
+
+**The cost of that is a transient failure ending a long pass.** A share that
+stops answering for a moment, or a permission fixed a minute later, now ends the
+run instead of degrading it. That is the trade, made deliberately: the walk
+happens before any document is read, so what a stopped pass throws away is the
+listing rather than hours of retrieval, and the pass can simply be run again.
+
+**A directory reached a second way is not a gap and does not stop anything.** A
+link pointing back up into the tree, or a volume reachable under two names,
+brings the walk to a directory it has already listed; it says so, declines to
+list it twice, and goes on. The documents under it are already in the listing,
+under the path the walk met first, and walking it again would only write them a
+second time under identifiers no consumer asks about.
 
 **The exit status says whether the pass completed, not what it found.**
 ``sd_stats_ingest`` exits 0 when every named root was walked, whatever mix of
 documents was read, skipped and refused, and 1 when the run could not complete:
 no index or no results root could be resolved, a named root is not a location
-that can be read, the index could not be opened, or a root could not be listed
-at all. A scheduled invocation therefore reads the same status from the same
+that can be read, the index could not be opened, a root could not be listed at
+all, or a directory under one could not be listed, which stops the pass where it
+is found. A scheduled invocation therefore reads the same status from the same
 tree every time, and a status of 1 always means something needs fixing rather
 than that a tree happens to hold no results.
 
@@ -385,6 +407,25 @@ did **not** hold are removed.
 step 1 onwards, so every consumer reports it as a root nobody has ingested while
 the workers are still writing -- rather than answering from whichever shares
 have landed.
+
+**Abandoning a fan-out costs a full re-ingest of that root.** Step 1 removes the
+rows of documents that have left the tree before any document is read, so a
+pass whose tasks are never queued, or that is given up on, has already shrunk
+the index. Nothing incorrect is lost -- the rows removed are exactly those whose
+documents the listing did not find -- and the root stays unfinished throughout,
+so no consumer reads a wrong answer from it. What it costs is the rest of the
+root's content in the index, which comes back by running the three steps through
+to the end, or an ordinary ``sd_stats_ingest`` over the root.
+
+**Two passes over one root at the same time are a documented limit.** Nothing
+refuses a fan-out over a root whose newest run is still unfinished, and two that
+overlap can leave behind one row whose document has gone: a worker of the first
+writes a stub after the second has read what the index holds and before it
+deletes. The window is narrow, both runs are unfinished while it is open -- so
+no consumer reads the root during it -- and the next pass over the root removes
+the row. Leaving it alone is a decision rather than an oversight: refusing or
+warning about a concurrent pass was considered and not done, and the case for
+either would have to be made afresh. Run one pass over a root at a time.
 
 **Step 3 refuses to finish a root its tasks did not cover.** Step 1 records how
 many files it found; step 3 adds up how many the tasks ingested, skipped and
@@ -711,13 +752,11 @@ pair with ``ON DELETE CASCADE``.
 ``ingest_runs`` records one row per ingest pass over one root: the root, when
 the pass started and finished (``finished_utc`` is NULL while it is running),
 how many files it saw, ingested, skipped as unchanged, could not read and
-removed, how many directories it did not list (``directories_missed``), and the
-schema version it wrote. A root whose newest row has no finish time, or which
-has no row at all, has not been fully ingested, and a consumer says so rather
-than reading absence of rows as "nothing was navigated". A finished row whose
-``directories_missed`` is nonzero covers the root apart from those directories:
-the rows it wrote are good, and absence of a row under one of them means the
-walk never looked rather than that the image was never navigated.
+removed, and the schema version it wrote. A root whose newest row has no finish
+time, or which has no row at all, has not been fully ingested, and a consumer
+says so rather than reading absence of rows as "nothing was navigated". A row
+that does carry a finish time covers the whole of its root, because a pass that
+could not list a directory stops rather than finishing.
 
 ``failed_files`` records one row per file that is not a current-schema
 navigation document: the root and stub that identify it, the volume it is under,

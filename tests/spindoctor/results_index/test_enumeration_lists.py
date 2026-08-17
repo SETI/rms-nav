@@ -27,7 +27,6 @@ from spindoctor.results_index import selection
 ENUMERATION_MEMBERS = {
     'a document the ingest refused': 'the ingest refused',
     'a file with no row': 'has no row at all',
-    'a document that left the tree': 'the tree no longer holds',
     'a document rewritten in place': 'rewritten in place',
 }
 """The answers the index gives differently from the tree, and what names each.
@@ -41,7 +40,9 @@ member is deleted and an unrelated paragraph is emphasized in its place.
 The phrase is chosen to be the one wording every statement of that member shares
 and no other member's carries.  Adding a member means adding it here, to the
 module docstring, to the navigation guide and to the plan's two lists, in one
-commit.
+commit; so does removing one that has stopped being a divergence, which is how
+the row of a document the tree no longer holds left this list when an ingest
+that cannot list a directory began to stop rather than complete.
 
 What this can and cannot check
 ------------------------------

@@ -7,7 +7,9 @@ re-downloaded forever.  A document that has left the tree takes its row with
 it, because absence of a row is what every consumer reads as "this image was
 never navigated" and presence therefore has to mean the reverse.  And a root
 the walk could not list at all is not a root that is empty, so its ingest run
-is deliberately left unfinished.
+is deliberately left unfinished -- as is the run of a root holding one
+directory the walk could not list, which stops the pass where it meets it
+rather than completing around the documents it could not see.
 
 The transactions are pinned here too.  A crash costs one chunk rather than a
 whole run, and one image's delete and inserts share one transaction; both are
@@ -26,7 +28,7 @@ import pytest
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats.ingest import METADATA_SUFFIX
+from spindoctor.cli.stats.ingest import METADATA_SUFFIX, UnlistableDirectoryError
 from spindoctor.cli.stats.ingest import chunks as chunks_module
 from spindoctor.cli.stats.ingest import driver as driver_module
 from spindoctor.cli.stats.ingest import store as store_module
@@ -469,35 +471,6 @@ def test_a_listing_that_does_not_say_what_is_a_directory_is_asked(
     assert counts.files_ingested == 1
 
 
-def test_an_entry_the_filesystem_will_not_classify_is_read_as_a_file(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Asking an entry what it is has to survive the entry refusing to answer.
-
-    The question is only asked when the listing did not say, which is already
-    a degraded backend; the answer can fail for every reason a listing can.
-    Letting it out would end the pass on one entry of one directory. Read as a
-    file, the worst it costs is a subtree the walk did not descend into, which
-    is what the missed-directory bookkeeping is for.
-    """
-    root = tmp_path / 'results'
-    write_metadata(root, 'N1454725799_1_CALIB', metadata_document())
-    (root / 'VOL2').mkdir()
-    real_iterdir = FCPath.iterdir_metadata
-
-    def saying_nothing(self: FCPath) -> Any:
-        for path, _entry_metadata in real_iterdir(self):
-            yield path, None
-
-    def refusing(self: FCPath) -> bool:
-        raise OSError('the share stopped answering')
-
-    monkeypatch.setattr(FCPath, 'iterdir_metadata', saying_nothing)
-    monkeypatch.setattr(FCPath, 'is_dir', refusing)
-    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    assert counts.files_ingested == 1
-
-
 def test_a_metric_less_listing_skips_nothing(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -717,8 +690,9 @@ UNLISTABLE_ERRORS = [
 """Every way a real tree refuses to list a directory.
 
 They are one thing to the walk -- it can see no result file there, which is not
-evidence that there is none -- and enumerating only some of them ends the run on
-the others.  A permission error is the commonest of all on a shared tree.
+evidence that there is none -- and enumerating only some of them lets the others
+through as an empty directory.  A permission error is the commonest of all on a
+shared tree.
 """
 
 
@@ -755,13 +729,90 @@ def _two_volume_tree(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
-def test_a_partly_listed_root_removes_nothing(
+def test_a_directory_that_cannot_be_listed_stops_the_pass(
     error: type[OSError],
     tmp_path: Path,
     quiet_logger: pdslogger.PdsLogger,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A directory that could not be listed is not a directory that is empty.
+    """A pass that finished around the gap would answer wrongly and go on doing so.
+
+    Absence of a row is what every consumer reads as "this image was never
+    navigated", and under a directory nobody listed that reading is simply
+    false.  A stopped run costs an ingest; a completed one that skipped a
+    directory costs a wrong answer no later pass corrects.
+
+    Parameters:
+        error: The exception type the unlistable directory raises.
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    root = _two_volume_tree(tmp_path)
+    _unlistable_subdirectory(monkeypatch, error)
+    with pytest.raises(UnlistableDirectoryError, match='could not be listed'):
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+
+
+@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
+def test_the_refusal_names_the_directory_that_would_not_list(
+    error: type[OSError],
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one thing an operator has to go and fix is the one thing it must say.
+
+    Parameters:
+        error: The exception type the unlistable directory raises.
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    root = _two_volume_tree(tmp_path)
+    _unlistable_subdirectory(monkeypatch, error)
+    with pytest.raises(UnlistableDirectoryError) as excinfo:
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert (root / 'VOL2').as_posix() in str(excinfo.value)
+
+
+@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
+def test_the_pass_stops_before_it_reads_a_document(
+    error: type[OSError],
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stopping where the walk finds it is the whole difference in what it costs.
+
+    The same refusal noticed where the prune is skipped instead would discard a
+    pass that had already read every document under the root, which on an
+    archive-scale root is hours of retrieval thrown away to say what the first
+    minute of the walk could have said.
+
+    Parameters:
+        error: The exception type the unlistable directory raises.
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    root = _two_volume_tree(tmp_path)
+    read: list[Any] = []
+    monkeypatch.setattr(driver_module, '_ingest_chunk', lambda *args, **kwargs: read.append(args))
+    _unlistable_subdirectory(monkeypatch, error)
+    with pytest.raises(UnlistableDirectoryError):
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert read == []
+
+
+@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
+def test_a_stopped_pass_leaves_its_run_unfinished(
+    error: type[OSError],
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No finish time is what makes every consumer refuse the root outright.
 
     Parameters:
         error: The exception type the unlistable directory raises.
@@ -771,127 +822,127 @@ def test_a_partly_listed_root_removes_nothing(
     """
     root = _two_volume_tree(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
     _unlistable_subdirectory(monkeypatch, error)
-    ingest_tree(url, [root], logger=quiet_logger)
-    engine = open_index(url)
-    with engine.connect() as connection:
-        found = _rows(connection, sqlalchemy.select(sqlalchemy.func.count()).select_from(IMAGES))
-    engine.dispose()
-    assert found[0][0] == 2
+    with pytest.raises(UnlistableDirectoryError):
+        ingest_tree(url, [root], logger=quiet_logger)
+    assert [time is not None for time in _finish_times(url)] == [False]
 
 
-@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
-def test_a_directory_that_cannot_be_listed_costs_only_itself(
-    error: type[OSError],
-    tmp_path: Path,
-    quiet_logger: pdslogger.PdsLogger,
-    monkeypatch: pytest.MonkeyPatch,
+def _entries_the_listing_says_nothing_about(
+    monkeypatch: pytest.MonkeyPatch, error: type[OSError]
 ) -> None:
-    """One unreadable subdirectory must not end the pass over the rest of the root.
+    """Strip the listing's metadata and make asking about an entry fail.
+
+    A backend whose listing carries no ``is_dir`` is asked about each entry
+    directly, which is the only path on which the answer can fail at all.
 
     Parameters:
-        error: The exception type the unlistable directory raises.
+        monkeypatch: Fixture the listing and the inspection are wrapped through.
+        error: The exception type asking about an entry raises.
+    """
+    real_iterdir = FCPath.iterdir_metadata
+
+    def without_metadata(self: FCPath) -> Any:
+        for path, _metadata in real_iterdir(self):
+            yield path, None
+
+    def refusing(self: FCPath) -> bool:
+        raise error(self.as_posix())
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', without_metadata)
+    monkeypatch.setattr(FCPath, 'is_dir', refusing)
+
+
+def test_an_entry_the_storage_layer_will_not_classify_stops_the_pass(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entry nobody will answer about may be a directory full of documents.
+
+    Passing it over as a file is the same gap as walking past a directory that
+    would not list, arrived at one step earlier: the walk goes on, the run
+    completes, and everything under it reads as never navigated.
+
+    Parameters:
         tmp_path: Directory the tree and the index live under.
         quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the listing is wrapped through.
+        monkeypatch: Fixture the listing and the inspection are wrapped through.
     """
     root = _two_volume_tree(tmp_path)
-    _unlistable_subdirectory(monkeypatch, error)
+    _entries_the_listing_says_nothing_about(monkeypatch, PermissionError)
+    with pytest.raises(UnlistableDirectoryError, match='could not be listed'):
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+
+
+def test_an_entry_that_has_gone_away_since_the_listing_is_passed_over(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deletion landing mid-walk is ordinary, and leaves nothing to have missed.
+
+    The pass finishes and ingests what it did find, because an entry that is
+    not there holds no document this pass failed to see.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the listing and the inspection are wrapped through.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'N1454725799_1_CALIB', metadata_document())
+    (root / 'VOL1').mkdir(exist_ok=True)
+    _entries_the_listing_says_nothing_about(monkeypatch, FileNotFoundError)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     assert counts.files_ingested == 1
 
 
-@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
-def test_a_directory_that_cannot_be_listed_leaves_a_completed_run(
-    error: type[OSError],
-    tmp_path: Path,
-    quiet_logger: pdslogger.PdsLogger,
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_root_walked_before_the_one_that_stopped_keeps_its_pass(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The root itself was listed, so it is a root somebody has ingested part of.
+    """What is already ingested and stamped is good, and is not rolled back.
 
     Parameters:
-        error: The exception type the unlistable directory raises.
-        tmp_path: Directory the tree and the index live under.
+        tmp_path: Directory the trees and the index live under.
         quiet_logger: Logger the ingest reports through.
         monkeypatch: Fixture the listing is wrapped through.
     """
-    root = _two_volume_tree(tmp_path)
+    first = tmp_path / 'first'
+    write_metadata(first, 'VOL1/N1454725801_1_CALIB', metadata_document())
+    second = _two_volume_tree(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
-    _unlistable_subdirectory(monkeypatch, error)
-    ingest_tree(url, [root], logger=quiet_logger)
-    assert [time is not None for time in _finish_times(url)] == [True]
+    _unlistable_subdirectory(monkeypatch, error=PermissionError)
+    with pytest.raises(UnlistableDirectoryError):
+        ingest_tree(url, [first, second], logger=quiet_logger)
+    assert [time is not None for time in _finish_times(url)] == [True, False]
 
 
-@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
-def test_a_directory_that_cannot_be_listed_is_counted(
-    error: type[OSError],
-    tmp_path: Path,
-    quiet_logger: pdslogger.PdsLogger,
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_root_named_after_the_one_that_stopped_is_never_walked(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A directory the walk never saw into is the one thing absence cannot mean.
+    """The pass ends, so a later root gets no run of its own and no rows.
 
-    Every consumer reads a missing row as "this image was never navigated", and
-    under an unlisted directory that reading is simply wrong. The run still
-    completes -- the rows it did write are good -- so the count is the only
-    place the gap shows.
+    A root left with no run at all is one every consumer refuses, which is the
+    same answer it gives for the root that stopped.
 
     Parameters:
-        error: The exception type the unlistable directory raises.
-        tmp_path: Directory the tree and the index live under.
+        tmp_path: Directory the trees and the index live under.
         quiet_logger: Logger the ingest reports through.
         monkeypatch: Fixture the listing is wrapped through.
     """
-    root = _two_volume_tree(tmp_path)
-    _unlistable_subdirectory(monkeypatch, error)
-    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    assert counts.directories_missed == 1
-
-
-@pytest.mark.parametrize('error', UNLISTABLE_ERRORS)
-def test_a_directory_that_cannot_be_listed_is_recorded_on_the_run(
-    error: type[OSError],
-    tmp_path: Path,
-    quiet_logger: pdslogger.PdsLogger,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The count outlives the run's log, because the consumers read the row.
-
-    Parameters:
-        error: The exception type the unlistable directory raises.
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the listing is wrapped through.
-    """
-    root = _two_volume_tree(tmp_path)
+    stopping = _two_volume_tree(tmp_path)
+    later = tmp_path / 'later'
+    write_metadata(later, 'VOL1/N1454725802_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
-    _unlistable_subdirectory(monkeypatch, error)
-    ingest_tree(url, [root], logger=quiet_logger)
+    _unlistable_subdirectory(monkeypatch, error=PermissionError)
+    with pytest.raises(UnlistableDirectoryError):
+        ingest_tree(url, [stopping, later], logger=quiet_logger)
     engine = open_index(url)
     with engine.connect() as connection:
-        found = _rows(connection, sqlalchemy.select(INGEST_RUNS.c.directories_missed))
+        found = _rows(connection, sqlalchemy.select(INGEST_RUNS.c.root_url))
     engine.dispose()
-    assert [row.directories_missed for row in found] == [1]
-
-
-def test_a_fully_listed_root_records_no_missed_directory(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """A zero has to mean something, so the ordinary pass has to record one."""
-    root = _two_volume_tree(tmp_path)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
-    engine = open_index(url)
-    with engine.connect() as connection:
-        found = _rows(connection, sqlalchemy.select(INGEST_RUNS.c.directories_missed))
-    engine.dispose()
-    assert [row.directories_missed for row in found] == [0]
+    assert [row.root_url for row in found] == [stopping.as_posix()]
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
-def test_a_directory_the_filesystem_will_not_open_costs_only_itself(
+def test_a_directory_the_filesystem_will_not_open_stops_the_pass(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """The same thing again, against a real directory rather than a stand-in."""
@@ -899,25 +950,24 @@ def test_a_directory_the_filesystem_will_not_open_costs_only_itself(
     closed = root / 'VOL2'
     closed.chmod(0o000)
     try:
-        counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+        with pytest.raises(UnlistableDirectoryError, match='could not be listed'):
+            ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     finally:
         closed.chmod(0o755)
-    assert counts.files_ingested == 1
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason='the superuser reads a directory of mode 000')
-def test_a_directory_the_filesystem_will_not_open_is_counted(
+def test_a_root_the_walk_lists_completely_records_no_refusal(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """And it is counted, against a real directory rather than a stand-in."""
+    """The ordinary pass over the same tree, so the tests above pin the refusal.
+
+    Every assertion above is about a tree one directory of which refuses; this
+    is that tree with nothing wrong with it, and it completes.
+    """
     root = _two_volume_tree(tmp_path)
-    closed = root / 'VOL2'
-    closed.chmod(0o000)
-    try:
-        counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    finally:
-        closed.chmod(0o755)
-    assert counts.directories_missed == 1
+    url = index_url(tmp_path / 'index.sqlite3')
+    counts = ingest_tree(url, [root], logger=quiet_logger)
+    assert counts.files_ingested == 2
 
 
 # ---------------------------------------------------------------------------
@@ -961,24 +1011,37 @@ def test_a_link_back_to_an_ancestor_writes_one_row_for_one_document(
     assert [row.results_path_stub for row in found] == ['VOL/N1454725799_1_CALIB']
 
 
-def test_a_link_back_to_an_ancestor_is_counted_as_a_missed_directory(
+def test_a_link_back_to_an_ancestor_does_not_stop_the_pass(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The walk stopped somewhere, and what it did not enumerate has to show."""
-    root = _tree_that_links_to_its_own_ancestor(tmp_path)
-    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    assert counts.directories_missed == 1
+    """A directory reached a second way is not a directory nobody listed.
 
-
-def test_a_link_back_to_an_ancestor_removes_no_row(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """A walk that stopped early is not evidence that a stub has left the tree."""
+    Its documents are in the listing already, under the path the walk met
+    first, so declining to walk it again leaves the root wholly accounted for
+    and the pass completes.
+    """
     root = _tree_that_links_to_its_own_ancestor(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
+    assert [time is not None for time in _finish_times(url)] == [True]
+
+
+def test_a_link_back_to_an_ancestor_still_prunes_a_deleted_document(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """And such a pass has the evidence to remove a row, so it removes it.
+
+    This is the difference between a directory that was reached twice and one
+    that was not reached at all: the first leaves presence meaning what absence
+    means, and the second is why a pass that meets one stops.
+    """
+    root = _tree_that_links_to_its_own_ancestor(tmp_path)
+    write_metadata(root, 'VOL/N1454725800_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    (root / f'VOL/N1454725800_1_CALIB{METADATA_SUFFIX}').unlink()
     counts = ingest_tree(url, [root], logger=quiet_logger)
-    assert counts.files_removed == 0
+    assert counts.files_removed == 1
 
 
 def test_a_link_to_a_directory_outside_the_walk_is_followed(
@@ -998,15 +1061,15 @@ def test_a_link_to_a_directory_outside_the_walk_is_followed(
     assert counts.files_ingested == 1
 
 
-def test_the_prune_refuses_a_listing_of_part_of_a_root(
+def test_the_prune_refuses_a_listing_that_is_not_of_the_whole_root(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """A worker holding a share of a root would otherwise delete its peers' rows."""
     url = index_url(tmp_path / 'index.sqlite3')
     engine = open_index(url, create=True)
-    listing = walk_module._RootListing(directories_missed=1)
+    listing = walk_module._RootListing(root_listed=False)
     try:
-        with pytest.raises(ValueError, match='complete listing'):
+        with pytest.raises(ValueError, match='whole root'):
             driver_module._prune_missing(
                 engine, '/data/nav-results', listing, {}, logger=quiet_logger
             )

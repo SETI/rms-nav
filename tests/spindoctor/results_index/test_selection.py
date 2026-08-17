@@ -78,15 +78,15 @@ SPICE = 'missing_spice_data'
 INGESTED = '2026-02-03T04:05:06+00:00'
 """When the newest pass over the root under test finished."""
 
+EARLIER_INGESTED = '2026-01-02T03:04:05+00:00'
+"""When an earlier pass over that same root finished."""
+
 OTHER_ROOT_INGESTED = '2026-03-04T05:06:07+00:00'
-"""When the newest pass over the other root finished, which is not when this one did."""
+"""When the newest pass over the other root finished, which is not when this one did.
 
-OTHER_ROOT_MISSED = 7
-"""How many directories the other root's newest pass did not list.
-
-It is not zero, and that pass is the newest in the index, so a count read from
-the newest run of the table rather than from the newest run of the root under
-test reports this number instead of that root's own.
+That pass is the newest in the index, so a finish time read from the newest run
+of the table rather than from the newest run of the root under test reports this
+moment instead of that root's own.
 """
 
 
@@ -125,14 +125,11 @@ def _document(stub: str, **columns: Any) -> dict[str, Any]:
     )
 
 
-def _completed_run(
-    root_url: str, *, directories_missed: int = 0, finished_utc: str | None = None
-) -> dict[str, Any]:
+def _completed_run(root_url: str, *, finished_utc: str | None = None) -> dict[str, Any]:
     """Return an ``ingest_runs`` row saying a pass over one root completed.
 
     Parameters:
         root_url: The root the run covered.
-        directories_missed: How many directories that pass did not list.
         finished_utc: When the pass finished, defaulting to now for the tests
             that do not read the time back.
 
@@ -144,7 +141,6 @@ def _completed_run(
         'root_url': root_url,
         'started_utc': stamp,
         'finished_utc': stamp,
-        'directories_missed': directories_missed,
         'schema_version': SCHEMA_VERSION,
     }
 
@@ -153,14 +149,12 @@ def _other_roots_newest_run() -> dict[str, Any]:
     """Return the run row that makes a root-blind run query answer wrongly.
 
     It is inserted last, so it is the newest run in the index, and it records a
-    finish time and a missed count that the root under test never records.
+    finish time the root under test never records.
 
     Returns:
         A mapping ready to insert.
     """
-    return _completed_run(
-        OTHER_ROOT, directories_missed=OTHER_ROOT_MISSED, finished_utc=OTHER_ROOT_INGESTED
-    )
+    return _completed_run(OTHER_ROOT, finished_utc=OTHER_ROOT_INGESTED)
 
 
 @pytest.fixture
@@ -471,16 +465,6 @@ def test_a_refused_document_matches_no_error_filter(two_roots: str) -> None:
     assert REFUSED not in _stubs(two_roots, has_offset_error=True).matching_error
 
 
-def test_a_complete_pass_leaves_nothing_for_the_caller_to_report(two_roots: str) -> None:
-    """A pass that listed the whole root makes absence mean what it says.
-
-    The other root's pass is the newest in the index and missed directories, so
-    a count read without naming this root reports that gap against a root that
-    has none.
-    """
-    assert _stubs(two_roots).directories_missed == 0
-
-
 def test_the_answer_carries_the_time_of_the_pass_that_recorded_it(two_roots: str) -> None:
     """The index detects no change since that moment, so the moment travels with it.
 
@@ -490,73 +474,53 @@ def test_the_answer_carries_the_time_of_the_pass_that_recorded_it(two_roots: str
     assert _stubs(two_roots).ingested_utc == INGESTED
 
 
-def _index_with_runs(tmp_path: Path, counts: list[int]) -> str:
-    """Build an index whose root was passed over once per count, in that order.
+def _index_with_runs(tmp_path: Path, finish_times: list[str]) -> str:
+    """Build an index whose root was passed over once per time, in that order.
 
-    A second root is passed over after all of them, missing directories and
-    finishing at a moment of its own, so that a count or a finish time read from
-    the newest run in the index rather than from the newest run over this root
-    is that second root's and is visibly wrong.
+    A second root is passed over after all of them, finishing at a moment of its
+    own, so that a finish time read from the newest run in the index rather than
+    from the newest run over this root is that second root's and is visibly
+    wrong.
 
     Parameters:
         tmp_path: Directory the index file is written into.
-        counts: How many directories each completed pass over the root under
-            test did not list, oldest pass first.
+        finish_times: When each completed pass over the root under test
+            finished, oldest pass first.
 
     Returns:
         The connection URL of the index.
     """
-    url = sqlite_url_for(tmp_path / 'missed.sqlite3')
+    url = sqlite_url_for(tmp_path / 'passes.sqlite3')
     with opened(url, create=True) as engine, engine.begin() as connection:
         connection.execute(IMAGES.insert(), [_document(SECOND_SUCCESS)])
         connection.execute(
             INGEST_RUNS.insert(),
-            [
-                _completed_run(ROOT, directories_missed=missed, finished_utc=INGESTED)
-                for missed in counts
-            ]
+            [_completed_run(ROOT, finished_utc=finished) for finished in finish_times]
             + [_other_roots_newest_run()],
         )
     return url
 
 
-def test_a_pass_that_missed_a_directory_hands_the_count_back(tmp_path: Path) -> None:
-    """Absence under a directory nobody listed is not an answer, and says so.
+def test_the_time_comes_from_the_newest_pass_over_the_root(tmp_path: Path) -> None:
+    """A root passed over twice is as old as the second pass, not the first.
 
-    The run completed, so nothing else in the index shows the gap; the count on
-    the run row is the only place it appears, and the caller that reads absence
-    as "this image was never navigated" is the one that has to be told.
+    The age belongs to a pass and not to a root, and an answer dated by the
+    oldest pass over the root reads as stale on every enumeration until the end
+    of time.
     """
-    stubs = read_result_stubs(_index_with_runs(tmp_path, [0, 3]), ROOT, [VOLUME])
-    assert stubs.directories_missed == 3
-
-
-def test_the_count_comes_from_the_newest_pass(tmp_path: Path) -> None:
-    """A later complete pass answers for the tree an earlier half-read one left.
-
-    The count belongs to a pass and not to a root: the whole root was listed
-    this time, so absence under it means what it says again, and reporting the
-    older pass's gap would cry wolf on every enumeration until the end of time.
-    """
-    stubs = read_result_stubs(_index_with_runs(tmp_path, [3, 0]), ROOT, [VOLUME])
-    assert stubs.directories_missed == 0
-
-
-def test_another_roots_gap_is_not_this_roots(tmp_path: Path) -> None:
-    """The count is read from the runs over the named root and no others.
-
-    One index serves several roots, and the newest run in it is routinely
-    another root's: a count read without the root warns of a gap this root does
-    not have, or -- with the two passes the other way round -- reports none when
-    this root has one.
-    """
-    stubs = read_result_stubs(_index_with_runs(tmp_path, [0]), ROOT, [VOLUME])
-    assert stubs.directories_missed == 0
+    url = _index_with_runs(tmp_path, [EARLIER_INGESTED, INGESTED])
+    stubs = read_result_stubs(url, ROOT, [VOLUME])
+    assert stubs.ingested_utc == INGESTED
 
 
 def test_another_roots_pass_is_not_when_this_answer_was_recorded(tmp_path: Path) -> None:
-    """The finish time comes from the same run row as the count, and by the same rule."""
-    stubs = read_result_stubs(_index_with_runs(tmp_path, [0]), ROOT, [VOLUME])
+    """The finish time is read from the runs over the named root and no others.
+
+    One index serves several roots, and the newest run in it is routinely
+    another root's: a time read without the root dates this answer by whenever
+    somebody last passed over an unrelated tree.
+    """
+    stubs = read_result_stubs(_index_with_runs(tmp_path, [INGESTED]), ROOT, [VOLUME])
     assert stubs.ingested_utc == INGESTED
 
 

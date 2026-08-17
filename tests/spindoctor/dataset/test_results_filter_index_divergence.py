@@ -29,13 +29,10 @@ from tests.spindoctor.cli.stats.conftest import (
     write_metadata,
 )
 from tests.spindoctor.dataset.conftest import (
-    SECOND_SUCCESS,
     SPICE_ERROR,
-    UNLISTABLE,
     VOLUMES,
     null_logger,
     one_image_tree,
-    refusing_to_list,
     select_from,
 )
 
@@ -202,137 +199,6 @@ def test_a_document_the_database_would_not_store_reads_as_absent(
     monkeypatch.undo()
     results_filter = ResultsFilter(
         VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-    )
-    assert select_from(results_filter, images) == []
-
-
-def _tree_of_two_documents(tmp_path: Path) -> tuple[Path, list[ImageFile]]:
-    """Write a root holding two documents in two directories, and an empty third.
-
-    Parameters:
-        tmp_path: Directory the root is written under.
-
-    Returns:
-        The root, and the two candidate images in enumeration order.
-    """
-    root = tmp_path / 'results'
-    write_metadata(root, SECOND_SUCCESS, metadata_document(image_name='N1000000002_1.IMG'))
-    write_metadata(root, SPICE_ERROR, metadata_document(image_name='N1000000004_1.IMG'))
-    (root / UNLISTABLE).mkdir(parents=True, exist_ok=True)
-    return root, [
-        ImageFile(
-            image_file_url=FCPath(root / f'{stub}.IMG'),
-            label_file_url=FCPath(root / f'{stub}.LBL'),
-            results_path_stub=stub,
-        )
-        for stub in (SECOND_SUCCESS, SPICE_ERROR)
-    ]
-
-
-def _index_after_a_document_left_the_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, listing_the_whole_root: bool
-) -> tuple[Path, list[ImageFile], str]:
-    """Ingest a root, delete one of its documents, and ingest it again.
-
-    The second pass either lists the whole root or finds one directory it cannot
-    list.  Both passes complete and stamp a finish time, so a consumer accepts
-    the root either way; what differs is whether the pass had the evidence to
-    remove the row of the document that has gone.
-
-    Parameters:
-        tmp_path: Directory the root and the index are written under.
-        monkeypatch: Fixture the unlistable directory is installed through.
-        listing_the_whole_root: Whether the second pass lists every directory.
-
-    Returns:
-        The root, the two candidate images, and the connection URL of the index.
-    """
-    root, images = _tree_of_two_documents(tmp_path)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    (root / f'{SPICE_ERROR}_metadata.json').unlink()
-    if not listing_the_whole_root:
-        refusing_to_list(monkeypatch, root / UNLISTABLE)
-    ingest_tree(url, [root], logger=null_logger())
-    monkeypatch.undo()
-    return root, images, url
-
-
-def test_a_document_that_left_the_tree_reads_as_absent_in_the_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The walk finds what is there now, which is the answer the index is held to."""
-    root, images, _url = _index_after_a_document_left_the_tree(
-        tmp_path, monkeypatch, listing_the_whole_root=True
-    )
-    results_filter = ResultsFilter(VOLUMES, str(root), logger=null_logger(), has_offset_file=True)
-    assert select_from(results_filter, images) == [SECOND_SUCCESS]
-
-
-def test_a_document_that_left_the_tree_is_pruned_by_a_pass_that_listed_it_all(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A complete pass has the evidence to remove the row, and removes it.
-
-    This is what makes the divergence below a consequence of the incomplete
-    listing rather than a property of an index: presence means what absence
-    means again as soon as one pass lists the whole root.
-    """
-    root, images, url = _index_after_a_document_left_the_tree(
-        tmp_path, monkeypatch, listing_the_whole_root=True
-    )
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-    )
-    assert select_from(results_filter, images) == [SECOND_SUCCESS]
-
-
-def test_a_document_that_left_the_tree_survives_a_pass_that_missed_a_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """One unlistable directory holds every stale row of the root, not only its own.
-
-    A pass that did not list the whole root has no evidence about the stubs it
-    did not see, so it removes none of them, and the row of a document deleted
-    from a directory it did list survives with them.  The index then hands a
-    presence filter an image whose document is not there, for as long as that
-    one directory stays unlistable.
-    """
-    root, images, url = _index_after_a_document_left_the_tree(
-        tmp_path, monkeypatch, listing_the_whole_root=False
-    )
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-    )
-    assert select_from(results_filter, images) == [SECOND_SUCCESS, SPICE_ERROR]
-
-
-def test_the_tree_offers_a_document_that_left_it_to_the_absence_filter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Nothing has been written for that image now, so the resume idiom picks it up."""
-    root, images, _url = _index_after_a_document_left_the_tree(
-        tmp_path, monkeypatch, listing_the_whole_root=False
-    )
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), has_no_offset_file=True
-    )
-    assert select_from(results_filter, images) == [SPICE_ERROR]
-
-
-def test_the_absence_filter_skips_a_document_the_tree_no_longer_holds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The other direction of the same stale row, and the costlier one.
-
-    ``--has-no-offset-file`` is the resume idiom, so an image whose document was
-    deleted is one the run silently declines to navigate again.
-    """
-    root, images, url = _index_after_a_document_left_the_tree(
-        tmp_path, monkeypatch, listing_the_whole_root=False
-    )
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
     )
     assert select_from(results_filter, images) == []
 
