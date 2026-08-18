@@ -184,7 +184,19 @@ def _finite_bound(value: float | None, field: str) -> None:
         raise ValueError(
             f'{field} is a {type(value).__name__}, and a time bound is a number of seconds'
         )
-    if not math.isfinite(value):
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        # Python puts no bound on an integer, so a bound can arrive too large
+        # for the float every recorded midtime is read as.  Asking whether it is
+        # finite is what raises, so the answer is supplied here: it is refused
+        # for the same reason an infinite bound is, and refused as a selection
+        # rather than as an arithmetic failure a caller cannot place.
+        raise ValueError(
+            f'{field} is an integer no float can hold, and a time bound is a finite number '
+            f'of seconds'
+        ) from None
+    if not finite:
         raise ValueError(
             f'{field} is {value!r}, and a time bound is a finite number of seconds: a walk '
             f'keeps every record against one and a query keeps none'

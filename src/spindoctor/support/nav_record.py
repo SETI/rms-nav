@@ -170,7 +170,10 @@ def record_midtime_et(nav_metadata: dict[str, Any]) -> float | None:
         value is read as none rather than passed on, because every comparison
         against a NaN is False: a NaN midtime would fall inside every time range
         at once, and an infinite one would fall inside a half-bounded range it
-        can have no business in.
+        can have no business in.  The same reading is applied to every other
+        recorded number, by :func:`finite_float`, which is what makes an
+        unusable midtime an unplaceable record rather than a raised exception
+        somewhere down the stream.
     """
     result = nav_metadata.get('navigation_result')
     if not isinstance(result, dict):
@@ -178,12 +181,7 @@ def record_midtime_et(nav_metadata: dict[str, Any]) -> float | None:
     times = result.get('times')
     if not isinstance(times, dict):
         return None
-    midtime = times.get('midtime_et')
-    if isinstance(midtime, bool) or not isinstance(midtime, (int, float)):
-        return None
-    if not math.isfinite(midtime):
-        return None
-    return float(midtime)
+    return finite_float(times.get('midtime_et'))
 
 
 @dataclass(frozen=True)

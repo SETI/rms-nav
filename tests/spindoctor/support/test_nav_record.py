@@ -496,6 +496,19 @@ def test_a_value_no_reader_can_place_in_time_is_read_as_no_midtime(midtime: Any)
     assert record_midtime_et({'navigation_result': {'times': {'midtime_et': midtime}}}) is None
 
 
+def test_a_recorded_integer_no_float_can_hold_is_read_as_no_midtime() -> None:
+    """JSON puts no bound on an integer literal, and asking whether one is finite raises.
+
+    A midtime of several hundred digits is a value a reader cannot use rather
+    than an error for a caller to meet.  Read as an error it would end a
+    time-bounded stream over the documents on one malformed file, while the same
+    file ingested into the index places no image at all -- so the two storages
+    would disagree about a document neither of them can place.
+    """
+    recorded = {'navigation_result': {'times': {'midtime_et': 10**400}}}
+    assert record_midtime_et(recorded) is None
+
+
 @pytest.mark.parametrize(
     'metadata',
     [

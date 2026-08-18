@@ -91,6 +91,23 @@ def test_a_non_finite_upper_bound_is_refused() -> None:
         Selection(stop_et=float('nan'))
 
 
+@pytest.mark.parametrize('field', [pytest.param('start_et'), pytest.param('stop_et')])
+def test_a_bound_no_float_can_hold_is_refused_as_a_selection(field: str) -> None:
+    """Python puts no bound on an integer, and asking whether one is finite raises.
+
+    Refused as a selection rather than left to raise an arithmetic error out of
+    the seam: an ``OverflowError`` reaching a caller from a value it wrote names
+    neither the field nor the rule, and it is the one way a bound can be
+    unusable without being a float at all.
+
+    Parameters:
+        field: The bound to hand an integer no float can hold.
+    """
+    named: dict[str, Any] = {field: 10**400}
+    with pytest.raises(ValueError, match='finite number of seconds'):
+        Selection(**named)
+
+
 def test_a_boolean_time_bound_is_refused() -> None:
     """A boolean is an integer in Python, and would bound a span at one second."""
     with pytest.raises(ValueError, match='a time bound is a number of seconds'):
