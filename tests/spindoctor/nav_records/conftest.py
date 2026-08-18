@@ -175,6 +175,24 @@ def tree_source(root: Path, logger: pdslogger.PdsLogger) -> TreeRecordSource:
     return TreeRecordSource([str(root)], logger=logger)
 
 
+def _unlistable_directory(monkeypatch: pytest.MonkeyPatch, error: type[OSError], name: str) -> None:
+    """Make one directory of a results tree refuse to be listed.
+
+    Parameters:
+        monkeypatch: Fixture the listing is wrapped through.
+        error: The exception type that directory raises.
+        name: The name of the directory that refuses.
+    """
+    real_iterdir = FCPath.iterdir_metadata
+
+    def refusing(self: FCPath) -> Any:
+        if self.name == name:
+            raise error(self.as_posix())
+        yield from real_iterdir(self)
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', refusing)
+
+
 def unlistable_subdirectory(monkeypatch: pytest.MonkeyPatch, error: type[OSError]) -> None:
     """Make the second volume of a two-volume tree refuse to be listed.
 
@@ -182,14 +200,7 @@ def unlistable_subdirectory(monkeypatch: pytest.MonkeyPatch, error: type[OSError
         monkeypatch: Fixture the listing is wrapped through.
         error: The exception type that directory raises.
     """
-    real_iterdir = FCPath.iterdir_metadata
-
-    def unlistable_vol2(self: FCPath) -> Any:
-        if self.name == 'VOL2':
-            raise error(self.as_posix())
-        yield from real_iterdir(self)
-
-    monkeypatch.setattr(FCPath, 'iterdir_metadata', unlistable_vol2)
+    _unlistable_directory(monkeypatch, error, 'VOL2')
 
 
 def unlistable_root(monkeypatch: pytest.MonkeyPatch, error: type[OSError]) -> None:
@@ -199,14 +210,7 @@ def unlistable_root(monkeypatch: pytest.MonkeyPatch, error: type[OSError]) -> No
         monkeypatch: Fixture the listing is wrapped through.
         error: The exception type the root raises.
     """
-    real_iterdir = FCPath.iterdir_metadata
-
-    def unlistable_results(self: FCPath) -> Any:
-        if self.name == 'results':
-            raise error(self.as_posix())
-        yield from real_iterdir(self)
-
-    monkeypatch.setattr(FCPath, 'iterdir_metadata', unlistable_results)
+    _unlistable_directory(monkeypatch, error, 'results')
 
 
 def count_retrievals(monkeypatch: pytest.MonkeyPatch) -> list[int]:
@@ -242,6 +246,13 @@ def failing_retrievals(monkeypatch: pytest.MonkeyPatch) -> None:
     """
 
     def never_delivers(self: FCPath, sub_path: Any = None, **kwargs: Any) -> Any:
+        if not isinstance(sub_path, list):
+            # A batch is what the stream asks for, but this patch covers every
+            # retrieval the test reaches -- and reading one document reaches a
+            # retrieval of itself, with no sub-path at all.  Refusing that the
+            # way the storage layer refuses it keeps such a call a file that
+            # never arrived rather than a fake that could not be called.
+            raise FileNotFoundError(self.as_posix() if sub_path is None else str(sub_path))
         return [FileNotFoundError(str(one)) for one in sub_path]
 
     monkeypatch.setattr(FCPath, 'retrieve', never_delivers)

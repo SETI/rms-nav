@@ -206,6 +206,30 @@ def test_every_target_of_these_checks_exists(relative: str) -> None:
     assert (_SRC / relative).exists()
 
 
+def test_a_module_exempted_twice_is_read_in_the_order_the_scan_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exemption is a set of places, not a sequence, and must not be read as one.
+
+    The scan returns a module's sites sorted, so an exemption compared in the
+    order it happens to be written in would fail a module that writes exactly
+    what it is allowed to -- an exemption that has to be spelled in a particular
+    order is a trap for whoever adds the second entry.
+
+    Parameters:
+        monkeypatch: Fixture the exemption table is amended through.
+    """
+    monkeypatch.setitem(
+        _MAY_WRITE_THROUGH_A_LENT_LOGGER,
+        'nav_records/tree.py',
+        (('_walk_from', 'warn'), ('_walk_from', 'info')),
+    )
+    assert _exempt_sites(_SRC / 'nav_records' / 'tree.py') == [
+        ('_walk_from', 'info'),
+        ('_walk_from', 'warn'),
+    ]
+
+
 @pytest.mark.parametrize('relative', sorted(_MAY_WRITE_THROUGH_A_LENT_LOGGER))
 def test_every_exempted_module_exists(relative: str) -> None:
     """An exemption naming nothing exempts nothing, and hides that it is dead.
@@ -300,10 +324,10 @@ def test_a_data_access_layer_writes_no_record_of_its_own(package: str) -> None:
         package: Path, relative to the source root, of the package to scan.
     """
     offenders = sorted(
-        f'{_under_source(path)}:{_logging_call_sites(path)}'
+        f'{_under_source(path)}: writes at {_logging_call_sites(path)}, '
+        f'exempt at {_exempt_sites(path)}'
         for path in _python_files(package)
-        if _logging_call_sites(path)
-        != list(_MAY_WRITE_THROUGH_A_LENT_LOGGER.get(_under_source(path), ()))
+        if _logging_call_sites(path) != _exempt_sites(path)
     )
     assert offenders == []
 
@@ -335,6 +359,23 @@ def _under_source(path: FCPath) -> str:
         The path relative to the source root, with forward separators.
     """
     return path.relative_to(_SRC).as_posix()
+
+
+def _exempt_sites(path: FCPath) -> list[tuple[str, str]]:
+    """Return the sites one module is exempted at, ordered as the scan orders them.
+
+    Sorted rather than taken in declaration order, because the scan returns its
+    sites sorted: a module exempted at two places would otherwise fail on the
+    order the exemption happens to be written in rather than on anything the
+    module does.
+
+    Parameters:
+        path: The module.
+
+    Returns:
+        The exempt sites, sorted.
+    """
+    return sorted(_MAY_WRITE_THROUGH_A_LENT_LOGGER.get(_under_source(path), ()))
 
 
 def _logging_call_sites(path: FCPath) -> list[tuple[str, str]]:

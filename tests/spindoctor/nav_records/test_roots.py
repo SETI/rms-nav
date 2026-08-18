@@ -40,7 +40,7 @@ def test_a_relative_root_becomes_an_absolute_one(
 ) -> None:
     """A root named relatively on one run and absolutely on the next is one root."""
     monkeypatch.chdir(tmp_path)
-    assert normalize_root_url('results') == (tmp_path / 'results').as_posix()
+    assert normalize_root_url('results') == (tmp_path.resolve() / 'results').as_posix()
 
 
 def test_the_filesystem_root_keeps_its_separator() -> None:
@@ -63,7 +63,7 @@ def test_a_root_reached_through_a_link_is_the_root_it_points_at(tmp_path: Path) 
     real = tmp_path / 'results-2026'
     real.mkdir()
     (tmp_path / 'latest').symlink_to(real)
-    assert normalize_root_url(tmp_path / 'latest') == real.as_posix()
+    assert normalize_root_url(tmp_path / 'latest') == real.resolve().as_posix()
 
 
 def test_a_root_naming_a_parent_directory_is_the_directory_it_names() -> None:

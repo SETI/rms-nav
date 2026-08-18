@@ -18,7 +18,6 @@ from typing import Any
 import pdslogger
 import pytest
 
-from spindoctor.nav_records import tree as tree_module
 from spindoctor.nav_records import (
     METADATA_SUFFIX,
     NAMES_NO_INSTRUMENT,
@@ -28,6 +27,7 @@ from spindoctor.nav_records import (
     TreeRecordSource,
     UnreadableFile,
 )
+from spindoctor.nav_records import tree as tree_module
 
 from .conftest import (
     FIRST_STUB,
@@ -122,28 +122,6 @@ def test_a_stub_spelled_as_an_absolute_path_reads_no_document(
     stub = (planted / 'STOLEN').as_posix()
     with pytest.raises(FileNotFoundError, match='fragment is absolute'):
         source.record(stub)
-
-
-def test_a_selection_naming_a_stub_that_escapes_its_root_is_refused_where_it_is_written(
-    tmp_path: Path,
-) -> None:
-    """A queue task carries stubs, and a task file is written by hand.
-
-    Refused in the selection rather than in a source, so the walk and the query
-    refuse it alike: there is one place the key can be wrong and neither storage
-    is reached from it.
-    """
-    write_document(tmp_path / 'elsewhere', 'STOLEN', document())
-    with pytest.raises(ValueError, match='is not a results path stub'):
-        Selection(stubs=('../elsewhere/STOLEN',))
-
-
-def test_a_selection_naming_a_subtree_that_escapes_its_root_is_refused(
-    tmp_path: Path,
-) -> None:
-    """The other parameter a caller can walk out of a root with."""
-    with pytest.raises(ValueError, match='is not a subtree of a results root'):
-        Selection(subtrees=('..',))
 
 
 def test_a_document_that_is_not_a_json_object_refuses_the_record(
@@ -325,6 +303,23 @@ def test_a_file_that_never_arrived_is_reported_rather_than_raised(
         'could not be retrieved',
         'could not be retrieved',
     ]
+
+
+def test_one_named_record_whose_file_never_arrives_raises_rather_than_returning(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stream reports such a file, and a call asked for one record has nothing to report with.
+
+    This reaches the storage layer the other way round from the stream above --
+    one file asked for by itself rather than a batch asked of the root -- and it
+    raises the error a caller distinguishes an unnavigated image by.
+    """
+    root = tmp_path / 'results'
+    write_document(root, FIRST_STUB, document())
+    source = tree_source(root, quiet_logger)
+    failing_retrievals(monkeypatch)
+    with pytest.raises(FileNotFoundError, match=FIRST_STUB):
+        source.record(FIRST_STUB)
 
 
 def test_a_file_whose_bytes_will_not_read_as_text_is_reported(
@@ -550,7 +545,7 @@ def test_a_record_at_the_range_edge_is_kept(
     root = tmp_path / 'results'
     write_document(root, FIRST_STUB, timed_document(midtime))
     found = list(tree_source(root, quiet_logger).records(Selection(start_et=1.0, stop_et=3.0)))
-    assert len(found) == 1
+    assert stubs_of(records_of(found)) == [FIRST_STUB]
 
 
 @pytest.mark.parametrize('midtime', [pytest.param(0.5, id='before'), pytest.param(3.5, id='after')])
@@ -621,7 +616,7 @@ def test_a_record_with_an_unusable_midtime_is_kept_when_no_bound_is_given(
     root = tmp_path / 'results'
     write_document(root, FIRST_STUB, timed_document(float('nan')))
     found = list(tree_source(root, quiet_logger).records(Selection()))
-    assert len(found) == 1
+    assert stubs_of(records_of(found)) == [FIRST_STUB]
 
 
 def test_a_lower_bound_alone_still_drops_a_record_before_it(

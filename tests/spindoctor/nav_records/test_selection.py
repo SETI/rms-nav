@@ -173,7 +173,12 @@ def test_a_range_whose_ends_are_equal_is_not_inverted() -> None:
 
 
 def test_a_selection_cannot_be_changed_after_it_is_written() -> None:
-    """One selection is handed to two sources, and neither may alter it."""
+    """One selection is handed to two sources, and neither may alter it.
+
+    Matched on the field's name because a frozen dataclass refuses an assignment
+    to a name it does not have in the same words it refuses one to a name it
+    does, so a mistyped field would pass an assertion about the type alone.
+    """
     selection = Selection(instrument='coiss')
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match="cannot assign to field 'instrument'"):
         selection.instrument = 'vgiss'  # type: ignore[misc]

@@ -1078,7 +1078,7 @@ def test_a_pass_stopped_at_a_directory_removes_no_row(
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
     _unlistable_subdirectory(monkeypatch, PermissionError)
-    with pytest.raises(UnlistableDirectoryError):
+    with pytest.raises(UnlistableDirectoryError, match='VOL2 could not be listed'):
         ingest_tree(url, [root], logger=quiet_logger)
     engine = open_index(url)
     with engine.connect() as connection:
