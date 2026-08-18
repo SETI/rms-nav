@@ -18,6 +18,7 @@ from typing import Any
 import pdslogger
 import pytest
 
+from spindoctor.nav_records import tree as tree_module
 from spindoctor.nav_records import (
     METADATA_SUFFIX,
     NAMES_NO_INSTRUMENT,
@@ -346,6 +347,40 @@ def test_a_file_that_is_not_valid_json_is_reported(
     write_text(root, FIRST_STUB, '{not json')
     found = list(tree_source(root, quiet_logger).records(Selection()))
     assert reasons_of(found) == ['not valid JSON']
+
+
+def test_a_document_nested_past_the_recursion_limit_is_reported(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The decoder reports more than malformed syntax, and this is not a reason to stop.
+
+    Twenty thousand nested arrays exhaust the recursion limit rather than
+    failing to parse, and what happened is the same thing the reason states: no
+    value came out of the file.
+    """
+    root = tmp_path / 'results'
+    write_text(root, FIRST_STUB, '[' * 20000 + ']' * 20000)
+    found = list(tree_source(root, quiet_logger).records(Selection()))
+    assert reasons_of(found) == ['not valid JSON']
+
+
+def test_a_fault_in_the_reader_itself_is_not_reported_as_a_bad_document(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malformed document is a property of the file; a broken reader is not.
+
+    Reported as a bad document it would say every file in the tree was
+    malformed, and an operator would go looking at a tree that is fine.
+    """
+    root = tmp_path / 'results'
+    write_document(root, FIRST_STUB, document())
+
+    def broken(path: Any) -> dict[str, Any]:
+        raise TypeError('the reader was changed and no longer works')
+
+    monkeypatch.setattr(tree_module, 'read_document', broken)
+    with pytest.raises(TypeError, match='no longer works'):
+        list(tree_source(root, quiet_logger).records(Selection()))
 
 
 def test_a_file_holding_json_that_is_not_an_object_is_reported(

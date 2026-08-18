@@ -697,12 +697,16 @@ class TreeRecordSource:
             # What is left of ValueError once the decoder's own failure is taken
             # out is the document rule itself: valid JSON that is not an object.
             return NOT_A_JSON_OBJECT
-        except Exception:
+        except (RecursionError, MemoryError):
             # The decoder reports more than malformed syntax.  Twenty thousand
             # nested objects exhaust the recursion limit rather than failing to
             # parse, and a decoder that runs out of memory says so its own way.
             # Neither is a reason to end a pass, and what happened in both is
-            # that no value came out of the file.
+            # that no value came out of the file.  Named rather than caught as
+            # every remaining exception, because a fault in the reader itself is
+            # a property of this code and not of the file: reported as a bad
+            # document it would say the whole tree was malformed, which is a
+            # worse answer than stopping.
             return NOT_VALID_JSON
 
     @staticmethod
