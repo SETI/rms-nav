@@ -2,6 +2,9 @@ spindoctor.nav_records
 ======================
 
 .. automodule:: spindoctor.nav_records
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 .. automodule:: spindoctor.nav_records.record
    :members:

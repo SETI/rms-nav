@@ -173,7 +173,7 @@ one at a time. :class:`~spindoctor.results_index.IndexRecordSource` answers from
 the rows: one query per call, streamed in server-side chunks, with the
 per-technique and per-feature rows merged onto the images stream by key.
 :func:`~spindoctor.results_index.open_record_source` is what a program calls; it
-returns the first when no index URL was resolved and the second when one was.
+returns the first when the run names no index and the second when it names one.
 
 **The seam is split along the database line, and the line is not a matter of
 taste.** ``import spindoctor.dataset`` must not import SQLAlchemy: every

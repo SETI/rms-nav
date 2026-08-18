@@ -258,9 +258,11 @@ the tree excludes as well. One query separates them:
 
 ``root_url`` is the results root as the ingest normalized it: absolute and
 resolved, with any
-trailing ``/`` removed. A selection also enumerates volumes, so add ``AND subtree
-IN (...)`` to bound what one selection can be short by; a row whose ``subtree``
-is NULL sits above every volume an enumeration walks and can shorten nothing.
+trailing ``/`` removed. A selection also enumerates subtrees --- the top-level
+directories under the root, which a PDS3 selection names as volumes --- so add
+``AND subtree IN (...)`` to bound what one selection can be short by; a row whose
+``subtree`` is NULL sits above every subtree an enumeration walks and can shorten
+nothing.
 
 ``sd_stats_ingest`` reports that count, narrowed to the rows carrying a subtree,
 at the end of each root's pass, as the line ``Documents under ... an error
