@@ -179,7 +179,7 @@ class IndexRecordSource:
         url: str,
         columns: Sequence[sqlalchemy.Column[Any]],
     ) -> None:
-        held = distinct_roots([str(root) for root in roots])
+        held = distinct_roots(roots)
         if not held:
             raise ValueError('a record source over the results index needs at least one root')
         self._engine = engine
@@ -766,7 +766,7 @@ def open_record_source(
             another version of the schema; or if a named root has no completed
             ingest run in it.
     """
-    root_urls = distinct_roots([str(root) for root in roots])
+    root_urls = distinct_roots(roots)
     if not root_urls:
         raise ValueError('a record source needs at least one results root to read')
     if results_db_url is None:

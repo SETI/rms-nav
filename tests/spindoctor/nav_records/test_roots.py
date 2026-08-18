@@ -149,3 +149,21 @@ def test_a_root_that_is_not_a_location_is_refused_here_too() -> None:
     """Every mode of a pass reads its roots through this, so the refusal is here."""
     with pytest.raises(ValueError, match='not a location'):
         distinct_roots(['/data/nav-results', ''])
+
+
+def test_a_root_handed_over_as_a_path_is_the_root_it_names(tmp_path: Path) -> None:
+    """A caller holding paths hands them over as they are.
+
+    Rendering one itself would put a second spelling rule beside the one this
+    module exists to be, and a path rendered by the platform is not the POSIX
+    rendering every key is stored and compared as.
+    """
+    assert distinct_roots([tmp_path / 'results']) == [(tmp_path.resolve() / 'results').as_posix()]
+
+
+def test_two_kinds_of_path_naming_one_root_are_one_root(tmp_path: Path) -> None:
+    """One program holds a path, another an FCPath, and a third the URL: one root."""
+    root = tmp_path / 'results'
+    assert distinct_roots([root, FCPath(root.as_posix()), root.as_posix()]) == [
+        (tmp_path.resolve() / 'results').as_posix()
+    ]

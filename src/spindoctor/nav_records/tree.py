@@ -379,7 +379,7 @@ class TreeRecordSource:
     def __init__(
         self, roots: Sequence[str | Path | FCPath], *, logger: PdsLogger | None = None
     ) -> None:
-        held = distinct_roots([str(root) for root in roots])
+        held = distinct_roots(roots)
         if not held:
             raise ValueError('a record source over the documents needs at least one results root')
         self._roots = tuple(held)

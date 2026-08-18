@@ -71,7 +71,7 @@ def normalize_root_url(root: str | Path | FCPath) -> str:
     return FCPath(root).expanduser().resolve().as_posix()
 
 
-def distinct_roots(roots: Sequence[str]) -> list[str]:
+def distinct_roots(roots: Sequence[str | Path | FCPath]) -> list[str]:
     """Normalize the given roots and drop the repeats, keeping their order.
 
     ``/data/x`` and ``/data/x/`` are one root, and a command line naming both
@@ -86,8 +86,13 @@ def distinct_roots(roots: Sequence[str]) -> list[str]:
     that reports which roots it was given: a run that named a root two ways and
     then reported on it once reads as a root having gone missing.
 
+    Every spelling :func:`normalize_root_url` accepts is accepted here, so a
+    caller holding paths hands them over as they are.  Rendering them itself
+    would put a second spelling rule beside the one this module exists to be.
+
     Parameters:
-        roots: The roots as their holder spelled them.
+        roots: The roots as their holder spelled them: local paths,
+            :class:`FCPath` objects, or cloud URLs.
 
     Returns:
         The normalized roots, first spelling first.

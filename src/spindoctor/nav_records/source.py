@@ -223,7 +223,7 @@ def selected_roots(held: Sequence[str], named: Sequence[str]) -> tuple[str, ...]
     """
     if not named:
         return tuple(held)
-    wanted = distinct_roots(list(named))
+    wanted = distinct_roots(named)
     unheld = [root for root in wanted if root not in held]
     if unheld:
         raise ValueError(
