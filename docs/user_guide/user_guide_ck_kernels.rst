@@ -390,6 +390,28 @@ Environment options
   takes precedence over the ``NAV_RESULTS_ROOT`` environment variable. One of
   the three is required.
 
+* ``--results-db URL``: connection URL of a results index built by
+  ``sd_stats_ingest`` (see :doc:`user_guide_results_index`). The run then reads
+  the whole mission's records in bulk instead of walking the tree and reading
+  one file per image, which is what makes a cloud results root affordable: an
+  archive-scale root costs one paid round trip per image otherwise, and a
+  Cassini-scale root holds several hundred thousand. Takes precedence over the ``environment.results_db``
+  configuration variable and ``NAV_RESULTS_DB``. ``--results-db none``
+  names no index, which is how a machine that has one configured is told to
+  read the tree for this run. Without an index the tree is read, which is the
+  default.
+
+  The index must hold a completed ingest of the same results root, and the run
+  is refused if it does not: a root nobody has ingested cannot say what it
+  holds, and a mission would silently come back short. What the run writes does
+  not otherwise depend on which it read -- the same images, the same
+  eligibility, the same matrices, epochs and recorded kernels -- with one
+  exception, which is that a value the ingest could not store is read as one
+  the document never recorded. A malformed offset, sigma or confidence is
+  refused outright when the tree is read, and reported as a blank column when
+  the index is; nothing a segment is built from can differ, because a matrix
+  the readers refuse is refused either way.
+
 * ``--kernel-dir DIR`` (repeatable, at least one required): a directory of
   SPICE kernels. These directories serve two purposes at once: every C-kernel
   in them is a candidate original to pair images against, and all of them

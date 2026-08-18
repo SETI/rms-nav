@@ -24,10 +24,9 @@ from typing import Any
 from filecache import FCPath
 from pdslogger import PdsLogger
 
-__all__ = ['METADATA_SUFFIX', 'UnlistableDirectoryError']
+from spindoctor.support.nav_document import METADATA_SUFFIX
 
-METADATA_SUFFIX = '_metadata.json'
-"""Suffix of the per-image navigation document under the results root."""
+__all__ = ['METADATA_SUFFIX', 'UnlistableDirectoryError']
 
 
 class UnlistableDirectoryError(Exception):

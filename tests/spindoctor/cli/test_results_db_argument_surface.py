@@ -34,6 +34,7 @@ from spindoctor.cli import (
     sd_backplanes,
     sd_consolidate_metadata,
     sd_create_bundle,
+    sd_create_ck,
     sd_mosaic,
 )
 from spindoctor.config import DEFAULT_CONFIG, get_results_db_url
@@ -51,6 +52,7 @@ _INDEX_BACKED: list[tuple[str, list[str]]] = [
     ('sd_backplanes', ['coiss_saturn']),
     ('sd_mosaic', ['rings', 'coiss_saturn', '--output-dir', 'out', '--planet', 'SATURN']),
     ('sd_mosaic', ['body', 'coiss_saturn', '--output-dir', 'out', '--body-name', 'RHEA']),
+    ('sd_create_ck', ['coiss', '--kernel-dir', 'kernels', '--output-dir', 'out']),
 ]
 
 # Every program whose questions the index answers, named by the argv that
@@ -82,7 +84,8 @@ _INDEX_BACKED_CLOUD_TASK_DRIVERS = [
 # The programs that read a results index in any capacity, as the paths of the
 # modules that resolve the URL, relative to the package root.  The statistics
 # programs read it as their whole subject; the pipeline stages read one row per
-# image; the navigator's dataset layer answers one selection query from it.  A
+# image; the kernel writer reads one mission's records in one query; the
+# navigator's dataset layer answers one selection query from it.  A
 # module absent from this list must not resolve a URL: it would then pick one up
 # from an exported NAV_RESULTS_DB without ever offering the option that opts
 # back out.  The scan covers the whole package rather than the dispatch modules
@@ -91,6 +94,7 @@ _INDEX_BACKED_CLOUD_TASK_DRIVERS = [
 _RESOLVING_MODULES = {
     'cli/sd_backplanes.py',
     'cli/sd_backplanes_cloud_tasks.py',
+    'cli/sd_create_ck.py',
     'cli/sd_mosaic.py',
     'cli/sd_mosaic_cloud_tasks.py',
     'cli/sd_stats_ingest.py',
@@ -213,6 +217,8 @@ def _parsed(program: str, argv: list[str]) -> argparse.Namespace:
     """
     if program == 'sd_mosaic':
         return sd_mosaic.parse_args(argv)[1]
+    if program == 'sd_create_ck':
+        return sd_create_ck.parse_args(argv)
     return sd_backplanes.parse_args(argv)
 
 

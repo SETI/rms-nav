@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from filecache import FCPath
 
 from spindoctor.support.types import NDArrayFloatType
 
@@ -44,6 +45,7 @@ __all__ = [
     'NULL_OFFSET',
     'REAL_NUMBER_DTYPE_KINDS',
     'UNKNOWN_STATUS',
+    'NavRecord',
     'RecordOffset',
     'finite_float',
     'record_offset',
@@ -85,6 +87,32 @@ NON_FINITE_OFFSET = 'non_finite_offset'
 
 MALFORMED_OFFSET = 'malformed_offset'
 """The offset is not two values a reader can read as pixels."""
+
+
+@dataclass(frozen=True)
+class NavRecord:
+    """One image's navigation record, and where that record is kept.
+
+    A record read from its document and one rebuilt from an index row are the
+    same thing to every consumer, so both arrive in this shape and neither
+    carries which storage produced it.
+
+    Parameters:
+        path: The document.  For a record rebuilt from a row this is the
+            document the ingest recorded reading, or -- for a row written
+            before anything recorded one -- where the stub says the document
+            lives.  It is what a message about this record names, so that an
+            operator is always told a file they can open.
+        stub: The image's results path stub: its identity under the root, and
+            the name of its log.
+        metadata: The record, in the shape the navigator writes it.  A record
+            rebuilt from a row carries the fields its columns hold and no
+            others, which is the part of the document its consumer reads.
+    """
+
+    path: FCPath
+    stub: str
+    metadata: dict[str, Any]
 
 
 def finite_float(value: Any) -> float | None:

@@ -1215,9 +1215,10 @@ def test_closing_an_index_backed_source_disposes_the_engine(
     build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
     database = tmp_path / 'index.sqlite3'
     index_for([root], database, logger=quiet_ingest_logger).dispose()
-    source = build_pointing_source(FCPath(root), results_db_url=f'sqlite:///{database.as_posix()}')
-    assert isinstance(source, IndexPointingSource)
-    engine = source._engine
+    # The engine is handed in rather than read back off the source, so what the
+    # assertion watches is an object the test owns.
+    engine = open_index(f'sqlite:///{database.as_posix()}')
+    source = IndexPointingSource(engine, normalize_root_url(FCPath(root)))
     source.load_pointing(image_file(CMATRIX_STUB))
     pooled_before = engine.pool
     source.close()

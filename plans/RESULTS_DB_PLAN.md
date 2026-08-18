@@ -973,9 +973,10 @@ one ladder rather than two that could drift apart. Every field that ladder
 reads is a column: `status`, `status_error`, `offset_dv` / `offset_du`, the
 `times` block including `midtime_et` (section 2.3), and the `pointing` block's
 `cmatrix`, `cmatrix_original`, `camera_frame_id` and `ck_frame_id`. The
-`pointing` block's `camera_frame` name is not a column and is not rebuilt: no
-reader consults it, because the frame identity a recorded attitude is gated
-against is taken from the observation.
+`pointing` block's `camera_frame` name is a column that this rebuild does not
+read: the frame identity a recorded attitude is gated against is taken from the
+observation, so these two readers consult the name nowhere. The kernel writer
+does consult it, which is why the column exists.
 
 **Ingest fills those columns through the readers' own functions.** The domain
 of every value a consumer classifies a record from lives in
@@ -1552,10 +1553,12 @@ Details settled during execution, none of them a change of intent:
   from an earlier state of this phase would otherwise pass the version gate and
   then fail on a column that is not there, which is exactly what the gate exists
   to prevent. Phase 5 raises it again, to 5, on the same reasoning, and the
-  column set changed twice more after it -- the summary-PNG flag left both file
-  tables, and `directories_missed` left `ingest_runs` when a walk that cannot
-  list a directory began to stop rather than complete -- which is what makes the
-  current version 7.
+  column set changed three times more after it -- the summary-PNG flag left both
+  file tables; `directories_missed` left `ingest_runs` when a walk that cannot
+  list a directory began to stop rather than complete; and `images` gained
+  `shutter_mode`, `spice_kernels` and `camera_frame` when the C-kernel writer
+  began reading its records from the index -- which is what makes the current
+  version 8.
 - **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
   the export now names LF. The frozen `images.csv` blobs are LF, so what the
   export writes matches them byte for byte, which the previous implementation's
@@ -2401,11 +2404,30 @@ File as tracking issues alongside the implementation issue:
   widening for one out-of-package tool, wanted only if triage's ten
   rglobs-per-frame remain a practical pain after the pipeline consumers are
   converted.
-- **`sd_create_ck` reads one document per image** (#507). Every field its report
-  and its segment writer take from a document is already a column, so it is the
-  last high-volume reader of the tree outside bundle generation; converting it
-  is the Phase 4 shape again -- declare the option, resolve the URL, read
-  records through a source object.
+- **`sd_create_ck` reads one document per image** (#507), **closed.** It reads one
+  mission's records in bulk now, and it reads them through the seam every program
+  reads records through, so converting it unified the back end rather than adding
+  a second one: `spindoctor/results_index/record_source.py` answers both shapes --
+  one image by its stub, one mission in bulk -- over either storage, and
+  `spindoctor/results_index/rebuild.py` holds the one column-to-field
+  correspondence both shapes rebuild through. The program declares
+  `--results-db` like every other index-backed one. Three of the fields it reads
+  were not columns and were added with it -- `observation.shutter_mode`, which is
+  what detects a simultaneous exposure;
+  `navigation_result.provenance.spice_kernels`, which assigns a correction to the
+  original it overlays; and `navigation_result.pointing.camera_frame`, which the
+  earlier phases left out on the grounds that no reader consulted it. That is
+  what raised the schema version to 8.
+- **Two rebuilds of one row were two answers**, **closed with the phase above.**
+  Each consumer carried its own row-to-record rebuild, its own open-and-check
+  ceremony and its own account of how the two storages could differ. They agreed
+  when they were written and then each grew a rule the other did not: the
+  `ORDER BY` that was right under SQLite's collation and wrong under a
+  PostgreSQL locale collation could only exist in the consumer that read in
+  bulk. There is now one rebuild, one `open_index_for_roots`, and one place that
+  states what the two storages may differ about; every column of `images` is
+  asserted to be a record field, part of a row's identity or a value the ingest
+  derived, so a column added for one consumer cannot read as absent to the rest.
 - **Shipping the index to cloud workers** (#466). Publishing the SQLite file to the
   results bucket and having each worker download it once is the alternative
   to a PostgreSQL instance, and needs a documented workflow either way.

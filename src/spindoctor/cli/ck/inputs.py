@@ -1,22 +1,24 @@
-"""What a generator run reads before it can write anything.
+"""What a generator run assembles before it can write anything.
 
 The kernel writer's other modules each answer a question about one image.  This
-one gathers the run: the per-image metadata documents a navigation pass left
-under its results root, the kernel directories those images name, and the
+one gathers the run: which of the navigation records a run was handed belong to
+the span it was asked for, the kernel directories those records name, and the
 spacecraft clock kernel each of the run's clocks is encoded against.
+
+Where the records themselves come from is not here.  They arrive through
+:mod:`spindoctor.results_index.record_source`, the one seam every program reads
+navigation records through, so that this program reads a results tree and an
+ingested index through the same code every other consumer does.
 
 Nothing here logs.  The driver reports what these functions return, so that the
 part of the run that touches only files and SPICE stays testable without a
-logger and stays inside the writer package, which may import neither oops nor
-anything from ``spindoctor.support``.
+logger and imports no oops.
 """
 
-import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import cspyce
 from filecache import FCPath
@@ -25,124 +27,66 @@ from spindoctor.cli.ck.clocks import SCLK_SUFFIX, select_sclk_kernel
 from spindoctor.cli.ck.frames import FK_SUFFIXES, require_one_frame_kernel_per_frame
 from spindoctor.cli.ck.images import ImageEntry
 from spindoctor.cli.ck.segment import resolve_sclk_id
-
-METADATA_SUFFIX = '_metadata.json'
-"""What a per-image navigation metadata document is named."""
+from spindoctor.results_index import IMAGES
+from spindoctor.support.nav_record import NavRecord
 
 LSK_SUFFIXES = frozenset({'.tls'})
 """The extension a leapseconds kernel carries in the holdings."""
 
+RECORD_COLUMNS = (
+    IMAGES.c.image_name,
+    IMAGES.c.instrument,
+    IMAGES.c.camera,
+    IMAGES.c.shutter_mode,
+    IMAGES.c.status,
+    IMAGES.c.status_reason,
+    IMAGES.c.offset_dv,
+    IMAGES.c.offset_du,
+    IMAGES.c.sigma_dv,
+    IMAGES.c.sigma_du,
+    IMAGES.c.rotation_deg,
+    IMAGES.c.confidence,
+    IMAGES.c.confidence_rank,
+    IMAGES.c.spice_kernels,
+    IMAGES.c.start_et,
+    IMAGES.c.stop_et,
+    IMAGES.c.midtime_et,
+    IMAGES.c.exposure_s,
+    IMAGES.c.sclk_midtime,
+    IMAGES.c.camera_frame,
+    IMAGES.c.camera_frame_id,
+    IMAGES.c.ck_frame_id,
+    IMAGES.c.cmatrix,
+    IMAGES.c.cmatrix_original,
+)
+"""Every column this program reads, and the whole of what a bulk read selects.
 
-@dataclass(frozen=True)
-class Document:
-    """One image's navigation metadata, as the run read it.
+A row is only cheaper than a document while it carries less, so this is a
+declaration rather than a convenience: what is not here is not read, and what is
+read is here.  A test holds the list to the fields
+:mod:`spindoctor.results_index.rebuild` knows a place for, since a column
+selected that no field is rebuilt from would be paid for and dropped.
 
-    Parameters:
-        path: The metadata file.
-        stub: The image's results path stub, which names its log.
-        metadata: The document itself.
-    """
-
-    path: FCPath
-    stub: str
-    metadata: dict[str, Any]
-
-
-################################################################################
-#
-# READING WHAT THE NAVIGATION RUN LEFT
-#
-################################################################################
-
-
-def read_documents(root: FCPath, mission: str) -> tuple[list[Document], list[tuple[FCPath, str]]]:
-    """Read every metadata document of one mission under a results root.
-
-    A file that cannot be read as JSON, or that holds JSON that is not a
-    document, is returned for the caller to report rather than raised on: it
-    names no image, so there is nothing for the report to say about it and
-    nothing an omission reason could be recorded against.  A document of
-    another mission is simply not this run's business and is passed over
-    silently -- but only a document that *names* a mission can be another
-    mission's.  One with no readable instrument at all is unreadable, not
-    foreign: skipping it silently would let a truncated or corrupted document
-    vanish from every mission's run without a trace.
-
-    Parameters:
-        root: The navigation results root.
-        mission: The instrument identity to keep.
-
-    Returns:
-        The mission's documents, ordered by path, and one entry per file that
-        could not be read at all, pairing it with why.
-    """
-    documents: list[Document] = []
-    unreadable: list[tuple[FCPath, str]] = []
-    for path in sorted(root.rglob(f'*{METADATA_SUFFIX}'), key=lambda entry: entry.as_posix()):
-        stub = _stub_for(root, path)
-        try:
-            metadata = _read_document(path)
-        except (OSError, ValueError) as exc:
-            unreadable.append((path, str(exc)))
-            continue
-        observation = metadata.get('observation')
-        instrument = observation.get('instrument') if isinstance(observation, dict) else None
-        if not isinstance(instrument, str):
-            unreadable.append((path, 'names no instrument to attribute it to a mission'))
-            continue
-        if instrument != mission:
-            continue
-        documents.append(Document(path=path, stub=stub, metadata=metadata))
-    return documents, unreadable
-
-
-def _read_document(path: FCPath) -> dict[str, Any]:
-    """Read one metadata document.
-
-    Parameters:
-        path: The file to read.
-
-    Returns:
-        The document.
-
-    Raises:
-        ValueError: if the file does not hold a JSON object.
-        OSError: if it cannot be read.
-    """
-    document = json.loads(path.read_text())
-    if not isinstance(document, dict):
-        raise ValueError(f'holds a {type(document).__name__}, not a JSON object')
-    return cast(dict[str, Any], document)
-
-
-def _stub_for(root: FCPath, path: FCPath) -> str:
-    """Return the results path stub naming one image's log.
-
-    Parameters:
-        root: The navigation results root.
-        path: The image's metadata file.
-
-    Returns:
-        The file's path relative to the root, without the metadata suffix.
-        The full path is used when it does not lie under the root, which
-        cannot happen for a document the root's own listing produced.
-    """
-    relative = path.as_posix().removeprefix(root.as_posix()).lstrip('/')
-    return relative.removesuffix(METADATA_SUFFIX)
+``camera_frame`` is here and is not among the columns the reprojection and
+backplane stages select, which is the whole of the difference between what the
+two consumers read: a kernel writer looks the frame up among the frame kernels it
+furnishes, and a reader gating an attitude against an observation takes the frame
+identity from the observation instead.
+"""
 
 
 def select_by_time(
-    documents: Sequence[Document], start_et: float | None, stop_et: float | None
-) -> tuple[list[Document], int]:
-    """Keep the documents whose exposure midtime lies within a time range.
+    records: Sequence[NavRecord], start_et: float | None, stop_et: float | None
+) -> tuple[list[NavRecord], int]:
+    """Keep the records whose exposure midtime lies within a time range.
 
     Parameters:
-        documents: The documents to filter.
+        records: The records to filter.
         start_et: Earliest midtime to keep, or ``None`` for no lower bound.
         stop_et: Latest midtime to keep, or ``None`` for no upper bound.
 
     Returns:
-        The selected documents and how many were dropped for recording no
+        The selected records and how many were dropped for recording no
         midtime.  An image with no midtime is kept when no bound is given and
         dropped when either is, since it cannot be shown to satisfy one.
 
@@ -157,11 +101,11 @@ def select_by_time(
             f'the time range is inverted: its start {start_et!r} is after its stop {stop_et!r}'
         )
     if start_et is None and stop_et is None:
-        return list(documents), 0
-    selected: list[Document] = []
+        return list(records), 0
+    selected: list[NavRecord] = []
     undated = 0
-    for document in documents:
-        midtime = _midtime_of(document)
+    for record in records:
+        midtime = _midtime_of(record)
         if midtime is None:
             undated += 1
             continue
@@ -169,25 +113,25 @@ def select_by_time(
             continue
         if stop_et is not None and midtime > stop_et:
             continue
-        selected.append(document)
+        selected.append(record)
     return selected, undated
 
 
-def _midtime_of(document: Document) -> float | None:
-    """Return one document's recorded exposure midtime.
+def _midtime_of(record: NavRecord) -> float | None:
+    """Return one record's recorded exposure midtime.
 
     Parameters:
-        document: The document.
+        record: The record.
 
     Returns:
-        The midtime in TDB seconds past J2000, or ``None`` when the document
+        The midtime in TDB seconds past J2000, or ``None`` when the record
         records none or records something that is not a finite number.  A
         non-finite value is read as none rather than passed on, because every
         comparison against a NaN is False: a NaN midtime would fall inside
         every time range at once, and an infinite one would fall inside a
         half-bounded range it can have no business in.
     """
-    result = document.metadata.get('navigation_result')
+    result = record.metadata.get('navigation_result')
     if not isinstance(result, dict):
         return None
     times = result.get('times')
@@ -266,18 +210,18 @@ def resolve_one(basename: str, paths: Mapping[str, tuple[FCPath, ...]]) -> FCPat
     return candidates[0]
 
 
-def recorded_basenames(documents: Sequence[Document]) -> tuple[str, ...]:
-    """Return every SPICE kernel basename the documents record, sorted.
+def recorded_basenames(records: Sequence[NavRecord]) -> tuple[str, ...]:
+    """Return every SPICE kernel basename the records name, sorted.
 
     Parameters:
-        documents: The documents to read.
+        records: The records to read.
 
     Returns:
         The basenames, without repeats.
     """
     names: set[str] = set()
-    for document in documents:
-        result = document.metadata.get('navigation_result')
+    for record in records:
+        result = record.metadata.get('navigation_result')
         if not isinstance(result, dict):
             continue
         provenance = result.get('provenance')
@@ -342,7 +286,7 @@ def furnish_frame_kernels(
     Parameters:
         entries: The images the run considered.  Those carrying no pointing
             name no frames.
-        basenames: Every kernel basename the run's documents record.
+        basenames: Every kernel basename the run's records name.
         paths: The indexed kernel directories.
 
     Returns:
@@ -386,7 +330,7 @@ def clock_kernels(
     Parameters:
         entries: The images the run considered.  Those carrying no pointing
             encode no time tags and name no clock.
-        basenames: Every kernel basename the run's documents record.
+        basenames: Every kernel basename the run's records name.
         paths: The indexed kernel directories.
 
     Returns:

@@ -33,12 +33,24 @@ Public API:
     normalize_root_url    -- the one spelling of a results root
     ingested_roots        -- the roots a completed ingest covered
     require_ingested_roots -- refuse to read absence from a root nobody ingested
+    open_index_for_roots  -- open an index, refusing a root it has not ingested
     newest_finish_time    -- when the newest pass over a root finished
     FATAL_STATUS          -- the status the error selection filters match
     SPICE_STATUS_ERROR    -- the status_error the SPICE selection filters match
     ResultStubs           -- what a root holds, as a selection filter asks it
     read_result_stubs     -- one query answering an enumeration's selection filters
     reporting_a_failed_read -- the one translation of a database failure into a refusal
+    RECORD_FIELDS         -- the one correspondence between columns and record fields
+    RecordField           -- one column's place in the record a row is rebuilt into
+    record_from_row       -- rebuild the record a row holds, through that mapping
+    RecordSource          -- the seam a program reads its records through
+    TreeRecordSource      -- that seam over the documents
+    IndexRecordSource     -- that seam over the index
+    build_record_source   -- build whichever of the two a run resolved
+
+Reading a document rather than a row needs no database, so what a document is
+named, where one lives under a root and how one is read are
+:mod:`spindoctor.support.nav_document`'s.
 """
 
 from spindoctor.results_index.drop import (
@@ -48,12 +60,24 @@ from spindoctor.results_index.drop import (
     index_contents,
     index_table_names,
 )
-from spindoctor.results_index.engine import open_database, open_index
+from spindoctor.results_index.engine import (
+    open_database,
+    open_index,
+    reporting_a_failed_read,
+)
 from spindoctor.results_index.masking import masked_url
+from spindoctor.results_index.rebuild import RECORD_FIELDS, RecordField, record_from_row
+from spindoctor.results_index.record_source import (
+    IndexRecordSource,
+    RecordSource,
+    TreeRecordSource,
+    build_record_source,
+)
 from spindoctor.results_index.roots import (
     ingested_roots,
     newest_finish_time,
     normalize_root_url,
+    open_index_for_roots,
     require_ingested_roots,
 )
 from spindoctor.results_index.schema import (
@@ -72,7 +96,6 @@ from spindoctor.results_index.selection import (
     SPICE_STATUS_ERROR,
     ResultStubs,
     read_result_stubs,
-    reporting_a_failed_read,
 )
 
 __all__ = [
@@ -82,14 +105,20 @@ __all__ = [
     'IMAGES',
     'INGEST_RUNS',
     'METADATA',
+    'RECORD_FIELDS',
     'SCHEMA_META',
     'SCHEMA_VERSION',
     'SPICE_STATUS_ERROR',
     'TECHNIQUES',
     'UNKNOWN_STATUS',
     'IndexContents',
+    'IndexRecordSource',
+    'RecordField',
+    'RecordSource',
     'ResultStubs',
     'TableContents',
+    'TreeRecordSource',
+    'build_record_source',
     'drop_index_tables',
     'index_contents',
     'index_table_names',
@@ -99,7 +128,9 @@ __all__ = [
     'normalize_root_url',
     'open_database',
     'open_index',
+    'open_index_for_roots',
     'read_result_stubs',
+    'record_from_row',
     'reporting_a_failed_read',
     'require_ingested_roots',
 ]

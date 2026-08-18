@@ -24,11 +24,14 @@ means no file was there to read: a pass that could not list a directory stops
 rather than finishing, so a run that has a finish time listed the whole root.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import sqlalchemy
 from filecache import FCPath
+from sqlalchemy.engine import Engine
 
+from spindoctor.results_index.engine import open_index, reporting_a_failed_read
 from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.schema import INGEST_RUNS
 
@@ -36,6 +39,7 @@ __all__ = [
     'ingested_roots',
     'newest_finish_time',
     'normalize_root_url',
+    'open_index_for_roots',
     'require_ingested_roots',
 ]
 
@@ -175,3 +179,47 @@ def require_ingested_roots(
         f'It holds: {held}. Run sd_stats_ingest over that root first; until then the '
         f'index cannot say whether an image under it was navigated.'
     )
+
+
+def open_index_for_roots(url: str, roots: Sequence[str]) -> Engine:
+    """Open an index and refuse it if a root the caller means to read is not in it.
+
+    Every consumer that reads rows under a named root opens the index this way,
+    because every one of them needs the same two things to be true before it
+    reads anything and needs them in the same order: the URL names an index this
+    build can read, and the roots it is about to ask about have been ingested
+    into it.  Written out at each call site, the sequence lost a step at a time
+    -- an engine left undisposed on the refusal, a root checked after the first
+    query rather than before it.
+
+    Nothing here falls back to the documents.  A URL that cannot be opened, or a
+    root nobody has ingested, fails the run: turning either into a slow read of
+    the tree would make a misconfigured run a silently different one.  Nor does
+    anything here create an index: a consumer that created one would answer every
+    question with "nothing was navigated", so creating is the writer's alone and
+    the writer requires no root to be ingested.
+
+    Parameters:
+        url: Connection URL of the results index.
+        roots: The normalized roots the caller means to read.  Empty means the
+            caller reads whatever the index holds and names no root of its own,
+            which the report does.
+
+    Returns:
+        The open index, which the caller closes when it is done with it.
+
+    Raises:
+        ValueError: If the URL cannot be opened, does not name an index, or names
+            one written by another version of the schema; if the index cannot be
+            read; or if any named root has no completed ingest run in it.  The
+            engine is disposed of before the refusal leaves here, so a refused
+            caller has nothing to close.
+    """
+    engine = open_index(url, create=False)
+    try:
+        with reporting_a_failed_read(url), engine.connect() as connection:
+            require_ingested_roots(connection, list(roots), url=url)
+    except Exception:
+        engine.dispose()
+        raise
+    return engine

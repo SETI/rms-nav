@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 from filecache import FCPath
+from tests.conftest import child_interpreter_environment
 
 # Every level, so nothing is passing merely for being below a threshold, and
 # an exception, whose traceback is the bulkiest thing a per-image log carries.
@@ -96,6 +97,7 @@ def task_output(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, str, str
         text=True,
         check=False,
         timeout=300,
+        env=child_interpreter_environment(),
     )
     assert completed.returncode == 0, completed.stderr
     log_text = FCPath(path_file.read_text()).read_text()
@@ -255,6 +257,7 @@ def ingest_task_output(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, s
         text=True,
         check=False,
         timeout=300,
+        env=child_interpreter_environment(),
     )
     assert completed.returncode == 0, completed.stderr
     return completed.stdout, completed.stderr, json.loads(results_file.read_text())

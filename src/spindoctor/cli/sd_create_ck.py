@@ -3,8 +3,8 @@
 # sd_create_ck.py
 #
 # Turn the corrected pointing a navigation run recorded into SPICE C-kernels.
-# One mission per invocation: every per-image metadata document under the
-# navigation results root is read, each eligible image is paired with the
+# One mission per invocation: every navigation record under the navigation
+# results root is read, each eligible image is paired with the
 # original kernel it navigated against, and one corrected kernel is written per
 # original, mirroring its name with "_nav" before the extension.  Beside them go
 # a meta-kernel that furnishes the set in the order that makes a correction take
@@ -37,12 +37,11 @@ from spindoctor.cli.ck.images import ImageEntry, OmissionReason
 from spindoctor.cli.ck.index import CkFile, build_ck_index
 from spindoctor.cli.ck.inputs import (
     LSK_SUFFIXES,
-    Document,
+    RECORD_COLUMNS,
     clock_kernels,
     furnish_frame_kernels,
     furnish_supporting_kernels,
     kernel_paths,
-    read_documents,
     recorded_basenames,
     resolve_one,
     select_by_time,
@@ -67,10 +66,13 @@ from spindoctor.config import (
     build_image_log_handlers,
     build_run_logging,
     get_nav_results_root,
+    get_results_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_CREATE_CK
+from spindoctor.results_index import build_record_source
 from spindoctor.support.misc import log_run_environment
+from spindoctor.support.nav_record import NavRecord
 
 PROGRAM_NAME = SD_CREATE_CK
 """Program identity: names the main log directory and the
@@ -139,6 +141,19 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         help="""The root directory of the navigation results to read metadata from;
         overrides the NAV_RESULTS_ROOT environment variable and the nav_results_root
         configuration variable""",
+    )
+    environment_group.add_argument(
+        '--results-db',
+        type=str,
+        default=None,
+        metavar='URL',
+        help="""Connection URL of the results index written by sd_stats_ingest (a
+        sqlite: URL naming a local path, or a postgresql+psycopg: URL naming a
+        server); overrides the environment.results_db configuration variable
+        and NAV_RESULTS_DB. The run then reads the whole mission's navigation
+        records in bulk instead of one file per image. Pass --results-db none to
+        read the files even where an index is configured. Without an index the
+        navigation results tree is read directly, which is the default.""",
     )
     environment_group.add_argument(
         '--kernel-dir',
@@ -223,27 +238,27 @@ class BuiltOutputs:
     omissions: Mapping[str, OmissionReason]
 
 
-def image_facts(documents: Sequence[Document]) -> dict[str, ImageFacts]:
+def image_facts(records: Sequence[NavRecord]) -> dict[str, ImageFacts]:
     """Read the facts the report and the comment areas both carry, by image name.
 
     Parameters:
-        documents: The documents the run considered.
+        records: The records the run considered.
 
     Returns:
         One entry per image, keyed by the name recorded for it.
 
     Raises:
-        ValueError: if a document holds a value the report cannot render, or if
-            two documents name the same image, whose facts could not then be
-            told apart and one of which would silently replace the other in
-            whichever kernel's comment area carried it.
+        ValueError: if a record holds a value the report cannot render, or if two
+            records name the same image, whose facts could not then be told apart
+            and one of which would silently replace the other in whichever
+            kernel's comment area carried it.
     """
     facts_by_name: dict[str, ImageFacts] = {}
-    for document in documents:
-        facts = read_image_facts(document.metadata)
+    for record in records:
+        facts = read_image_facts(record.metadata)
         if facts.image_name in facts_by_name:
             raise ValueError(
-                f'two documents name the image {facts.image_name!r}; their reported facts cannot '
+                f'two records name the image {facts.image_name!r}; their reported facts cannot '
                 f'be told apart'
             )
         facts_by_name[facts.image_name] = facts
@@ -265,7 +280,7 @@ def report_rows(
 
     Raises:
         KeyError: if an assignment names an image the facts do not hold, which
-            means the two were read from different sets of documents.
+            means the two were read from different sets of records.
     """
     return [
         ReportRow(
@@ -591,7 +606,7 @@ def pointing_of(assignment: Assignment) -> ImagePointing:
 
 
 def log_dispositions(
-    documents: Sequence[Document], assignments: Sequence[Assignment], run_logging: RunLogging
+    records: Sequence[NavRecord], assignments: Sequence[Assignment], run_logging: RunLogging
 ) -> Counter[str]:
     """Report what became of each image, to that image's log and to the run's.
 
@@ -601,7 +616,7 @@ def log_dispositions(
     reported once at the end.
 
     Parameters:
-        documents: The documents the run considered.
+        records: The records the run considered.
         assignments: What became of each of them.
         run_logging: The run's logging configuration.
 
@@ -614,9 +629,9 @@ def log_dispositions(
             they are not the same images.
     """
     totals: Counter[str] = Counter()
-    for document, assignment in zip(documents, assignments, strict=True):
+    for record, assignment in zip(records, assignments, strict=True):
         totals[_disposition_of(assignment)] += 1
-        _log_one_disposition(document, assignment, run_logging)
+        _log_one_disposition(record, assignment, run_logging)
     return totals
 
 
@@ -635,25 +650,25 @@ def _disposition_of(assignment: Assignment) -> str:
 
 
 def _log_one_disposition(
-    document: Document, assignment: Assignment, run_logging: RunLogging
+    record: NavRecord, assignment: Assignment, run_logging: RunLogging
 ) -> None:
     """Write one image's disposition to its own log, and any omission to the run's.
 
     Parameters:
-        document: The image's metadata document.
+        record: The image's navigation record.
         assignment: What became of it.
         run_logging: The run's logging configuration.
     """
     handlers, log_path = build_image_log_handlers(
         BACKEND,
-        document.stub,
+        record.stub,
         run_logging.sinks,
         run_logging.levels,
         timestamp=run_logging.timestamp,
     )
     try:
         with IMAGE_LOGGER.open(
-            document.path.as_posix(),
+            record.path.as_posix(),
             handler=handlers,
             level=run_logging.levels.image_section_level(),
         ):
@@ -710,6 +725,7 @@ def main() -> None:
         load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     nav_results_root = FileCache(None).new_path(get_nav_results_root(arguments, DEFAULT_CONFIG))
+    results_db_url = get_results_db_url(arguments, DEFAULT_CONFIG)
     # Resolved to absolute, both of them, because the meta-kernel names the
     # kernels it furnishes by these paths and SPICE resolves a relative name
     # against the *consumer's* working directory.  A meta-kernel written with
@@ -729,12 +745,22 @@ def main() -> None:
     MAIN_LOGGER.info('')
     log_run_environment(MAIN_LOGGER, command_list)
 
-    documents, unreadable = read_documents(nav_results_root, arguments.mission)
+    # Opened before anything else is read, and closed at the end of the run:
+    # an index that cannot be opened, or that has no completed ingest of this
+    # root, is a misconfigured run rather than a reason to walk the tree
+    # instead.
+    source = build_record_source(
+        nav_results_root, results_db_url=results_db_url, columns=RECORD_COLUMNS
+    )
+    try:
+        records, unreadable = source.read_records(arguments.mission)
+    finally:
+        source.close()
     MAIN_LOGGER.info(
-        'Read %d %s metadata document(s) under %s',
-        len(documents),
+        'Read %d %s navigation record(s) from %s',
+        len(records),
         arguments.mission,
-        nav_results_root.as_posix(),
+        source.describe(),
     )
     for path, reason in unreadable:
         MAIN_LOGGER.error('Could not read %s: %s', path.as_posix(), reason)
@@ -748,11 +774,11 @@ def main() -> None:
     # selection's; that is safe where a clock kernel would not be, since
     # leap seconds are the same fact in every version of the kernel that
     # states them.
-    lsk = furnish_supporting_kernels(recorded_basenames(documents), paths, LSK_SUFFIXES)
+    lsk = furnish_supporting_kernels(recorded_basenames(records), paths, LSK_SUFFIXES)
     MAIN_LOGGER.info('Furnished leapseconds kernel(s): %s', ', '.join(lsk))
 
-    documents, undated = select_by_time(
-        documents,
+    records, undated = select_by_time(
+        records,
         _selection_et('--start-time', arguments.start_time),
         _selection_et('--stop-time', arguments.stop_time),
     )
@@ -760,22 +786,22 @@ def main() -> None:
         MAIN_LOGGER.warning(
             'Ignored %d image(s) that recorded no exposure midtime to place in time', undated
         )
-    if len(documents) == 0:
+    if len(records) == 0:
         MAIN_LOGGER.warning('No images selected; nothing to write')
         # The unreadable count still decides the exit status: a run whose
         # selection is empty only because its metadata could not be read must
         # not report itself clean.
         sys.exit(1 if len(unreadable) > 0 else 0)
-    MAIN_LOGGER.info('Selected %d image(s)', len(documents))
+    MAIN_LOGGER.info('Selected %d image(s)', len(records))
 
     # Read from the selected images only.  A run restricted to a time range
     # must not be refused for a disagreement between two kernel versions that
     # only images outside that range recorded.
-    basenames = recorded_basenames(documents)
+    basenames = recorded_basenames(records)
     # The entries are read before any frame kernel is furnished, because they
     # need no SPICE and they name the frames the frame kernels are checked
     # against.
-    entries = [_entry_for(document) for document in documents]
+    entries = [_entry_for(record) for record in records]
     frames = furnish_frame_kernels(entries, basenames, paths)
     MAIN_LOGGER.info('Furnished frame kernel(s): %s', ', '.join(frames))
 
@@ -800,7 +826,7 @@ def main() -> None:
         )
 
     assignments = assign_images(entries, index)
-    facts_by_name = image_facts(documents)
+    facts_by_name = image_facts(records)
 
     # Everything is built before anything is written.  A run that dies part way
     # through the build then leaves the output directory untouched, rather than
@@ -832,7 +858,7 @@ def main() -> None:
     write_report(report, rows)
     MAIN_LOGGER.info('Wrote report %s with %d row(s)', report.as_posix(), len(rows))
 
-    log_totals(log_dispositions(documents, assignments, run_logging))
+    log_totals(log_dispositions(records, assignments, run_logging))
     MAIN_LOGGER.info('Total elapsed time %.2f sec', time.time() - start_time)
     # Non-zero when anything the run was pointed at could not be read, so a
     # batch wrapper can tell a clean run from one that silently skipped its
@@ -864,26 +890,26 @@ def _selection_et(flag: str, value: str | None) -> float | None:
         raise ValueError(f'{flag} {value!r} is not a UTC time SPICE can read: {exc}') from exc
 
 
-def _entry_for(document: Document) -> ImageEntry:
-    """Read one document's generator entry, naming the image if it cannot be read.
+def _entry_for(record: NavRecord) -> ImageEntry:
+    """Read one record's generator entry, naming the image if it cannot be read.
 
     Parameters:
-        document: The document.
+        record: The record.
 
     Returns:
         The entry.
 
     Raises:
-        TypeError: if the document holds a value of the wrong kind.
+        TypeError: if the record holds a value of the wrong kind.
         ValueError: if a field the generator needs is absent or unusable.
     """
     try:
-        return ImageEntry.from_metadata(document.metadata)
+        return ImageEntry.from_metadata(record.metadata)
     except (TypeError, ValueError) as exc:
         # The run log only, for the same reason the segment failure reports
         # there: this stops the run, and no image scope is open to write to.
         MAIN_LOGGER.exception(
-            '%s: cannot be read as a navigated image: %s', document.path.as_posix(), exc
+            '%s: cannot be read as a navigated image: %s', record.path.as_posix(), exc
         )
         raise
 

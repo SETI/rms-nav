@@ -44,6 +44,7 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('image_name', sqlalchemy.Text, False),
     ('instrument', sqlalchemy.Text, False),
     ('camera', sqlalchemy.Text, True),
+    ('shutter_mode', sqlalchemy.Text, True),
     ('image_path', sqlalchemy.Text, True),
     ('image_et', sqlalchemy.Double, True),
     ('image_date', sqlalchemy.Text, True),
@@ -74,6 +75,7 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('config_hash', sqlalchemy.Text, True),
     ('git_sha', sqlalchemy.Text, True),
     ('pipeline_run', sqlalchemy.Text, True),
+    ('spice_kernels', sqlalchemy.JSON, True),
     ('image_number', sqlalchemy.BigInteger, True),
     ('start_et', sqlalchemy.Double, True),
     ('stop_et', sqlalchemy.Double, True),
@@ -82,6 +84,7 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('sclk_start', sqlalchemy.Text, True),
     ('sclk_midtime', sqlalchemy.Text, True),
     ('sclk_stop', sqlalchemy.Text, True),
+    ('camera_frame', sqlalchemy.Text, True),
     ('camera_frame_id', sqlalchemy.Integer, True),
     ('ck_frame_id', sqlalchemy.Integer, True),
     ('cmatrix', sqlalchemy.JSON, True),
@@ -144,7 +147,7 @@ SCHEMA_META_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('created_utc', sqlalchemy.Text, False),
 )
 
-COLUMN_SET_VERSION = 7
+COLUMN_SET_VERSION = 8
 """The schema version the column sets above make up.
 
 An index is readable only by code whose column set is the one that wrote it, and

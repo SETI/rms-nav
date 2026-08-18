@@ -233,7 +233,7 @@ async def async_main() -> None:
         metavar='URL',
         help=(
             'Connection URL of the results index written by sd_stats_ingest; overrides '
-            'NAV_RESULTS_DB and the environment.results_db configuration variable. Each '
+            'the environment.results_db configuration variable and NAV_RESULTS_DB. Each '
             "image's navigation record is then read as one row instead of one file. Pass "
             '--results-db none to read the files even where an index is configured.'
         ),

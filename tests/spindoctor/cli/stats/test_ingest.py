@@ -538,6 +538,73 @@ def test_a_camera_frame_id_is_read_as_an_integer() -> None:
     assert rows.image['camera_frame_id'] is None
 
 
+def test_the_shutter_mode_is_stored_as_recorded() -> None:
+    """Two cameras exposed together share one bus attitude, and this says so.
+
+    A kernel writer pairs the two and keeps one correction; a column that did
+    not carry the mode would leave it pairing on the camera name alone, which
+    every image of that camera would match.
+    """
+    document = metadata_document()
+    document['observation']['shutter_mode'] = 'BOTSIM'
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['shutter_mode'] == 'BOTSIM'
+
+
+def test_a_document_recording_no_shutter_mode_stores_none() -> None:
+    """Most datasets record none, and a missing mode pairs nothing."""
+    rows = rows_from_metadata(metadata_document(), SOURCE)
+    assert rows.image['shutter_mode'] is None
+
+
+def test_the_recorded_kernels_are_stored_in_the_order_recorded() -> None:
+    """A correction overlays one original kernel, named among these."""
+    document = metadata_document()
+    document['navigation_result']['provenance']['spice_kernels'] = [
+        'cas00172.tsc',
+        'naif0012.tls',
+    ]
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['spice_kernels'] == ['cas00172.tsc', 'naif0012.tls']
+
+
+def test_a_kernel_list_holding_anything_but_names_is_stored_as_none() -> None:
+    """Its reader refuses such a block, and an emptied list is not that block.
+
+    Storing the readable members would hand a consumer a shorter list than the
+    document holds, and storing an empty one would say the run recorded no
+    kernels -- which its reader refuses for an image carrying an attitude.
+    """
+    document = metadata_document()
+    document['navigation_result']['provenance']['spice_kernels'] = ['cas00172.tsc', 7]
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['spice_kernels'] is None
+
+
+def test_a_run_that_recorded_no_kernels_stores_the_empty_list() -> None:
+    """An empty list is a statement about the run, and its reader refuses it."""
+    document = metadata_document()
+    document['navigation_result']['provenance']['spice_kernels'] = []
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['spice_kernels'] == []
+
+
+def test_the_camera_frame_name_is_stored_as_recorded() -> None:
+    """A kernel writer looks the name up among the frame kernels it furnishes."""
+    document = metadata_document()
+    document['navigation_result']['pointing'] = {'camera_frame': 'CASSINI_ISS_NAC'}
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['camera_frame'] == 'CASSINI_ISS_NAC'
+
+
+def test_a_camera_frame_name_that_is_not_text_is_stored_as_none() -> None:
+    """``str(None)`` is ``'None'``, which would name a frame nothing defines."""
+    document = metadata_document()
+    document['navigation_result']['pointing'] = {'camera_frame': -82360}
+    rows = rows_from_metadata(document, SOURCE)
+    assert rows.image['camera_frame'] is None
+
+
 def test_a_document_without_an_image_name_is_refused() -> None:
     """This is what a file that is not a navigation document looks like."""
     with pytest.raises(MetadataDocumentError, match=r'no observation\.image_name'):
