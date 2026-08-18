@@ -152,6 +152,29 @@ def test_a_stub_round_trips_through_the_path_and_back(tmp_path: Path) -> None:
     )
 
 
+def test_a_root_that_merely_spells_the_start_of_a_neighbour_takes_nothing_off(
+    tmp_path: Path,
+) -> None:
+    """``/data/res`` is a character prefix of ``/data/results`` and a parent of none of it.
+
+    A root taken off character by character turns the neighbour's document into
+    something that looks like a key, reads like a key and names a file this root
+    does not hold.  Nothing downstream can tell such a stub from a real one, so
+    it becomes a wrong index key and stays one.
+    """
+    root = FCPath(str(tmp_path / 'res'))
+    doc = FCPath(str(tmp_path / 'results' / 'VOL1' / f'N1454725799{METADATA_SUFFIX}'))
+    assert (
+        stub_for_document(root, doc) == (tmp_path / 'results' / 'VOL1' / 'N1454725799').as_posix()
+    )
+
+
+def test_a_root_spelled_with_a_trailing_separator_names_the_same_stub(tmp_path: Path) -> None:
+    """The two spellings are one root, so they cannot give a document two keys."""
+    doc = FCPath(str(tmp_path / 'VOL1' / f'N1454725799{METADATA_SUFFIX}'))
+    assert stub_for_document(FCPath(f'{tmp_path.as_posix()}/'), doc) == 'VOL1/N1454725799'
+
+
 # ---------------------------------------------------------------------------
 # What makes a file a document
 # ---------------------------------------------------------------------------
