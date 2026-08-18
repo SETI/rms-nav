@@ -116,13 +116,16 @@ identity is part of the contract, not a convenience.
 
 `root_url` is the ingested root in **normalized** form, and every consumer
 normalizes its own resolved `nav_results_root` the same way before
-comparing: `FCPath(root).absolute().as_posix()` with any trailing `/`
-removed. A consumer whose normalized root has no completed `ingest_runs` row
+comparing: `FCPath(root).expanduser().resolve().as_posix()` with any trailing
+`/` removed, so a `~`, a `..` or a symbolic link is one spelling of the place
+it names. Resolving there is what lets everything downstream stop thinking
+about paths: joining a validated key onto a canonical root is one answer for
+every caller. A consumer whose normalized root has no completed `ingest_runs` row
 (section 2.7) fails with a message naming its root and the roots the index
 does contain -- absence of a row must never be read as "nothing was
 navigated".
 
-Two derived columns avoid string surgery in queries: `volume` -- the first
+Two derived columns avoid string surgery in queries: `subtree` -- the first
 path segment of the stub, or NULL when the stub contains no `/` (the
 simulated dataset) -- and `image_number`, computed by the existing
 `image_number_from_name` logic at ingest time. `results_path_stub` alone
@@ -154,7 +157,7 @@ The `images` table:
 | Column | Source in the document | Notes |
 |---|---|---|
 | `root_url`, `results_path_stub` | derived (section 2.2) | primary key, NOT NULL |
-| `volume` | derived (section 2.2) | NULL for a stub with no separator |
+| `subtree` | derived (section 2.2) | NULL for a stub with no separator |
 | `image_name`, `instrument` | `observation.*` | NOT NULL; ingest rejects a document lacking either |
 | `camera` | `observation.camera` | present whenever the dataset index supplied it, including for an image that never loaded; NULL only when no camera column exists for the dataset |
 | `image_path` | `observation.image_path` | |
@@ -601,7 +604,7 @@ re-reads everything.
 
 **A refused file is bookkeeping, not a row.** A file that is not a
 current-schema navigation document is recorded in a `failed_files` table --
-`root_url`, `results_path_stub`, `reason`, `volume`, `mtime_ns`, `size_bytes`
+`root_url`, `results_path_stub`, `reason`, `subtree`, `mtime_ns`, `size_bytes`
 -- and is skipped on the next pass on the same evidence as an ingested one, so
 a tree whose non-navigation files outnumber its results does not pay to
 download and parse every one of them on every run. It is a table of its own
@@ -609,9 +612,9 @@ rather than a marked `images` row: absence of an `images` row is what every
 consumer reads as "this image was never navigated", and a file with no usable
 data must leave that answer alone. The one column beyond the bookkeeping is the
 one fact the walk knows about a file whatever the file turned out to contain:
-which volume it is under. A selection filter asks about the file rather than
+which subtree it lies under. A selection filter asks about the file rather than
 about its contents, so a refused document answers that exactly as an ingested
-one does, and it has to be a column because otherwise a one-volume enumeration
+one does, and it has to be a column because otherwise a one-subtree enumeration
 fetches every refusal in the root. `--force` re-reads a refused file too. A
 document that ingested on an earlier pass and no longer reads has its `images`
 row deleted as the refusal is written, since a row nothing backs would answer
@@ -640,11 +643,11 @@ are a file no JSON object came out of, and the tree path excludes such a file
 from every error filter exactly as the index answers none for it, so the two
 agree and the row is no gap. The `not a current-schema navigation document`
 family is the divergence: a JSON object the tree reads a `status` out of and
-this index records no status for. A refusal whose `volume` is NULL is left out
+this index records no status for. A refusal whose `subtree` is NULL is left out
 for the second reason, that both arms of the selection query are restricted by
-`IN` over the enumerated volumes and `IN` is false for NULL, so such a row is in
+`IN` over the enumerated subtrees and `IN` is false for NULL, so such a row is in
 no selection's answer either way. What remains is still the whole root's number
-where a selection enumerates volumes, so the line says it bounds a shortfall
+where a selection enumerates subtrees, so the line says it bounds a shortfall
 rather than measuring one. A parse that fails in a way the decoder does not call
 a syntax error carries a parse reason rather than a schema one, so that the
 family boundary is the fact it states: no value came out of the file, and
@@ -743,9 +746,11 @@ the typed form would also record a relative `source_file` beside an absolute
 `FCPath.retrieve()` with `exception_on_fail=False`, the pattern
 `ResultsFilter.filter_batch` uses. The current code reads via
 `get_local_path()`, which does not download on a cloud root and must be
-replaced. Batch and chunk sizes are module constants,
-`INGEST_RETRIEVE_BATCH_SIZE = 64` and `INGEST_COMMIT_CHUNK_SIZE = 512`,
-independent of one another.
+replaced. Batch and chunk sizes are constants, independent of one another:
+`RETRIEVE_BATCH_SIZE = 64` in `spindoctor/nav_records/tree.py`, so that the
+seam and the ingest retrieve in the same groups, and
+`INGEST_COMMIT_CHUNK_SIZE = 512` in the ingest, which is the only thing that
+writes.
 
 **Chunked transactions.** Commit every `INGEST_COMMIT_CHUNK_SIZE` images.
 A crash costs one chunk, and concurrent writers are not serialized behind a
@@ -1052,7 +1057,7 @@ walked-set mode and the absence-only batched-`exists()` mode) and every
 contradictory-pair rejection in the constructor, apart from the carve-out
 enumerated in section 4's Phase 5 entry. A file the ingest refused is
 still a file the walk finds, so the presence and absence filters read
-`failed_files` alongside `images`, and that table carries the volume for the
+`failed_files` alongside `images`, and that table carries the subtree for the
 same reason. The carve-out is what one ingest pass
 could read and record, never a property of this query; it is enumerated in the
 Phase 5 entry, repeated in the module docstring and stated for an operator in
@@ -1410,6 +1415,19 @@ the supplemental product, which is why it is out of scope.
 
 SQLAlchemy is not currently installed or declared.
 
+Phase 7 changed where the paragraphs above get their records, and the steps
+after it read that rather than this. **`spindoctor/nav_records/`** holds the
+record types, the document rules, root identity, `Selection`, the
+`RecordSource` protocol and `TreeRecordSource`, and imports no database layer;
+**`spindoctor/results_index/record_source.py`** holds `IndexRecordSource` and
+`open_record_source`. There is one walk of a results tree, one spelling of the
+`_metadata.json` suffix and one rule about what makes a stub a key.
+`spindoctor/support/nav_document.py` and `spindoctor/cli/stats/ingest/walk.py`
+are gone. What has *not* moved onto the seam is the enumeration
+(`spindoctor/dataset/results_filter.py` still carries its own walk, its own
+parser, its own batching and its own copy of the suffix), the statistics
+report, and the ingest's retrieve-and-parse loop.
+
 ---
 
 ## 4. Implementation phases
@@ -1500,7 +1518,7 @@ modules the scan reaches. Left alone, criterion 10 would report green over a
 package that no longer holds the queries it exists to check.
 
 Tests: a two-volume tree with colliding basenames producing two rows; a
-bare-basename stub with NULL `volume`; the unrounded offset; the separated
+bare-basename stub with NULL `subtree`; the unrounded offset; the separated
 status vocabularies; an unchanged file skipped on a second ingest (proven by
 counting retrievals *and* asserting no per-file stat call) and a touched one
 re-read; `--force`; a chunk boundary crossed mid-run; `ingest_runs` written
@@ -1557,8 +1575,8 @@ Details settled during execution, none of them a change of intent:
   file tables; `directories_missed` left `ingest_runs` when a walk that cannot
   list a directory began to stop rather than complete; and `images` gained
   `shutter_mode`, `spice_kernels` and `camera_frame` when the C-kernel writer
-  began reading its records from the index -- which is what makes the current
-  version 8.
+  began reading its records from the index -- and `volume` became `subtree` in
+  both tables that carry it, which is what makes the current version 9.
 - **The CSV export states its line terminator.** `csv.writer` defaults to CRLF;
   the export now names LF. The frozen `images.csv` blobs are LF, so what the
   export writes matches them byte for byte, which the previous implementation's
@@ -1715,7 +1733,7 @@ Details settled during execution, none of them a change of intent:
 - **The seam lives in `spindoctor/cli/stats/ingest/tasks.py`**, beside the pass
   it divides: fan-out, one share, and the completion that adds them up are the
   same three stages `driver.py` runs in one process, and both read the same
-  walk, store and chunk modules. The package re-exports them, so the drivers
+  driver, store and chunk modules. The package re-exports them, so the drivers
   import from `spindoctor.cli.stats.ingest` as they do everything else.
 - **Two Phase 2 helpers were widened rather than copied.** `_files_to_read`
   takes the files, what the index records about them and the metrics flag
@@ -1947,11 +1965,11 @@ Details settled during execution:
   Every block a navigation writes carries the baseline and both frame
   identities.
 - **Both of a file-backed source's methods apply the same path rule.**
-  `read_record` joined the stub onto the root while `load_pointing` resolved it
-  through the guard that refuses null bytes, absolute fragments and `..`
-  escapes. One class applying two rules depending on which method was called is
-  the shape a traversal gets through; the guard is now shared, and a stub that
-  does not name a path under the root reads as no record for that image.
+  `read_record` joined the stub onto the root while `load_pointing` put it
+  through the rule that refuses null bytes, absolute fragments and `..`
+  segments. One class applying two rules depending on which method was called is
+  the shape a traversal gets through; the rule is now shared, and a stub that
+  is not a key under the root reads as no record for that image.
 - **The message for a record nobody holds names the storage that was
   searched.** It named `nav_results_root` in both paths, which is untrue of an
   index and hides the likelier of the two causes: an index is a snapshot of its
@@ -2109,11 +2127,11 @@ Details settled during execution, none of them a change of intent:
   refusal table criterion 1's malformed-metadata image would be present in the
   tree and absent in the index, for `--has-offset-file` and
   `--has-no-offset-file` alike.
-- **`failed_files` carries the volume**, which is a column-set change and so a
+- **`failed_files` carries the subtree**, which is a column-set change and so a
   schema version bump, to 5. It is a fact of the walk rather than of the
   document, so it is as knowable for a file nothing could be read from as for
   one that ingested, and a selection filter asks about the file and not about
-  its contents. Without it, a one-volume enumeration fetches every refusal the
+  its contents. Without it, a one-subtree enumeration fetches every refusal the
   root holds. The incremental skip compares a refusal's metrics exactly as it
   compares an image's. That skip reads the refusal table for the root it is
   walking, and the read is exercised with a second root holding a copy of the
@@ -2179,8 +2197,8 @@ Details settled during execution, none of them a change of intent:
   whether the answer is the answer the tree would give; members 2, 3 and 4
   survive a pass that finished a second ago, which is why each is enumerated
   rather than left to be read off the stamp.
-- **The volume restriction is one restriction in one query.** Both arms are
-  restricted, and a stub with no volume above it is matched by neither, because
+- **The subtree restriction is one restriction in one query.** Both arms are
+  restricted, and a stub with no subtree above it is matched by neither, because
   SQL's `IN` is false for NULL -- which is also how a bare scene name falls
   outside a walk of the selected volumes' directories.
 - **The URL reaches the filter through the dataset layer, and only from a
@@ -2260,6 +2278,141 @@ Details settled during execution, none of them a change of intent:
 - **The nitpicky build was run** (`sphinx -n`) and the two chapters this phase
   adds produce no warnings of their own. The repository-wide nitpick backlog is
   untouched and remains #438's.
+
+### Phase 7 — One record seam, over both storages
+
+`spindoctor/nav_records/` plus an index-backed half, answering the three
+questions the programs actually ask: `record(stub)` for one image,
+`records(selection)` yielding a stream, and `listing(selection)` yielding keys
+with the size and modification time of each. Above the seam, one implementation
+of everything; below it, batching. `volume -> subtree` folded in, since the
+schema version moves either way.
+
+**The package is split along the database line, and the line is forced.**
+`import spindoctor.dataset` must not import SQLAlchemy, and the enumeration
+lives in that package and will read documents through this seam, so
+`spindoctor/nav_records/` -- the record types, the document rules, root
+identity, `Selection`, the `RecordSource` protocol and the tree backend --
+imports no database layer at all. `spindoctor/results_index/record_source.py`
+holds `IndexRecordSource` and `open_record_source`, which returns the tree
+backend when no index URL was resolved and the index backend when one was. A
+subprocess probe pins each half: one imports `spindoctor.dataset`, one imports
+`spindoctor.nav_records`, and the second also asserts that the walk itself
+loaded, since a guarantee about a package that imported almost nothing is a
+guarantee about nothing.
+
+**`Selection` is where a caller is refused.** It is frozen, and its constructor
+checks everything it carries: each subtree one directory immediately under a
+root, each stub a key rather than a path -- no absolute fragment, no `..`, no
+null byte -- and each time bound a finite number with the start no later than
+the stop. That is what makes the two backends refuse alike. A walk and a query
+cannot be made to refuse identically by writing the same refusal twice; left to
+a backend, an unusable value is refused in that storage's own terms, and an
+inverted range simply selects nothing, which a run cannot tell from a clean pass
+over a quiet span. `normalize_root_url` is the same rule for the root, one place
+above everything: `expanduser().resolve()`, so a `~`, a `..` or a symbolic link
+is one spelling of the place it names, and a spelling that is not a location --
+an empty one, or one carrying a null byte -- is refused where it is spelled.
+Once the root is canonical and the key is
+validated, `root / f'{stub}{METADATA_SUFFIX}'` is the same answer for every call
+in the seam and no reader needs a path rule of its own.
+
+**No `order` parameter, and its absence is a decision.** Neither storage can
+promise a total order over a stream without giving up the streaming: a walk
+cannot know an image's epoch before it has read the document, and a server sorts
+text under its own collation. Each backend yields in the order it finds records,
+documents that order, and a caller wanting a total order calls `sorted()`. The
+parameter arrives with the consumer that can use it (#513).
+
+**Two walks are deleted, and one of them was a defect.**
+`spindoctor/support/nav_document.py` goes entirely: its `read_documents` walked
+with `rglob`, which skips a directory it cannot list and reports a clean run --
+measured at 1 record of 2, silently, against the ingest's hard refusal over the
+same tree. `spindoctor/cli/stats/ingest/walk.py` goes too, its strict walk
+having moved into `nav_records/tree.py` where every reader of a tree inherits
+it; the ingest's `_listing_of_root` is what is left, and it is the accounting a
+pass keeps around a listing rather than a listing of its own.
+`resolved_document_path` goes with the module, replaced by the canonical root
+and the validated key. `INGEST_RETRIEVE_BATCH_SIZE` goes, replaced by
+`RETRIEVE_BATCH_SIZE` in the seam, so the seam and the ingest retrieve in the
+same groups. `_midtime_of` moves out of `cli/ck/inputs.py` into
+`support/nav_record.py` as `record_midtime_et`, so the seam's time filter and
+the kernel writer read one rule.
+
+**A directory nobody can list ends a walk; a root nobody can list is charged to
+that root.** `UnlistableRootError` is a subclass of `UnlistableDirectoryError`,
+which is what lets the ingest catch the second to keep its per-root accounting
+while every other consumer lets either end its run.
+
+Tests: the three calls against both backends over one fixture tree and the index
+ingested from it, with the declared disagreements between them each pinned
+rather than left to be discovered; every `Selection` refusal, each asserted on
+its message; the strict walk's refusals, including the directory that ends a
+walk, the root that does not, and the directory already listed under another
+name; a two-root fixture whose
+second root differs in the value under test for every query the seam writes or
+touches, on the SQLite tier and on the `postgres` tier for both the images and
+the refusals arm; and the two import probes above. Adversarial review
+reconstructed the deleted ingest walk from git and ran 33 refusal scenarios
+against both, finding every refusal identical down to the log message.
+
+Details settled during execution, none of them a change of intent:
+
+- **The ingest keeps its own retrieve-and-parse loop.** Only its *discovery*
+  moves onto the seam. `cli/stats/ingest/chunks.py` owns the refusal vocabulary
+  stored in `failed_files.reason` and the "could not be retrieved" / "read but
+  refused" split, which is bookkeeping this index makes and the seam does not;
+  folding the rest in is #514.
+- **The roots bind to the source, not to the selection.**
+  `open_record_source(roots, ...)` binds them, a selection naming none covers
+  every root the source holds, and `record(stub)` refuses on a source holding
+  more than one, naming them: a bare stub does not say which root it belongs to,
+  and an index-backed source checks each root's ingest bookkeeping once at
+  opening rather than per query.
+- **The prune's licence became a type rather than a check.** One function builds
+  the listing the prune takes, it builds one only for a root it listed entirely,
+  and the listing carries the root it was of -- so a share of a root, a partial
+  listing, and a prune of one root on the evidence of another are all
+  unrepresentable. The runtime `ValueError` that used to refuse them went with
+  the condition.
+- **A stub both tables record is one file, read as the record it is.** The
+  ingest writes the two tables independently and a queue-divided pass can leave
+  a stale refusal beside a record, so all three index-backed calls prefer the
+  record: the per-image lookup reads both halves of the key, the stream naming
+  its own stubs puts the records in last, and the whole-root stream and the
+  listing exclude a refusal whose key also carries a record.
+- **Nothing from the database layer escapes this seam either.** A selection the
+  index cannot answer is refused by `Selection` before a statement is built, and
+  a query that fails is reported as a `ValueError` naming the index, so a
+  consumer that imports no database layer never has to name one of its types.
+- **The logging invariant is amended rather than weakened.** `nav_records` joins
+  the packages that construct no logger of their own, `pdslogger` leaves the
+  forbidden import set for those two packages so a caller can lend one, and a
+  static check forbids every log call in either package except the one line the
+  walk owes an operator, which says it declined to descend a directory it had
+  already listed under another name. The stdlib and SQLAlchemy bans are
+  untouched. A logger a caller hands in is by construction one the caller
+  configured; a logger a data-access layer reaches for is not.
+- **The C-kernel writer's no-oops guarantee is deleted**, and its import probe
+  with it. A kernel's portability is a property of the file rather than of the
+  process that wrote it; recomputation is caught directly by the round trip that
+  furnishes the written kernel and compares SPICE's answer to the recorded
+  matrix; `import oops` furnishes nothing into the SPICE pool, so there is no
+  contamination hazard; and `sd_create_ck` the program loads oops anyway through
+  its own logging and configuration, so nothing was protected at runtime. The
+  `nav_records` probe keeps its no-SQLAlchemy half, which is load-bearing, and
+  drops its oops half.
+
+Behaviour changes review must see:
+
+- **The kernel writer refuses a root it cannot list whole**, where it used to
+  write a short mission and report a clean run. It also refuses a root it cannot
+  list at all, where `rglob` yielded nothing and reported the same clean run. It
+  inherits the walk's already-listed-under-another-name rule too. `sd_create_ck`
+  reports both as a fatal line and exit 1, before any kernel, meta-kernel or
+  report is written.
+- **Every existing index must be dropped and rebuilt**, for the `volume ->
+  subtree` rename and the schema version it carries.
 
 ---
 
@@ -2478,6 +2631,34 @@ File as tracking issues alongside the implementation issue:
   storage layer already has (an object-store ETag) or a content digest paid for
   by retrieving every document on every pass, which is the cost the skip exists
   to avoid.
+- **The ingest still has its own retrieve-and-parse loop beside the seam's**
+  (#514). Only discovery moved onto the seam. `cli/stats/ingest/chunks.py` reads
+  and parses what the listing found, because it owns the `failed_files.reason`
+  vocabulary and the "could not be retrieved" / "read but refused" split, which
+  is bookkeeping the index makes and no other consumer wants. Folding it in
+  means the seam yielding a refusal reason precise enough for the table.
+- **A `Selection` order parameter** (#513). Neither backend can promise a total
+  order over a stream today, so a caller wanting one calls `sorted()`. The
+  parameter arrives with the consumer that can use it -- the kernel writer,
+  reading a time-ordered stream out of the index rather than holding a mission.
+- **A cloud-share ingest can write another root's document into this root's
+  rows** (#515). Pre-existing, and not closed by validating a `Selection`:
+  `_share_from_task` reads the stub straight out of the task JSON and never
+  builds one. The fix is to call `stub_refusal` in its existing per-entry loop.
+  It is the same threat model as #489 and the two should be answered together.
+- **`test_a_share_only_writes_its_own_root` cannot fail** (#516). Pre-existing.
+  Its docstring names the defect it misses and it asserts on the row a
+  root-blind write would keep, so the mutation it exists to catch leaves it
+  green.
+- **S3 directory listings are not paginated** (SETI/rms-filecache#65), which is
+  a dependency rather than a follow-up. `FileCacheSourceS3.iterdir_metadata`
+  issues one `list_objects_v2` and reads that single response, so a prefix
+  holding more than a thousand objects lists short and says nothing. The seam
+  assumes `iterdir_metadata` returns a complete listing or raises, and there is
+  deliberately no workaround here and no mention of it in the guides: a
+  mitigation in this repository would have to be undone when the storage layer
+  is fixed, and a listing that is complete or raises is the only contract a
+  completeness guarantee can be built on. GS auto-paginates and is unaffected.
 - **The lockability probe takes a write lock on a consumer's open** (#462).
   Section 2.5 has it refuse in both modes, so a consumer opening a SQLite index
   while an ingest holds a write transaction waits out the busy timeout and can

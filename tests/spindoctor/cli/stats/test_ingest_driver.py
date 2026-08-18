@@ -369,9 +369,9 @@ def _two_passes(
     This is the shape of the tree an operator measures a short selection
     against: every document under the root is one the ingest refuses, and the
     root has already been ingested, which is the only state a consumer accepts
-    it in.  They sit under a volume because that is where a selection looks:
-    one enumerates the volumes it was given, and a document above all of them is
-    in no selection's answer whatever it records.
+    it in.  They sit under a subtree because that is where a selection looks:
+    one enumerates the subtrees it was given, and a document above all of them
+    is in no selection's answer whatever it records.
 
     Parameters:
         tmp_path: Directory the tree, the index and the logs live under.

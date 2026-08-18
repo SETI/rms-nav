@@ -80,8 +80,8 @@ from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.driver import (
     INGEST_COMMIT_CHUNK_SIZE,
     _files_to_read,
+    _listing_of_root,
     _prune_missing,
-    distinct_roots,
 )
 from spindoctor.cli.stats.ingest.runs import (
     _finish_run,
@@ -91,8 +91,7 @@ from spindoctor.cli.stats.ingest.runs import (
     _unfinished_run,
 )
 from spindoctor.cli.stats.ingest.store import _recorded_files, _report_refusals
-from spindoctor.cli.stats.ingest.walk import _ListedFile, _walk_root
-from spindoctor.results_index import normalize_root_url
+from spindoctor.nav_records import ListedRecord, distinct_roots, document_path, normalize_root_url
 
 __all__ = [
     'INGEST_TASK_SHARE_SIZE',
@@ -188,7 +187,7 @@ class _Share:
     root_url: str
     force: bool
     has_file_metrics: bool
-    files: list[_ListedFile]
+    files: list[ListedRecord]
 
 
 @dataclass
@@ -309,7 +308,7 @@ class TaskCompletion:
     results_unidentified: int = 0
 
 
-def _task_files(files: Sequence[_ListedFile]) -> list[dict[str, Any]]:
+def _task_files(files: Sequence[ListedRecord]) -> list[dict[str, Any]]:
     """Render one share's files as the task data carries them.
 
     Parameters:
@@ -318,11 +317,13 @@ def _task_files(files: Sequence[_ListedFile]) -> list[dict[str, Any]]:
     Returns:
         One JSON object per file, carrying the stub and the two metrics the
         fan-out's listing reported for it, which is everything a worker needs
-        to decide whether it has to read the file.
+        to decide whether it has to read the file.  Where the document lives is
+        not among them: it is the stub joined onto the root, and both of those
+        already travel in the task.
     """
     return [
         {
-            'results_path_stub': listed.results_path_stub,
+            'results_path_stub': listed.stub,
             'mtime_ns': listed.mtime_ns,
             'size_bytes': listed.size_bytes,
         }
@@ -374,19 +375,18 @@ def fan_out_ingest_tasks(
         raise ValueError(f'a task share holds at least one file, not {share_size}')
     fan_out = FanOut()
     for root_url in distinct_roots(roots):
-        root = FCPath(root_url)
         counts = IngestCounts()
         run_id = _start_run(engine, root_url)
         logger.info('Dividing %s into ingest tasks', root_url)
-        listing = _walk_root(root, logger=logger)
-        counts.files_seen = len(listing.metadata_files)
-        if not listing.root_listed:
+        listing = _listing_of_root(root_url, logger=logger)
+        if listing is None:
             counts.roots_unreadable = 1
             fan_out.counts.add(counts)
             continue
+        counts.files_seen = len(listing.documents)
         with engine.connect() as connection:
             recorded = _recorded_files(connection, root_url)
-        counts.files_removed = _prune_missing(engine, root_url, listing, recorded, logger=logger)
+        counts.files_removed = _prune_missing(engine, listing, recorded, logger=logger)
         _record_fan_out(engine, run_id, counts)
         tasks_of_root = [
             {
@@ -399,7 +399,7 @@ def fan_out_ingest_tasks(
                     'files': _task_files(share),
                 },
             }
-            for index, share in enumerate(_batched(listing.metadata_files, share_size))
+            for index, share in enumerate(_batched(listing.documents, share_size))
         ]
         fan_out.tasks.extend(tasks_of_root)
         logger.info(
@@ -458,6 +458,11 @@ def _share_from_task(task_data: dict[str, Any]) -> _Share:
     unfinished and the shares named, since a share counts toward a run only when
     it names that run's root.
 
+    Each file's document path is rebuilt from that root rather than carried,
+    which is the same join the retrieval makes: a task carries the two metrics
+    that decide whether a file has to be read and the stub that names it, and
+    nothing that could disagree with the root it declares.
+
     Parameters:
         task_data: The task data, as the fan-out wrote it.
 
@@ -481,7 +486,7 @@ def _share_from_task(task_data: dict[str, Any]) -> _Share:
     force = bool(_required(task_data, 'force', bool))
     has_file_metrics = bool(_required(task_data, 'has_file_metrics', bool))
     entries = _required(task_data, 'files', list)
-    files: list[_ListedFile] = []
+    files: list[ListedRecord] = []
     for entry in entries:
         if not isinstance(entry, dict):
             raise ValueError(f'a "files" entry is {type(entry).__name__}, not an object')
@@ -494,7 +499,14 @@ def _share_from_task(task_data: dict[str, Any]) -> _Share:
             isinstance(size_bytes, bool) or not isinstance(size_bytes, int)
         ):
             raise ValueError(f'the "size_bytes" of {stub} is not a whole number')
-        files.append(_ListedFile(results_path_stub=stub, mtime_ns=mtime_ns, size_bytes=size_bytes))
+        files.append(
+            ListedRecord(
+                stub=stub,
+                path=document_path(root_url, stub),
+                mtime_ns=mtime_ns,
+                size_bytes=size_bytes,
+            )
+        )
     return _Share(
         run_id=run_id,
         root_url=root_url,
@@ -538,7 +550,7 @@ def ingest_task_share(
     share = _share_from_task(task_data)
     counts = _ShareCounts()
     root = FCPath(share.root_url)
-    stubs = [listed.results_path_stub for listed in share.files]
+    stubs = [listed.stub for listed in share.files]
     with engine.connect() as connection:
         recorded = _recorded_files(connection, share.root_url, stubs=stubs)
     to_read = _files_to_read(

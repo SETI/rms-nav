@@ -563,6 +563,15 @@ every file it wrote, and each of them is a complete, valid kernel.
   wrote nothing for that reason would be indistinguishable from a clean run
   over a quiet span, so it is refused by name instead.
 
+* **A directory under the navigation results root that cannot be listed.**
+  Reading the tree stops where the walk meets it, and the run says which
+  directory it was and exits 1. A directory nobody enumerated holds documents
+  nobody read, so a kernel set built around the gap would quietly cover less
+  than the tree and go on being trusted; a run that stops can simply be
+  repeated once the directory is readable. A results root that cannot be listed
+  at all is refused the same way, since nothing under it has been read either.
+  Nothing is written in either case.
+
 * **A metadata document that cannot be read as a navigated image**; an image
   whose segment copies its baseline's rates and whose baseline supplied
   pointing at every record but angular velocity at only some of them; and an

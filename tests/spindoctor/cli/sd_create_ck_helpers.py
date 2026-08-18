@@ -29,7 +29,7 @@ from tests.spindoctor.cli.ck.ck_helpers import (
 )
 
 from spindoctor.cli import sd_create_ck
-from spindoctor.cli.ck.pointing import NDArrayFloatType
+from spindoctor.support.types import NDArrayFloatType
 
 # The two exposures are far enough apart that no original kernel covers both,
 # so each image has exactly one candidate and the two land in different files.

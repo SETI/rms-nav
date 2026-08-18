@@ -22,9 +22,7 @@ attitude:
    half imports ``oops``, because it has to read the observation's own frame
    and field of view.
 2. The :mod:`spindoctor.cli.ck` package reads those recorded matrices back out
-   of the records and writes type-3 C-kernel segments. This half imports no
-   ``oops``, transitively or otherwise, and the guarantee is enforced by test
-   rather than by convention.
+   of the records and writes type-3 C-kernel segments.
 
 The recorded matrices have a second consumer inside SpinDoctor itself: the
 backplane and reprojection stages apply them back onto observations through
@@ -33,23 +31,6 @@ mechanism is :func:`~spindoctor.support.cmatrix.apply_cmatrix_to_obs` (see
 `The readers`_),
 so the pipeline's own downstream products are built on the same attitude a
 kernel consumer sees.
-
-The split is the design, not an accident of layering. The writer package
-exists so that a navigated attitude becomes a kernel without the geometry
-stack; a writer that pulled in ``oops`` would defeat the point of writing
-kernels at all. The claim is scoped to the package: the ``sd_create_ck``
-program that drives it shares the pipeline's logging and configuration
-surface, which does import ``oops``, so it is the package, not the program,
-that carries the guarantee.
-
-What the guarantee forbids is oops, and that is what the probe asserts. Naming a
-whole package as a proxy for it would forbid modules that import no geometry at
-all: the values a record carries
-(:mod:`spindoctor.support.nav_record`), the document one is written to
-(:mod:`spindoctor.support.nav_document`) and the seam a run reads records through
-(:mod:`spindoctor.results_index.record_source`) are all in the writer's imports
-and none of them reaches oops. A rule that forbids the harmless is one that gets
-worked around rather than kept.
 
 The two halves share exactly one table -- which spacecraft clock each C-kernel
 object's time tags are encoded against -- and it lives in
@@ -544,27 +525,6 @@ written, leaves a complete and self-consistent set of them, and takes only the
 meta-kernel and the report with it. The user guide names it beside the three
 above.
 
-Why the writer imports no oops and nothing from ``spindoctor.support``
-----------------------------------------------------------------------
-
-The ban on ``oops`` is the product requirement. The ban on
-:mod:`spindoctor.support` is what makes it hold: that is where
-:mod:`spindoctor.support.cmatrix` lives, and it imports ``oops``, so one
-convenience import of a helper from there would drag the geometry stack into a
-program whose whole point is not to need it. The ban is why
-:mod:`spindoctor.cli.ck.pointing` spells its own array type alias rather than
-importing :mod:`spindoctor.support.types`, and why the shared clock table sits
-in top-level :mod:`spindoctor.spice_ids` rather than under ``support``.
-
-The guarantee is asserted on ``sys.modules`` in a fresh interpreter, not by
-reading imports (``tests/spindoctor/cli/ck/test_writer_imports.py``). A
-subprocess imports the writer package from nothing and reports every module
-that loaded; the test fails if any of them is ``oops``, an ``oops`` submodule,
-or anything under :mod:`spindoctor.support`. Source scanning could not prove
-it:
-the offending import could be two modules deep, and the process running the
-test suite has already imported ``oops`` for other tests.
-
 Assignment is by reproduction, not by the recorded kernel list
 --------------------------------------------------------------
 
@@ -878,7 +838,8 @@ and the first two are the ones most easily missed.
    Voyager.
 3. **An entry in the driver's mission list** (``MISSIONS`` in
    ``src/spindoctor/cli/sd_create_ck.py``), spelled there rather than read from
-   the observation registry, which is behind an ``oops`` import.
+   the observation registry, which would drag every host class into a program
+   that needs only their names.
 4. **An integration assertion** that the measured ``R`` equals the constant the
    frame table claims, on a real frame. That is the one check hermetic tests
    cannot make, and the flip is the dominant risk in this subsystem.
@@ -901,8 +862,6 @@ kernel-writing mechanics fail in different ways.
   needed. They cover the segment records, the angular-velocity policy, the
   quaternion sign repair, the comment area and meta-kernel rendering, the
   assignment tie-break, and the report.
-* **The import guarantee** (``test_writer_imports.py``) runs a fresh
-  interpreter, as described above.
 * **Frame integration tests** (``tests/integration/test_cmatrix_frames.py``)
   measure ``R`` on real frames of each instrument and check it against the
   table, and confirm it is constant across the exposure.

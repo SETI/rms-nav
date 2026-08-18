@@ -7,12 +7,7 @@ SPICE-aware tool with a ``furnsh`` instead of having to be applied as a pixel
 offset by hand.
 
 The package consumes the recorded C-matrix and performs no offset-to-rotation
-conversion of its own.  It imports ``cspyce`` and **nothing** from oops: the
-module that computes a C-matrix from a navigated offset imports the whole
-geometry stack, and one convenience import of it would pull that stack into a
-program that only writes kernels.  What the guarantee is about is oops, so that
-is what is asserted, on ``sys.modules`` in a fresh interpreter rather than by
-reading the source -- the offending import could be two modules deep.
+conversion of its own.  It writes kernels through ``cspyce``.
 
 The one table it shares with the attitude computation -- which spacecraft clock
 each CK object's time tags are encoded against -- lives in

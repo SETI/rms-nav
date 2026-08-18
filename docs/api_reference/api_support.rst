@@ -83,11 +83,6 @@ spindoctor.support
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: spindoctor.support.nav_document
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. automodule:: spindoctor.support.nav_record
    :members:
    :undoc-members:

@@ -42,6 +42,7 @@ from spindoctor.cli.ck.inputs import (
     furnish_frame_kernels,
     furnish_supporting_kernels,
     kernel_paths,
+    read_whole_mission,
     recorded_basenames,
     resolve_one,
     select_by_time,
@@ -70,9 +71,9 @@ from spindoctor.config import (
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_CREATE_CK
-from spindoctor.results_index import build_record_source
+from spindoctor.nav_records import NavRecord, Selection, UnlistableDirectoryError
+from spindoctor.results_index import open_record_source
 from spindoctor.support.misc import log_run_environment
-from spindoctor.support.nav_record import NavRecord
 
 PROGRAM_NAME = SD_CREATE_CK
 """Program identity: names the main log directory and the
@@ -86,9 +87,8 @@ MISSIONS = ('coiss', 'gossi', 'nhlorri', 'vgiss')
 
 Spelled here rather than read from the observation registry, which is the
 authority on the names: the registry would drag every host class into a
-program that needs only their names, and the writer package this program
-drives imports no oops at all.  A mission whose images carry no corrected
-attitude at all -- simulated images -- is deliberately not offered.
+program that needs only their names.  A mission whose images carry no
+corrected attitude at all -- simulated images -- is deliberately not offered.
 """
 
 REPORT_SUFFIX = '_ck_report.csv'
@@ -749,21 +749,38 @@ def main() -> None:
     # an index that cannot be opened, or that has no completed ingest of this
     # root, is a misconfigured run rather than a reason to walk the tree
     # instead.
-    source = build_record_source(
-        nav_results_root, results_db_url=results_db_url, columns=RECORD_COLUMNS
-    )
-    try:
-        records, unreadable = source.read_records(arguments.mission)
-    finally:
-        source.close()
+    with open_record_source(
+        [nav_results_root],
+        results_db_url=results_db_url,
+        columns=RECORD_COLUMNS,
+        logger=MAIN_LOGGER,
+    ) as source:
+        try:
+            stream = source.records(Selection(instrument=arguments.mission))
+            records, unreadable = read_whole_mission(stream)
+        except UnlistableDirectoryError as exc:
+            # The one failure a read of the tree stops for rather than charging
+            # to a file.  A directory nobody listed holds documents nobody read,
+            # so a kernel set built around the gap would silently cover less
+            # than the tree and go on being trusted; and a console entry point
+            # owes its caller a message and a status for that rather than a
+            # traceback.  Nothing has been written at this point, so there is
+            # nothing to undo.
+            MAIN_LOGGER.fatal(
+                'C-kernel generation stopped: %s. No kernel, meta-kernel or report has '
+                'been written. Make that directory readable and run again.',
+                exc,
+            )
+            sys.exit(1)
+        storage = source.describe()
     MAIN_LOGGER.info(
         'Read %d %s navigation record(s) from %s',
         len(records),
         arguments.mission,
-        source.describe(),
+        storage,
     )
-    for path, reason in unreadable:
-        MAIN_LOGGER.error('Could not read %s: %s', path.as_posix(), reason)
+    for entry in unreadable:
+        MAIN_LOGGER.error('Could not read %s: %s', entry.path.as_posix(), entry.reason)
     if len(unreadable) > 0:
         MAIN_LOGGER.error('Could not read %d metadata file(s)', len(unreadable))
 

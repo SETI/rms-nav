@@ -41,6 +41,67 @@ _PRINT_ONLY = [
 
 _LOGGER_NAMES = frozenset({'IMAGE_LOGGER', 'MAIN_LOGGER'})
 
+_RECORD_METHODS = frozenset(
+    {
+        'blankline',
+        'critical',
+        'debug',
+        'dot_underscore',
+        'ds_store',
+        'error',
+        'exception',
+        'fatal',
+        'hidden',
+        'info',
+        'invisible',
+        'log',
+        'normal',
+        'summarize',
+        'warn',
+        'warning',
+    }
+)
+"""The calls that put a line in a log, whatever object they are made on.
+
+Every level the logging library offers, not the four a converted module happened
+to use: a line written at a level nobody thought of is still a line in somebody's
+run log, and ``warn`` beside ``warning`` is the same call under the older
+spelling.
+"""
+
+_SECTION_METHODS = frozenset({'open', 'close'})
+"""The section calls, which count only against something named as a logger.
+
+``with logger.open(...):`` is the house idiom for a section and puts as much in a
+log as an info call does, so it has to be here.  But a source, a cursor and a
+file are closed by the same word, so unlike the names above these are matched
+against what they are called on rather than against every object.
+"""
+
+_LOGGER_RECEIVER = 'logger'
+"""What a lent logger is called, which is how a section call is recognized.
+
+A layer that is lent a logger names the parameter for what it is, so the receiver
+of a section call reads as ``logger``, ``self._logger`` or the like.  A layer
+that hid one under another name would still be caught by any of the record
+methods above, which are matched on every object.
+"""
+
+_MAY_WRITE_THROUGH_A_LENT_LOGGER = {
+    'nav_records/tree.py': (('_walk_from', 'info'),),
+}
+"""Every place either data-access layer writes through a logger it was lent.
+
+The walk, and only for the directory it declines to descend a second time: a
+root is still wholly listed when that happens, and a run told nothing would read
+the decline as documents that were never there.
+
+Keyed by the module's path under the package rather than by its name, so a file
+of the same name elsewhere is not exempted by coincidence, and holding the
+enclosing function and the call rather than the file, so a second line added to
+the same function is caught as readily as one added anywhere else.
+"""
+
 # Core packages route through NavBase.logger; the stdlib logging module is
 # never imported there.
 _NO_STDLIB_LOGGING = [
@@ -51,11 +112,23 @@ _NO_STDLIB_LOGGING = [
     'support',
 ]
 
-# The results index is a data-access layer with no voice of its own: what it did
-# is reported by whichever program called it, in that program's log.  It is also
-# built on a third-party library that logs through the stdlib module, so a logger
-# here would be the one place those two ladders could be wired together.
-_NO_LOGGER_AT_ALL = [
+# The two data-access layers have no voice of their own: what either of them did
+# is reported by whichever program called it, in that program's log.  So neither
+# may name a program's logger -- that is a voice its caller did not configure --
+# and neither may import the stdlib module, which the index layer's database
+# library logs through and which a logger here would be the one place to wire
+# into this design's ladder.
+#
+# What they may name is pdslogger, and only to type a logger a caller lends
+# them.  The walk over the documents has one thing to say -- that it declined to
+# descend a directory it had already listed under another name -- and a run that
+# is not told it reads as one that covered the whole root, so the fact goes into
+# the log of the program that asked.  The builder of a source takes that logger
+# and passes it on, which is why the layer that builds the index-backed one
+# names the type too.  Making a logger is a different thing and is refused for
+# the whole source by test_the_loggers_are_the_only_two.
+_NO_LOGGER_OF_ITS_OWN = [
+    'nav_records',
     'results_index',
 ]
 
@@ -123,12 +196,22 @@ def _dotted_prefixes(dotted: str) -> set[str]:
     return {'.'.join(parts[: index + 1]) for index in range(len(parts))}
 
 
-@pytest.mark.parametrize('relative', _PRINT_ONLY + _NO_STDLIB_LOGGING + _NO_LOGGER_AT_ALL)
+@pytest.mark.parametrize('relative', _PRINT_ONLY + _NO_STDLIB_LOGGING + _NO_LOGGER_OF_ITS_OWN)
 def test_every_target_of_these_checks_exists(relative: str) -> None:
     """A target that has moved would make its check pass by finding nothing.
 
     Every assertion in this module is that a search came back empty, so a path
     that names nothing is indistinguishable from a path that is clean.
+    """
+    assert (_SRC / relative).exists()
+
+
+@pytest.mark.parametrize('relative', sorted(_MAY_WRITE_THROUGH_A_LENT_LOGGER))
+def test_every_exempted_module_exists(relative: str) -> None:
+    """An exemption naming nothing exempts nothing, and hides that it is dead.
+
+    Parameters:
+        relative: Path, relative to the source root, of the exempted module.
     """
     assert (_SRC / relative).exists()
 
@@ -179,18 +262,21 @@ def test_core_code_does_not_import_stdlib_logging(package: str) -> None:
     assert offenders == []
 
 
-@pytest.mark.parametrize('package', _NO_LOGGER_AT_ALL)
-def test_a_data_access_layer_holds_no_logger_of_any_kind(package: str) -> None:
-    """Neither of the two loggers, nor pdslogger, nor the stdlib module.
+@pytest.mark.parametrize('package', _NO_LOGGER_OF_ITS_OWN)
+def test_a_data_access_layer_holds_no_logger_of_its_own(package: str) -> None:
+    """Neither of the two program loggers, and not the stdlib module.
 
-    Reaching for any of the three would give a library layer a voice its caller
-    did not configure, and the stdlib one would additionally turn on whatever the
-    database library it sits over decided to say.
+    Reaching for a program's logger would give a library layer a voice its
+    caller did not configure, and the stdlib one would additionally turn on
+    whatever the database library it sits over decided to say.  A logger a
+    caller hands in is neither of those: it is the caller's own, configured by
+    the caller's own command line, and it is the only way the one thing these
+    layers have to say reaches the run that asked for it.
 
     Parameters:
         package: Path, relative to the source root, of the package to scan.
     """
-    forbidden = _LOGGER_NAMES | {'logging', 'pdslogger'}
+    forbidden = _LOGGER_NAMES | {'logging'}
     offenders = [
         f'{path.name}:{sorted(found)}'
         for path in _python_files(package)
@@ -199,12 +285,37 @@ def test_a_data_access_layer_holds_no_logger_of_any_kind(package: str) -> None:
     assert offenders == []
 
 
+@pytest.mark.parametrize('package', _NO_LOGGER_OF_ITS_OWN)
+def test_a_data_access_layer_writes_no_record_of_its_own(package: str) -> None:
+    """Only where it was lent a logger to write one through.
+
+    The import scan above cannot see this: a layer may name pdslogger to type a
+    parameter, so a name it was handed is one it could also write through
+    anywhere.  What keeps these layers quiet is that each of them writes through
+    a lent logger at exactly the places listed here and nowhere else, so a line
+    added elsewhere -- reporting a query, a row, a root -- is caught rather than
+    discovered in somebody's run log.
+
+    Parameters:
+        package: Path, relative to the source root, of the package to scan.
+    """
+    offenders = sorted(
+        f'{_under_source(path)}:{_logging_call_sites(path)}'
+        for path in _python_files(package)
+        if _logging_call_sites(path)
+        != list(_MAY_WRITE_THROUGH_A_LENT_LOGGER.get(_under_source(path), ()))
+    )
+    assert offenders == []
+
+
 def test_the_loggers_are_the_only_two() -> None:
-    """No third logger has been constructed anywhere in the package.
+    """No third logger that can write a record is constructed anywhere in the package.
 
     Every record belongs to the run or to one image.  A logger outside those
     two is configured by none of the command line, the configuration, or the
-    cloud-task isolation.
+    cloud-task isolation.  A null logger is not one of those and is not counted:
+    it holds no handler and writes nowhere, and it is how a layer that must have
+    no voice of its own spells the absence of one.
     """
     constructed = sorted(
         path.relative_to(_SRC).as_posix()
@@ -214,17 +325,114 @@ def test_the_loggers_are_the_only_two() -> None:
     assert constructed == ['config/log_scope.py', 'config/logger.py']
 
 
-def _constructs_a_logger(path: FCPath) -> bool:
-    """Whether a module calls the PdsLogger constructor.
+def _under_source(path: FCPath) -> str:
+    """Return one module's path under the package, as the exemptions spell it.
 
-    Matched in the AST rather than the text: a docstring mentioning the call
-    is not one, and an aliased import (``import pdslogger as _pl``) is.
+    Parameters:
+        path: The module.
+
+    Returns:
+        The path relative to the source root, with forward separators.
+    """
+    return path.relative_to(_SRC).as_posix()
+
+
+def _logging_call_sites(path: FCPath) -> list[tuple[str, str]]:
+    """Return every call in a module that would put a line in a log, with where it is.
+
+    Each site carries the function it is written in as well as the call, so an
+    exemption names a place rather than a file, and a second line added beside an
+    exempt one is a second site rather than the same one again.
 
     Parameters:
         path: The module to read.
 
     Returns:
-        True when the module constructs a logger.
+        The sites, sorted, one entry per call and repeats kept.
+    """
+    return sorted(_sites_within(ast.parse(path.read_text()), '<module>'))
+
+
+def _sites_within(node: ast.AST, enclosing: str) -> list[tuple[str, str]]:
+    """Return the log-writing calls under one node, attributed to their function.
+
+    Parameters:
+        node: The node to search under.
+        enclosing: Name of the function this node is written in.
+
+    Returns:
+        One entry per call, each naming the innermost function around it.
+    """
+    sites: list[tuple[str, str]] = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            sites.extend(_sites_within(child, child.name))
+            continue
+        method = _log_call_method(child)
+        if method is not None:
+            sites.append((enclosing, method))
+        sites.extend(_sites_within(child, enclosing))
+    return sites
+
+
+def _log_call_method(node: ast.AST) -> str | None:
+    """Return the log-writing method one node calls, or None when it calls none.
+
+    A record method is matched against any object, because the object a lent
+    logger arrives as has whatever name its parameter was given, and nothing
+    else offers a method of one of those names.  A section call is matched only
+    against something named as a logger, because a source and a cursor are
+    closed by the same word.
+
+    Parameters:
+        node: The node to inspect.
+
+    Returns:
+        The method name, or None.
+    """
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return None
+    if node.func.attr in _RECORD_METHODS:
+        return node.func.attr
+    if (
+        node.func.attr in _SECTION_METHODS
+        and _LOGGER_RECEIVER in ast.unparse(node.func.value).lower()
+    ):
+        return node.func.attr
+    return None
+
+
+_WRITING_LOGGER_CLASSES = frozenset({'CriticalLogger', 'EasyLogger', 'ErrorLogger', 'PdsLogger'})
+"""The logging library's classes whose instances can write a record.
+
+``NullLogger`` is deliberately absent: it writes nowhere, so constructing one is
+not acquiring a voice.  Every other class the library exports is one, and naming
+the set rather than one class is what keeps a second spelling of the same act
+from passing.
+"""
+
+_LOGGER_FACTORIES = frozenset({'get_logger', 'getLogger'})
+"""The factory calls that hand back a logger without naming a constructor.
+
+``PdsLogger.get_logger('x')`` returns a configured logger exactly as the
+constructor does, so a check that matched only the constructor would watch one
+of two doors.
+"""
+
+
+def _constructs_a_logger(path: FCPath) -> bool:
+    """Whether a module makes a logger that can write a record.
+
+    Matched in the AST rather than the text: a docstring mentioning the call
+    is not one, and an aliased import (``import pdslogger as _pl``) is.  Both
+    ways of making one are matched -- calling a class, and asking a class or the
+    module for one by name -- since the two produce the same object.
+
+    Parameters:
+        path: The module to read.
+
+    Returns:
+        True when the module makes a logger.
     """
     tree = ast.parse(path.read_text())
     # ``import pdslogger as p`` then ``p.PdsLogger(...)``.
@@ -236,25 +444,148 @@ def _constructs_a_logger(path: FCPath) -> bool:
         if alias.name == 'pdslogger'
     }
     # ``from pdslogger import PdsLogger as P`` then ``P(...)``: the name the
-    # constructor is called by is whatever the import bound it to.
-    constructor_names = {
+    # class is called by is whatever the import bound it to.
+    class_names = {
         alias.asname or alias.name
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom) and node.module == 'pdslogger'
         for alias in node.names
-        if alias.name == 'PdsLogger'
+        if alias.name in _WRITING_LOGGER_CLASSES
     }
+    reachable = module_aliases | class_names
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Name) and func.id in constructor_names:
+        if isinstance(func, ast.Name) and func.id in class_names:
             return True
-        if (
-            isinstance(func, ast.Attribute)
-            and func.attr == 'PdsLogger'
-            and isinstance(func.value, ast.Name)
-            and func.value.id in module_aliases
-        ):
+        if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
+            continue
+        if func.attr in _WRITING_LOGGER_CLASSES and func.value.id in module_aliases:
+            return True
+        if func.attr in _LOGGER_FACTORIES and func.value.id in reachable:
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# The checks themselves
+# ---------------------------------------------------------------------------
+#
+# Everything above asserts that a search came back empty, and a search that
+# cannot find anything comes back empty too.  These hand the two predicates
+# source they must object to, so a narrowing of either is caught here rather
+# than by the absence it would silently create.
+
+
+def _module(tmp_path: Path, source: str) -> FCPath:
+    """Write one module for a predicate to read.
+
+    Parameters:
+        tmp_path: Directory to write it in.
+        source: The module's source.
+
+    Returns:
+        The file.
+    """
+    path = tmp_path / 'probe.py'
+    path.write_text(source)
+    return FCPath(path)
+
+
+@pytest.mark.parametrize(
+    'call',
+    [
+        pytest.param('logger.info("x")', id='info'),
+        pytest.param('logger.warn("x")', id='warn'),
+        pytest.param('logger.warning("x")', id='warning'),
+        pytest.param('logger.error("x")', id='error'),
+        pytest.param('logger.blankline()', id='blankline'),
+        pytest.param('logger.normal("x")', id='normal'),
+        pytest.param('logger.hidden("x")', id='hidden'),
+        pytest.param('logger.invisible("x")', id='invisible'),
+        pytest.param('logger.summarize()', id='summarize'),
+        pytest.param('logger.open("SECTION")', id='open'),
+        pytest.param('logger.close()', id='close'),
+        pytest.param('self._logger.open("SECTION")', id='a-held-logger'),
+    ],
+)
+def test_every_way_of_writing_a_line_is_seen(call: str, tmp_path: Path) -> None:
+    """Enumerating some of them lets the others in, which is the hole this closes.
+
+    ``with logger.open(...):`` is the house idiom for a section and puts as much
+    in a log as an info call does, so a check watching only the four levels
+    somebody happened to use would be blind to the most likely addition of all.
+
+    Parameters:
+        call: The call to plant.
+        tmp_path: Directory the probe module is written in.
+    """
+    probe = _module(tmp_path, f'def f(logger, self):\n    {call}\n')
+    assert _logging_call_sites(probe) == [('f', call.split('(')[0].split('.')[-1])]
+
+
+@pytest.mark.parametrize(
+    'call',
+    [
+        pytest.param('source.close()', id='a-source'),
+        pytest.param('cursor.close()', id='a-cursor'),
+        pytest.param('handle.open()', id='a-file'),
+    ],
+)
+def test_closing_something_that_is_not_a_logger_is_not_a_line(call: str, tmp_path: Path) -> None:
+    """A source and a cursor are closed by the same word a section is.
+
+    Parameters:
+        call: The call to plant.
+        tmp_path: Directory the probe module is written in.
+    """
+    assert _logging_call_sites(_module(tmp_path, f'def f():\n    {call}\n')) == []
+
+
+def test_a_second_line_in_an_exempted_function_is_a_second_site(tmp_path: Path) -> None:
+    """An exemption names a call, not a file, so a line added beside it is caught."""
+    probe = _module(tmp_path, 'def f(logger):\n    logger.info("a")\n    logger.info("b")\n')
+    assert _logging_call_sites(probe) == [('f', 'info'), ('f', 'info')]
+
+
+def test_a_line_is_attributed_to_the_function_it_is_written_in(tmp_path: Path) -> None:
+    """So an exemption for one function does not cover the module around it."""
+    source = 'def f(logger):\n    logger.info("a")\n\n\ndef g(logger):\n    logger.info("b")\n'
+    probe = _module(tmp_path, source)
+    assert _logging_call_sites(probe) == [('f', 'info'), ('g', 'info')]
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        pytest.param('from pdslogger import PdsLogger\nx = PdsLogger("a")\n', id='the-class'),
+        pytest.param('import pdslogger\nx = pdslogger.PdsLogger("a")\n', id='through-the-module'),
+        pytest.param('import pdslogger as p\nx = p.PdsLogger("a")\n', id='an-aliased-module'),
+        pytest.param('from pdslogger import PdsLogger as P\nx = P("a")\n', id='an-aliased-class'),
+        pytest.param(
+            'from pdslogger import PdsLogger\nx = PdsLogger.get_logger("a")\n', id='the-factory'
+        ),
+        pytest.param('import pdslogger\nx = pdslogger.get_logger("a")\n', id='the-modules-factory'),
+        pytest.param('from pdslogger import EasyLogger\nx = EasyLogger("a")\n', id='another-class'),
+    ],
+)
+def test_every_way_of_making_a_logger_is_seen(source: str, tmp_path: Path) -> None:
+    """A logger asked for by name is the same object as one that was constructed.
+
+    Parameters:
+        source: The module source to plant.
+        tmp_path: Directory the probe module is written in.
+    """
+    assert _constructs_a_logger(_module(tmp_path, source)) is True
+
+
+def test_a_null_logger_is_not_a_logger_of_its_own(tmp_path: Path) -> None:
+    """It holds no handler and writes nowhere, so making one acquires no voice.
+
+    It is how a layer that must have none spells the absence of one, and
+    counting it would make the check about the word rather than about the
+    record.
+    """
+    source = 'from pdslogger import NullLogger\nx = NullLogger()\n'
+    assert _constructs_a_logger(_module(tmp_path, source)) is False

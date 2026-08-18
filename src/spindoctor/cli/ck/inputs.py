@@ -5,18 +5,20 @@ one gathers the run: which of the navigation records a run was handed belong to
 the span it was asked for, the kernel directories those records name, and the
 spacecraft clock kernel each of the run's clocks is encoded against.
 
-Where the records themselves come from is not here.  They arrive through
-:mod:`spindoctor.results_index.record_source`, the one seam every program reads
-navigation records through, so that this program reads a results tree and an
-ingested index through the same code every other consumer does.
+Where the records themselves come from is not here.  They arrive as the stream
+:mod:`spindoctor.nav_records` defines and either storage answers, so that this
+program reads a results tree and an ingested index through the same code every
+other consumer does.  What is here is the one thing this program does with that
+stream that no other consumer does: it holds the whole mission, because a kernel
+set cannot be assigned until every image that might claim a baseline has been
+seen.
 
 Nothing here logs.  The driver reports what these functions return, so that the
 part of the run that touches only files and SPICE stays testable without a
-logger and imports no oops.
+logger.
 """
 
-import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -27,8 +29,9 @@ from spindoctor.cli.ck.clocks import SCLK_SUFFIX, select_sclk_kernel
 from spindoctor.cli.ck.frames import FK_SUFFIXES, require_one_frame_kernel_per_frame
 from spindoctor.cli.ck.images import ImageEntry
 from spindoctor.cli.ck.segment import resolve_sclk_id
+from spindoctor.nav_records import NavRecord, UnreadableFile
 from spindoctor.results_index import IMAGES
-from spindoctor.support.nav_record import NavRecord
+from spindoctor.support.nav_record import record_midtime_et
 
 LSK_SUFFIXES = frozenset({'.tls'})
 """The extension a leapseconds kernel carries in the holdings."""
@@ -75,6 +78,43 @@ identity from the observation instead.
 """
 
 
+def read_whole_mission(
+    stream: Iterable[NavRecord | UnreadableFile],
+) -> tuple[list[NavRecord], list[UnreadableFile]]:
+    """Collect one mission's stream, separating the files that held no record.
+
+    The stream is held whole rather than consumed as it arrives.  This program
+    assigns every corrected attitude to one of the original kernels the run
+    indexes, and cannot know which originals it needs until it has seen every
+    image, so a mission's records are in memory whatever this function does with
+    them.
+
+    Both lists are ordered by the path of the file each entry stands for, which
+    is an order neither storage promises: a walk yields in the order its
+    directory listings return, and a server sorts text under a collation of its
+    own.  Imposing it here is what makes a run's kernels, its report and its log
+    identical whichever storage answered.
+
+    Parameters:
+        stream: What the record source yielded, records and unreadable files
+            mixed in the order it found them.
+
+    Returns:
+        The records, and the files no record could be read out of, each in the
+        order of the document it stands for.
+    """
+    records: list[NavRecord] = []
+    unreadable: list[UnreadableFile] = []
+    for found in stream:
+        if isinstance(found, UnreadableFile):
+            unreadable.append(found)
+        else:
+            records.append(found)
+    records.sort(key=lambda record: record.path.as_posix())
+    unreadable.sort(key=lambda entry: entry.path.as_posix())
+    return records, unreadable
+
+
 def select_by_time(
     records: Sequence[NavRecord], start_et: float | None, stop_et: float | None
 ) -> tuple[list[NavRecord], int]:
@@ -105,7 +145,7 @@ def select_by_time(
     selected: list[NavRecord] = []
     undated = 0
     for record in records:
-        midtime = _midtime_of(record)
+        midtime = record_midtime_et(record.metadata)
         if midtime is None:
             undated += 1
             continue
@@ -115,34 +155,6 @@ def select_by_time(
             continue
         selected.append(record)
     return selected, undated
-
-
-def _midtime_of(record: NavRecord) -> float | None:
-    """Return one record's recorded exposure midtime.
-
-    Parameters:
-        record: The record.
-
-    Returns:
-        The midtime in TDB seconds past J2000, or ``None`` when the record
-        records none or records something that is not a finite number.  A
-        non-finite value is read as none rather than passed on, because every
-        comparison against a NaN is False: a NaN midtime would fall inside
-        every time range at once, and an infinite one would fall inside a
-        half-bounded range it can have no business in.
-    """
-    result = record.metadata.get('navigation_result')
-    if not isinstance(result, dict):
-        return None
-    times = result.get('times')
-    if not isinstance(times, dict):
-        return None
-    midtime = times.get('midtime_et')
-    if isinstance(midtime, bool) or not isinstance(midtime, int | float):
-        return None
-    if not math.isfinite(midtime):
-        return None
-    return float(midtime)
 
 
 ################################################################################

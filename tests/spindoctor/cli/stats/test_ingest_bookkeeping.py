@@ -28,16 +28,15 @@ import pytest
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats.ingest import METADATA_SUFFIX, UnlistableDirectoryError
 from spindoctor.cli.stats.ingest import chunks as chunks_module
 from spindoctor.cli.stats.ingest import driver as driver_module
 from spindoctor.cli.stats.ingest import store as store_module
-from spindoctor.cli.stats.ingest import walk as walk_module
 from spindoctor.cli.stats.ingest_rows import (
     MetadataDocumentError,
     MetadataSource,
     rows_from_metadata,
 )
+from spindoctor.nav_records import METADATA_SUFFIX, UnlistableDirectoryError
 from spindoctor.results_index import FAILED_FILES, IMAGES, INGEST_RUNS, TECHNIQUES, open_index
 
 from .conftest import (
@@ -1061,20 +1060,63 @@ def test_a_link_to_a_directory_outside_the_walk_is_followed(
     assert counts.files_ingested == 1
 
 
-def test_the_prune_refuses_a_listing_that_is_not_of_the_whole_root(
+# ---------------------------------------------------------------------------
+# What licenses a prune
+# ---------------------------------------------------------------------------
+
+
+def test_a_pass_stopped_at_a_directory_removes_no_row(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prune is licensed by a listing of the whole root, and this pass has none.
+
+    The rows of the volume that would not list are exactly the rows a pass that
+    pruned on a partial listing would delete, and their images are still in the
+    tree: deleting them would answer "never navigated" for images that were.
+    """
+    root = _two_volume_tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    _unlistable_subdirectory(monkeypatch, PermissionError)
+    with pytest.raises(UnlistableDirectoryError):
+        ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(
+            connection,
+            sqlalchemy.select(IMAGES.c.results_path_stub).order_by(IMAGES.c.results_path_stub),
+        )
+    engine.dispose()
+    assert [row.results_path_stub for row in found] == [
+        'VOL1/N1454725799_1_CALIB',
+        'VOL2/N1454725800_1_CALIB',
+    ]
+
+
+def test_the_prune_deletes_only_under_the_root_it_listed(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A worker holding a share of a root would otherwise delete its peers' rows."""
+    """The key is ``(root_url, results_path_stub)``, and the stub half is not unique.
+
+    Two roots holding one stub between them is the ordinary case -- a tree
+    copied to a second location, a mirror being filled -- and a prune reading
+    only the stub would delete the other root's row for every document that has
+    left this one.
+    """
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    stub = 'VOL/N1454725799_1_CALIB'
+    gone = write_metadata(first, stub, metadata_document())
+    write_metadata(second, stub, metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
-    engine = open_index(url, create=True)
-    listing = walk_module._RootListing(root_listed=False)
-    try:
-        with pytest.raises(ValueError, match='whole root'):
-            driver_module._prune_missing(
-                engine, '/data/nav-results', listing, {}, logger=quiet_logger
-            )
-    finally:
-        engine.dispose()
+    ingest_tree(url, [first, second], logger=quiet_logger)
+    gone.unlink()
+    ingest_tree(url, [first], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.root_url))
+    engine.dispose()
+    assert [row.root_url for row in found] == [second.as_posix()]
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,13 @@ real numbers is a proper rotation is
 both readers ask it of the same array, so a recorded matrix that is not a
 rotation is refused identically however it was stored.  This module decides only
 which values survive to be asked about.
+
+Nor is the shape a consumer receives a record in decided here.  What a record is
+-- the record paired with the document it stands for, the file a listing found,
+the seam the two storages answer through -- is
+:mod:`spindoctor.nav_records`'s, and that package reaches this one for the rules
+below.  This module holds no type of its own: it is the domain of the values, so
+a reader of a document and a reader of a row ask it the same questions.
 """
 
 import math
@@ -33,7 +40,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from filecache import FCPath
 
 from spindoctor.support.types import NDArrayFloatType
 
@@ -45,9 +51,9 @@ __all__ = [
     'NULL_OFFSET',
     'REAL_NUMBER_DTYPE_KINDS',
     'UNKNOWN_STATUS',
-    'NavRecord',
     'RecordOffset',
     'finite_float',
+    'record_midtime_et',
     'record_offset',
     'record_rotation_matrix',
     'record_status',
@@ -87,32 +93,6 @@ NON_FINITE_OFFSET = 'non_finite_offset'
 
 MALFORMED_OFFSET = 'malformed_offset'
 """The offset is not two values a reader can read as pixels."""
-
-
-@dataclass(frozen=True)
-class NavRecord:
-    """One image's navigation record, and where that record is kept.
-
-    A record read from its document and one rebuilt from an index row are the
-    same thing to every consumer, so both arrive in this shape and neither
-    carries which storage produced it.
-
-    Parameters:
-        path: The document.  For a record rebuilt from a row this is the
-            document the ingest recorded reading, or -- for a row written
-            before anything recorded one -- where the stub says the document
-            lives.  It is what a message about this record names, so that an
-            operator is always told a file they can open.
-        stub: The image's results path stub: its identity under the root, and
-            the name of its log.
-        metadata: The record, in the shape the navigator writes it.  A record
-            rebuilt from a row carries the fields its columns hold and no
-            others, which is the part of the document its consumer reads.
-    """
-
-    path: FCPath
-    stub: str
-    metadata: dict[str, Any]
 
 
 def finite_float(value: Any) -> float | None:
@@ -176,6 +156,34 @@ def record_status_error(nav_metadata: dict[str, Any]) -> str:
     if isinstance(error, str) and error:
         return error
     return UNKNOWN_STATUS
+
+
+def record_midtime_et(nav_metadata: dict[str, Any]) -> float | None:
+    """Read the exposure midtime a navigation record supplies.
+
+    Parameters:
+        nav_metadata: The parsed metadata record.
+
+    Returns:
+        The midtime in TDB seconds past J2000, or None when the record records
+        none or records something that is not a finite number.  A non-finite
+        value is read as none rather than passed on, because every comparison
+        against a NaN is False: a NaN midtime would fall inside every time range
+        at once, and an infinite one would fall inside a half-bounded range it
+        can have no business in.
+    """
+    result = nav_metadata.get('navigation_result')
+    if not isinstance(result, dict):
+        return None
+    times = result.get('times')
+    if not isinstance(times, dict):
+        return None
+    midtime = times.get('midtime_et')
+    if isinstance(midtime, bool) or not isinstance(midtime, (int, float)):
+        return None
+    if not math.isfinite(midtime):
+        return None
+    return float(midtime)
 
 
 @dataclass(frozen=True)

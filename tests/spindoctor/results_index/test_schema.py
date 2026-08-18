@@ -40,7 +40,7 @@ ColumnType = type[sqlalchemy.types.TypeEngine[Any]]
 IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('root_url', sqlalchemy.Text, False),
     ('results_path_stub', sqlalchemy.Text, False),
-    ('volume', sqlalchemy.Text, True),
+    ('subtree', sqlalchemy.Text, True),
     ('image_name', sqlalchemy.Text, False),
     ('instrument', sqlalchemy.Text, False),
     ('camera', sqlalchemy.Text, True),
@@ -136,7 +136,7 @@ FAILED_FILES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('root_url', sqlalchemy.Text, False),
     ('results_path_stub', sqlalchemy.Text, False),
     ('reason', sqlalchemy.Text, False),
-    ('volume', sqlalchemy.Text, True),
+    ('subtree', sqlalchemy.Text, True),
     ('mtime_ns', sqlalchemy.BigInteger, True),
     ('size_bytes', sqlalchemy.BigInteger, True),
 )
@@ -147,7 +147,7 @@ SCHEMA_META_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('created_utc', sqlalchemy.Text, False),
 )
 
-COLUMN_SET_VERSION = 8
+COLUMN_SET_VERSION = 9
 """The schema version the column sets above make up.
 
 An index is readable only by code whose column set is the one that wrote it, and
@@ -629,7 +629,7 @@ def test_a_nanosecond_mtime_round_trips(sqlite_url: str) -> None:
     assert stored == mtime_ns
 
 
-def test_a_stub_without_a_separator_stores_a_null_volume(sqlite_url: str) -> None:
+def test_a_stub_without_a_separator_stores_a_null_subtree(sqlite_url: str) -> None:
     """The simulated dataset's bare scene basenames are valid stubs.
 
     Parameters:
@@ -638,10 +638,10 @@ def test_a_stub_without_a_separator_stores_a_null_volume(sqlite_url: str) -> Non
     with opened(sqlite_url, create=True) as engine:
         with engine.begin() as connection:
             connection.execute(
-                IMAGES.insert(), image_row(results_path_stub='sim_scene_0001', volume=None)
+                IMAGES.insert(), image_row(results_path_stub='sim_scene_0001', subtree=None)
             )
         with engine.connect() as connection:
-            stored = connection.execute(sqlalchemy.select(IMAGES.c.volume)).scalar()
+            stored = connection.execute(sqlalchemy.select(IMAGES.c.subtree)).scalar()
     assert stored is None
 
 

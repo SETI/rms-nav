@@ -7,8 +7,8 @@ of the things a refusal can be do not.  A file no JSON object came out of is one
 the tree excludes from every error filter as well, so the two agree about it --
 the parity of the two implementations over such a file is pinned in
 ``tests/spindoctor/dataset/test_results_filter_index.py`` -- and a refusal under
-no volume is in no selection's answer at all, because a selection enumerates
-volumes and both arms of the query are restricted to them.  Counting either
+no subtree is in no selection's answer at all, because a selection enumerates
+subtrees and both arms of the query are restricted to them.  Counting either
 would report a gap where there is none, and an operator reading a plausible
 number falls back to reading the tree, or distrusts a selection that was exact.
 
@@ -53,13 +53,13 @@ from .conftest import (
 )
 
 SECOND_STUB = 'VOL/N1454725800_1_CALIB'
-"""A second stub under the same volume, for a root that holds two refusals."""
+"""A second stub under the same subtree, for a root that holds two refusals."""
 
 THIRD_STUB = 'VOL/N1454725801_1_CALIB'
-"""A third stub under the same volume, for the refusal that parses to a list."""
+"""A third stub under the same subtree, for the refusal that parses to a list."""
 
 ROOTLESS_STUB = 'N1454725802_1_CALIB'
-"""A stub above every volume, which no enumeration walks or queries."""
+"""A stub above every subtree, which no enumeration walks or queries."""
 
 
 def write_unparseable(root: Path, stub: str) -> Path:
@@ -114,7 +114,7 @@ def refusals_recorded(url: str, root: Path) -> int:
         root: The results root to count under.
 
     Returns:
-        The rows, whatever their reason and whatever volume they are under.
+        The rows, whatever their reason and whatever subtree they are under.
     """
     engine = open_index(url)
     try:
@@ -191,8 +191,8 @@ def _tree_holding_one_of_each_refusal(root: Path) -> None:
     ``status`` out of any JSON object it can parse, whatever else is wrong with
     the object, so only the document refused for its schema is answered
     differently; a half-written file and a file holding a JSON list are ones the
-    tree excludes from every error filter too; and a document above every volume
-    is outside the volumes any enumeration walks or queries.
+    tree excludes from every error filter too; and a document above every subtree
+    is outside the subtrees any enumeration walks or queries.
 
     Parameters:
         root: The results root to write under.

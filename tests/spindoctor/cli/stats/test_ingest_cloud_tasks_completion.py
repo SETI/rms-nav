@@ -18,7 +18,8 @@ import pdslogger
 import pytest
 from filecache import FCPath
 
-from spindoctor.cli.stats.ingest import TaskResult, UnlistableDirectoryError
+from spindoctor.cli.stats.ingest import TaskResult
+from spindoctor.nav_records import UnlistableDirectoryError
 from spindoctor.results_index import (
     INGEST_RUNS,
     SCHEMA_VERSION,

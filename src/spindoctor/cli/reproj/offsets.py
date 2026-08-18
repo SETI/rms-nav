@@ -55,6 +55,13 @@ from filecache import FCPath
 
 from spindoctor.config import IMAGE_LOGGER, MAIN_LOGGER
 from spindoctor.dataset.dataset import ImageFile
+from spindoctor.nav_records import (
+    ABSOLUTE_PATH_FRAGMENT,
+    NULL_BYTE_IN_PATH,
+    PARENT_SEGMENT_IN_PATH,
+    document_path,
+    stub_refusal,
+)
 from spindoctor.obs import ObsSnapshotInst
 
 # The record validator is deliberately imported from the one module that owns
@@ -68,11 +75,6 @@ from spindoctor.support.cmatrix import (
     validated_record_rotation,
 )
 from spindoctor.support.exceptions import NavPointingError
-from spindoctor.support.nav_document import (
-    ABSOLUTE_PATH_FRAGMENT,
-    NULL_BYTE_IN_PATH,
-    resolved_document_path,
-)
 
 # Which values of a record a reader can use at all is decided in one place, and
 # the results index stores what that place returns, so a record rebuilt from a
@@ -206,49 +208,49 @@ def none_selection(reason: str | None) -> PointingSelection:
     )
 
 
-def resolved_nav_metadata_path(
+_PATH_REFUSAL_ADVICE = {
+    NULL_BYTE_IN_PATH: 'a null byte cannot reach a filesystem call',
+    ABSOLUTE_PATH_FRAGMENT: 'an absolute fragment names a file under no root',
+    PARENT_SEGMENT_IN_PATH: 'check results_path_stub for path traversal',
+}
+"""What to look at for each way a stub can fail to be a key under a root.
+
+The reason names the rule; this names the thing an operator would go and look
+at, which for a stub is always where the stub came from.
+"""
+
+
+def nav_metadata_path(
     nav_results_root: str | FCPath,
     image_file: ImageFile,
 ) -> FCPath | None:
-    """Resolve ``<nav_results_root>/<stub>_metadata.json`` and ensure it stays under root.
+    """Return ``<nav_results_root>/<stub>_metadata.json``, or None if the stub is no key.
 
-    Rejects null bytes, absolute ``results_path_stub`` fragments, and any resolved
-    path that escapes ``nav_results_root`` (e.g. ``..`` segments in ``stub``).
-    Which paths a results root may be read at is decided by
-    :func:`spindoctor.support.nav_document.resolved_document_path`, for every
-    reader of a document and both storages; this is the wrapper that reports a
-    refusal against the image, which is what the per-image readers need and what
-    a reader handing back the record itself cannot do.
+    A results path stub is a key under one root rather than a path, and what
+    makes one a key is decided by :func:`spindoctor.nav_records.stub_refusal`
+    for every reader of a document and both storages.  This is the wrapper that
+    reports a refusal against the image, which is what a per-image reader needs
+    and what a reader handing back the record itself cannot do.
 
     Parameters:
         nav_results_root: Root the navigator wrote its documents under.
         image_file: The image whose document is wanted.
 
     Returns:
-        The resolved path, or None when the stub does not name one this root
-        may be read at, with the reason written to the image's log.
+        Where the document lives, or None when the stub is not a key under a
+        root, with the reason written to the image's log.
     """
-    resolved = resolved_document_path(nav_results_root, image_file.results_path_stub)
-    if resolved.path is not None:
-        return resolved.path
-    if resolved.refusal == NULL_BYTE_IN_PATH:
-        IMAGE_LOGGER.warning(
-            'nav_results_root: metadata path contains null byte; refusing pointing load for %s.',
-            image_file.image_file_url,
-        )
-    elif resolved.refusal == ABSOLUTE_PATH_FRAGMENT:
-        IMAGE_LOGGER.warning(
-            'nav_results_root: metadata path fragment is absolute; refusing pointing load for %s.',
-            image_file.image_file_url,
-        )
-    else:
-        IMAGE_LOGGER.warning(
-            'nav_results_root: resolved metadata path %s is outside root %s; refusing '
-            'pointing load for %s (check results_path_stub for path traversal).',
-            resolved.resolved,
-            resolved.root,
-            image_file.image_file_url,
-        )
+    stub = image_file.results_path_stub
+    refusal = stub_refusal(stub)
+    if refusal is None:
+        return document_path(nav_results_root, stub)
+    IMAGE_LOGGER.warning(
+        'nav_results_root: %s for %s (%s); refusing pointing load for %s.',
+        refusal,
+        stub,
+        _PATH_REFUSAL_ADVICE[refusal],
+        image_file.image_file_url,
+    )
     return None
 
 
@@ -486,7 +488,7 @@ def load_pointing_if_any(
         # Nothing was asked for, so nothing is missing.
         return none_selection(None)
 
-    metadata_path = resolved_nav_metadata_path(nav_results_root, image_file)
+    metadata_path = nav_metadata_path(nav_results_root, image_file)
     if metadata_path is None:
         return none_selection('unusable_metadata_path')
 

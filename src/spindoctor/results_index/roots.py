@@ -2,10 +2,11 @@
 
 Every row of the index names the results root it was ingested from, and every
 consumer filters on the root it was itself pointed at.  The two only meet if
-both spell the root the same way, so one function spells it and everything
-calls that one: a results root reaches a program as a command-line value, a
-configuration key or an environment variable, and the three routinely differ by
-a trailing slash or by being relative to the working directory.
+both spell the root the same way, and one function spells it:
+:func:`~spindoctor.nav_records.normalize_root_url`, which is a rule about root
+identity rather than about a database and is therefore kept where a reader of
+documents can reach it too.  It is re-exported from here, so that a consumer of
+the index reads the root and the bookkeeping about it out of one place.
 
 Absence of a row is only meaningful once the root is known to have been
 ingested.  "No row in ``images`` for this stub" means "this image was never
@@ -25,12 +26,11 @@ rather than finishing, so a run that has a finish time listed the whole root.
 """
 
 from collections.abc import Sequence
-from pathlib import Path
 
 import sqlalchemy
-from filecache import FCPath
 from sqlalchemy.engine import Engine
 
+from spindoctor.nav_records import normalize_root_url
 from spindoctor.results_index.engine import open_index, reporting_a_failed_read
 from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.schema import INGEST_RUNS
@@ -42,44 +42,6 @@ __all__ = [
     'open_index_for_roots',
     'require_ingested_roots',
 ]
-
-
-def normalize_root_url(root: str | Path | FCPath) -> str:
-    """Return the form of a results root that the index stores and compares.
-
-    The rule is one absolute POSIX rendering, so that a root named relatively on
-    one run and absolutely on the next, or named with a trailing slash by one
-    program and without by another, is one root.  That rendering carries no
-    trailing separator except on the filesystem root itself, whose separator is
-    its whole name.
-
-    Two spellings are refused here rather than rendered.  An empty one renders
-    as whatever directory the process happens to be in, so a program handed one
-    -- which is what an unset variable in ``--nav-results-root "$ROOT"`` hands it
-    -- would walk the working directory, write its documents under a root nobody
-    named, and report a completed pass.  One carrying a null byte renders
-    perfectly well and then fails at the first call that reaches the filesystem,
-    which is a failure charged to a directory listing rather than to the word
-    that caused it.  Every caller reads a root through here, so both are refused
-    once for the whole surface.
-
-    Parameters:
-        root: The results root as its holder spelled it: a local path, an
-            :class:`FCPath`, or a cloud URL.
-
-    Returns:
-        The normalized root URL.
-
-    Raises:
-        ValueError: If the spelling is not a location: empty, carrying a null
-            byte, or one the storage layer itself refuses to render absolute.
-    """
-    spelled = str(root)
-    if spelled == '':
-        raise ValueError('a results root spelled as nothing at all is not a location')
-    if '\x00' in spelled:
-        raise ValueError(f'a results root carrying a null byte is not a location: {spelled!r}')
-    return FCPath(root).absolute().as_posix()
 
 
 def ingested_roots(connection: sqlalchemy.Connection) -> list[str]:

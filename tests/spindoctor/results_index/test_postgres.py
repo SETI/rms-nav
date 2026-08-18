@@ -18,6 +18,9 @@ it: the catalog spans every schema on the server, so a lookup by table name
 alone answers from whichever schema happens to hold a table of that name.
 """
 
+import contextlib
+from collections.abc import Iterator
+
 import psycopg
 import pytest
 import sqlalchemy
@@ -29,6 +32,8 @@ from tests.spindoctor.results_index.conftest import (
     technique_row,
 )
 
+from spindoctor.cli.ck.inputs import read_whole_mission
+from spindoctor.nav_records import NavRecord, RecordSource, Selection, UnreadableFile
 from spindoctor.results_index import (
     FAILED_FILES,
     FEATURE_SOURCES,
@@ -38,6 +43,7 @@ from spindoctor.results_index import (
     SCHEMA_VERSION,
     TECHNIQUES,
     open_index,
+    open_record_source,
 )
 from spindoctor.results_index.selection import read_result_stubs
 
@@ -432,11 +438,20 @@ SELECTION_OTHER_ROOT = '/data/other-nav-results'
 REFUSED_STUB = 'COISS_2001/data/1294561143_1295221348/N1294561203_1_CALIB'
 """A file the ingest refused, which is still a file that exists."""
 
+OTHER_ROOT_REFUSED_STUB = 'COISS_2001/data/1294561143_1295221348/N1294561205_1_CALIB'
+"""A file the other root refused, which the root under test holds nothing for.
+
+The refusals are keyed by root and stub together exactly as the images are, and
+this stub is the one that says so: it belongs to no image row anywhere, so a
+refusals arm reading the stub without its root shows it up as a document of the
+root under test.
+"""
+
 NAVIGATED_STUB = 'COISS_2001/data/1294561143_1295221348/N1294561204_1_CALIB'
 """A document recording an outcome that is not a fatal error."""
 
-SELECTION_VOLUME = 'COISS_2001'
-"""The volume the selection reads."""
+SELECTION_SUBTREE = 'COISS_2001'
+"""The subtree the selection reads."""
 
 SELECTION_INGESTED = '2026-08-08T00:00:00+00:00'
 """When the pass over the root under test finished."""
@@ -456,6 +471,11 @@ def _seed_selection_rows(url: str) -> None:
     a document recording no fatal error has something to select and is not
     satisfied by answering nothing.
 
+    Both roots refuse a file, and the other root's refusal names a stub no
+    image row anywhere carries, so the refusals arm is held to its root by the
+    same evidence the images arm is: read without its root it adds a stub to
+    what the root under test holds.
+
     The two roots' run rows differ the same way.  The other root is passed over
     second, so its run is the newest in the index and its finish time is not
     this root's: what the pass over this root recorded about itself is
@@ -471,21 +491,21 @@ def _seed_selection_rows(url: str) -> None:
                 image_row(
                     root_url=SELECTION_ROOT,
                     results_path_stub=STUB,
-                    volume=SELECTION_VOLUME,
+                    subtree=SELECTION_SUBTREE,
                     status='error',
                     status_error=None,
                 ),
                 image_row(
                     root_url=SELECTION_ROOT,
                     results_path_stub=NAVIGATED_STUB,
-                    volume=SELECTION_VOLUME,
+                    subtree=SELECTION_SUBTREE,
                     status='failure',
                     status_error=None,
                 ),
                 image_row(
                     root_url=SELECTION_OTHER_ROOT,
                     results_path_stub=STUB,
-                    volume=SELECTION_VOLUME,
+                    subtree=SELECTION_SUBTREE,
                     status='error',
                     status_error='missing_spice_data',
                 ),
@@ -498,10 +518,18 @@ def _seed_selection_rows(url: str) -> None:
                     'root_url': SELECTION_ROOT,
                     'results_path_stub': REFUSED_STUB,
                     'reason': 'not a current-schema navigation document',
-                    'volume': SELECTION_VOLUME,
+                    'subtree': SELECTION_SUBTREE,
                     'mtime_ns': 1,
                     'size_bytes': 2,
-                }
+                },
+                {
+                    'root_url': SELECTION_OTHER_ROOT,
+                    'results_path_stub': OTHER_ROOT_REFUSED_STUB,
+                    'reason': 'not a current-schema navigation document',
+                    'subtree': SELECTION_SUBTREE,
+                    'mtime_ns': 3,
+                    'size_bytes': 4,
+                },
             ],
         )
         connection.execute(
@@ -528,8 +556,26 @@ def test_the_selection_reads_a_document_and_a_refusal_on_postgresql(postgres_url
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
     assert stubs.with_metadata == frozenset({STUB, NAVIGATED_STUB, REFUSED_STUB})
+
+
+def test_another_roots_refusal_is_not_this_roots_document_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """The refusals arm is keyed by root and stub together, as the images arm is.
+
+    The other root's refusal names a file the root under test holds nothing
+    for, so an arm reading the stub alone hands the enumeration a stub whose
+    document is under a different root -- and the enumeration would then read
+    it as an image of this root that has already been navigated.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_selection_rows(postgres_url)
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
+    assert OTHER_ROOT_REFUSED_STUB not in stubs.with_metadata
 
 
 def test_the_error_flag_survives_the_union_on_postgresql(postgres_url: str) -> None:
@@ -545,7 +591,7 @@ def test_the_error_flag_survives_the_union_on_postgresql(postgres_url: str) -> N
     """
     _seed_selection_rows(postgres_url)
     stubs = read_result_stubs(
-        postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_offset_error=True
+        postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE], has_offset_error=True
     )
     assert stubs.matching_error == frozenset({STUB})
 
@@ -563,7 +609,7 @@ def test_the_negative_error_filter_selects_on_postgresql(postgres_url: str) -> N
     """
     _seed_selection_rows(postgres_url)
     stubs = read_result_stubs(
-        postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_no_offset_error=True
+        postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE], has_no_offset_error=True
     )
     assert stubs.matching_error == frozenset({NAVIGATED_STUB})
 
@@ -578,7 +624,7 @@ def test_a_fatal_error_with_no_cause_is_not_a_spice_error_on_postgresql(
     """
     _seed_selection_rows(postgres_url)
     stubs = read_result_stubs(
-        postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_offset_nonspice_error=True
+        postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE], has_offset_nonspice_error=True
     )
     assert stubs.matching_error == frozenset({STUB})
 
@@ -591,7 +637,7 @@ def test_the_error_filter_answers_for_one_root_on_postgresql(postgres_url: str) 
     """
     _seed_selection_rows(postgres_url)
     stubs = read_result_stubs(
-        postgres_url, SELECTION_ROOT, [SELECTION_VOLUME], has_offset_spice_error=True
+        postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE], has_offset_spice_error=True
     )
     assert stubs.matching_error == frozenset()
 
@@ -603,7 +649,7 @@ def test_the_snapshot_time_answers_for_one_root_on_postgresql(postgres_url: str)
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
     assert stubs.ingested_utc == SELECTION_INGESTED
 
 
@@ -635,7 +681,7 @@ def test_a_table_this_account_cannot_read_is_reported_on_postgresql(postgres_url
     """
     _seeded_without_the_refusals(postgres_url)
     with pytest.raises(ValueError, match='could not be read'):
-        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
 
 
 def test_a_failing_query_raises_no_database_exception_on_postgresql(postgres_url: str) -> None:
@@ -646,7 +692,7 @@ def test_a_failing_query_raises_no_database_exception_on_postgresql(postgres_url
     """
     _seeded_without_the_refusals(postgres_url)
     with pytest.raises(ValueError) as excinfo:
-        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
     assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
 
 
@@ -658,5 +704,386 @@ def test_a_failing_query_is_reported_without_its_sql_on_postgresql(postgres_url:
     """
     _seeded_without_the_refusals(postgres_url)
     with pytest.raises(ValueError) as excinfo:
-        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_VOLUME])
+        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
     assert 'SELECT' not in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# The record source
+# ---------------------------------------------------------------------------
+
+RECORD_ROOT = '/data/record-nav-results'
+"""The results root the record source below is opened over."""
+
+RECORD_OTHER_ROOT = '/data/record-other-results'
+"""A second ingested root, holding the same stubs with other values."""
+
+RECORD_SUBTREE = 'COISS_2001'
+"""The subtree the first two images live under."""
+
+RECORD_OTHER_SUBTREE = 'COISS_2002'
+"""The subtree the third lives under, so a subtree restriction has work to do."""
+
+FIRST_RECORD_STUB = f'{RECORD_SUBTREE}/data/N1294561202_1_CALIB'
+"""The image every per-image test below reads."""
+
+SECOND_RECORD_STUB = f'{RECORD_SUBTREE}/data/N1294561203_1_CALIB'
+"""A second image of the same subtree, exposed later."""
+
+THIRD_RECORD_STUB = f'{RECORD_OTHER_SUBTREE}/data/N1294561204_1_CALIB'
+"""An image of the other subtree."""
+
+RECORD_REFUSED_STUB = f'{RECORD_SUBTREE}/data/junk'
+"""A file this root's ingest refused, which is still a file that exists."""
+
+ONLY_OTHER_ROOT_STUB = f'{RECORD_SUBTREE}/data/N1294561299_1_CALIB'
+"""An image only the other root holds, which this root must never answer for."""
+
+OTHER_REFUSED_STUB = f'{RECORD_OTHER_SUBTREE}/data/other_junk'
+"""A file the other root's ingest refused, somewhere else and under another name."""
+
+RECORD_OFFSET = (1.5, -2.5)
+"""What this root's images record."""
+
+OTHER_RECORD_OFFSET = (9.5, -8.5)
+"""What the other root's rows for the same stubs record."""
+
+FIRST_MIDTIME_ET = 100.0
+"""The exposure midtime the first image records."""
+
+SECOND_MIDTIME_ET = 300.0
+"""The exposure midtime the second records, well after the first."""
+
+RECORD_COLUMNS = (IMAGES.c.status, IMAGES.c.instrument, IMAGES.c.offset_dv, IMAGES.c.offset_du)
+"""A consumer's columns, standing in for any consumer's."""
+
+
+def _record_rows(root_url: str, offset: tuple[float, float]) -> list[dict[str, object]]:
+    """Return one root's image rows, written in reverse of their path order.
+
+    Reversed on purpose.  No statement the source issues asks for an order, so
+    what a server hands back is its own; on a freshly written table that is the
+    order the rows went in, and a run that needs path order has to impose it
+    rather than inherit it.
+
+    Parameters:
+        root_url: The root these rows belong to.
+        offset: The offset each of them records, which is what tells one root's
+            rows from the other's.
+
+    Returns:
+        The rows, ready to insert.
+    """
+    return [
+        image_row(
+            root_url=root_url,
+            results_path_stub=stub,
+            subtree=stub.split('/')[0],
+            instrument='coiss',
+            offset_dv=offset[0],
+            offset_du=offset[1],
+            midtime_et=midtime,
+            source_file=f'{root_url}/{stub}_metadata.json',
+            mtime_ns=1_700_000_000_000_000_000,
+            size_bytes=512,
+        )
+        for stub, midtime in (
+            (THIRD_RECORD_STUB, SECOND_MIDTIME_ET),
+            (SECOND_RECORD_STUB, SECOND_MIDTIME_ET),
+            (FIRST_RECORD_STUB, FIRST_MIDTIME_ET),
+        )
+    ]
+
+
+def _seed_record_rows(url: str) -> None:
+    """Create the index and write the rows the record source reads.
+
+    Two roots, holding the same three stubs with different offsets, each with a
+    refused file of its own at a stub the other root has no file at.  A query
+    that dropped the root half of the key would therefore answer with the wrong
+    offsets, or fail an image this root has nothing to say about.
+
+    Parameters:
+        url: The index to create and write into.
+    """
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            IMAGES.insert(),
+            [
+                *_record_rows(RECORD_ROOT, RECORD_OFFSET),
+                *_record_rows(RECORD_OTHER_ROOT, OTHER_RECORD_OFFSET),
+                # A stub only the other root holds, so a query that bound a key
+                # and dropped the root is caught whichever order the server
+                # returned its rows in.
+                image_row(
+                    root_url=RECORD_OTHER_ROOT,
+                    results_path_stub=ONLY_OTHER_ROOT_STUB,
+                    subtree=RECORD_SUBTREE,
+                    instrument='coiss',
+                    offset_dv=OTHER_RECORD_OFFSET[0],
+                    offset_du=OTHER_RECORD_OFFSET[1],
+                    midtime_et=SECOND_MIDTIME_ET,
+                    source_file=f'{RECORD_OTHER_ROOT}/{ONLY_OTHER_ROOT_STUB}_metadata.json',
+                    mtime_ns=1_700_000_000_000_000_000,
+                    size_bytes=512,
+                ),
+            ],
+        )
+        connection.execute(
+            FAILED_FILES.insert(),
+            [
+                {
+                    'root_url': root_url,
+                    'results_path_stub': stub,
+                    'reason': 'not a current-schema navigation document',
+                    'subtree': stub.split('/')[0],
+                    'mtime_ns': 1_700_000_000_000_000_000,
+                    'size_bytes': 64,
+                }
+                for root_url, stub in (
+                    (RECORD_ROOT, RECORD_REFUSED_STUB),
+                    (RECORD_OTHER_ROOT, OTHER_REFUSED_STUB),
+                )
+            ],
+        )
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': root_url,
+                    'started_utc': SELECTION_INGESTED,
+                    'finished_utc': SELECTION_INGESTED,
+                    'schema_version': SCHEMA_VERSION,
+                }
+                for root_url in (RECORD_ROOT, RECORD_OTHER_ROOT)
+            ],
+        )
+
+
+@contextlib.contextmanager
+def _record_source(url: str, *roots: str) -> Iterator[RecordSource]:
+    """Open a record source over some of the seeded roots, and close it after.
+
+    Parameters:
+        url: The index URL.
+        roots: The roots the source is to hold.
+
+    Yields:
+        The source.
+    """
+    with open_record_source(list(roots), results_db_url=url, columns=RECORD_COLUMNS) as source:
+        yield source
+
+
+def test_the_listing_unions_both_tables_on_postgresql(postgres_url: str) -> None:
+    """A server types the columns of a union, and one arm records no path at all.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = sorted(entry.stub for entry in source.listing(Selection()))
+    assert found == sorted(
+        [FIRST_RECORD_STUB, SECOND_RECORD_STUB, THIRD_RECORD_STUB, RECORD_REFUSED_STUB]
+    )
+
+
+def test_the_listing_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
+    """The other root holds the same stubs and a refusal of its own.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [entry.path.as_posix() for entry in source.listing(Selection())]
+    assert [path for path in found if not path.startswith(RECORD_ROOT)] == []
+
+
+def test_the_listing_narrows_to_a_subtree_on_postgresql(postgres_url: str) -> None:
+    """Both arms of the union carry the restriction.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = sorted(entry.stub for entry in source.listing(Selection(subtrees=('COISS_2002',))))
+    assert found == [THIRD_RECORD_STUB]
+
+
+def test_the_stream_reads_one_roots_values_on_postgresql(postgres_url: str) -> None:
+    """The other root records another offset for every one of these stubs.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = {
+            tuple(entry.metadata['offset'])
+            for entry in source.records(Selection(instrument='coiss'))
+            if isinstance(entry, NavRecord)
+        }
+    assert found == {RECORD_OFFSET}
+
+
+def test_the_stream_bounds_time_on_postgresql(postgres_url: str) -> None:
+    """A double comparison, against the epoch the document recorded.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = sorted(
+            entry.stub
+            for entry in source.records(Selection(stop_et=FIRST_MIDTIME_ET))
+            if isinstance(entry, NavRecord)
+        )
+    assert found == [FIRST_RECORD_STUB]
+
+
+def test_the_stream_reports_a_refusal_on_postgresql(postgres_url: str) -> None:
+    """The refused file of this root, and not the one the other root refused.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [
+            entry.stub for entry in source.records(Selection()) if isinstance(entry, UnreadableFile)
+        ]
+    assert found == [RECORD_REFUSED_STUB]
+
+
+def test_named_stubs_come_back_in_the_order_named_on_postgresql(postgres_url: str) -> None:
+    """Bound as a list of keys, and put back into the order a caller named them.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    named = (SECOND_RECORD_STUB, FIRST_RECORD_STUB, THIRD_RECORD_STUB)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [entry.stub for entry in source.records(Selection(stubs=named))]
+    assert found == list(named)
+
+
+def test_a_named_stub_reads_this_roots_row_on_postgresql(postgres_url: str) -> None:
+    """The other root holds the same key, recording another offset.
+
+    Read against the root whose rows are written *first*.  The batch read builds
+    what it found with a dictionary update, so a query that dropped the root
+    half of the key would be answered by whichever row came back last, and
+    asking for the root that was written last would be answered correctly by the
+    defect.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [
+            tuple(entry.metadata['offset'])
+            for entry in source.records(Selection(stubs=(FIRST_RECORD_STUB,)))
+            if isinstance(entry, NavRecord)
+        ]
+    assert found == [RECORD_OFFSET]
+
+
+def test_one_image_is_read_for_one_root_on_postgresql(postgres_url: str) -> None:
+    """The per-image lookup joins both tables onto a key that carries the root.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_OTHER_ROOT) as source:
+        found = source.record(FIRST_RECORD_STUB)
+    assert tuple(found.metadata['offset']) == OTHER_RECORD_OFFSET
+
+
+def test_the_other_roots_refusal_is_not_this_ones_on_postgresql(postgres_url: str) -> None:
+    """A refusal lookup blind to the root would fail an image this root has no file for.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with (
+        _record_source(postgres_url, RECORD_ROOT) as source,
+        pytest.raises(FileNotFoundError, match=OTHER_REFUSED_STUB),
+    ):
+        source.record(OTHER_REFUSED_STUB)
+
+
+def test_a_run_puts_the_records_in_path_order_on_postgresql(postgres_url: str) -> None:
+    """No statement sorts, so the order a run works in is the one it imposes itself.
+
+    A server sorts text under its own collation, which is why nothing here asks
+    it to; the rows are written in reverse of their path order, so a run that
+    took the order it was handed would be caught.  Asserted through the function
+    the kernel writer collects its mission with, because the ordering is that
+    run's guarantee rather than the source's.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        records, _unreadable = read_whole_mission(source.records(Selection(instrument='coiss')))
+    paths = [record.path.as_posix() for record in records]
+    assert paths == sorted(paths)
+
+
+def test_a_stream_over_a_table_this_account_cannot_read_is_reported_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """A missing relation is a different exception class here, and is still translated.
+
+    The refusal reaches the caller out of the stream rather than out of the
+    call that built it, which is where a failure of a lazily executed query
+    arrives.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with opened(postgres_url) as engine, engine.begin() as connection:
+        connection.execute(sqlalchemy.text(f'DROP TABLE {FAILED_FILES.name}'))
+    with (
+        _record_source(postgres_url, RECORD_ROOT) as source,
+        pytest.raises(ValueError, match='could not be read'),
+    ):
+        list(source.records(Selection()))
+
+
+def test_a_named_stub_only_the_other_root_holds_yields_nothing_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """Naming a key does not stop it being a key under one root.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = list(source.records(Selection(stubs=(ONLY_OTHER_ROOT_STUB,))))
+    assert found == []
+
+
+def test_a_named_stub_only_the_other_root_refused_yields_nothing_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """The refusal half of a named-stub read carries its own root term.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = list(source.records(Selection(stubs=(OTHER_REFUSED_STUB,))))
+    assert found == []

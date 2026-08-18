@@ -2,15 +2,16 @@
 
 The rows are written directly rather than ingested, because what is under test
 is what the query reads and not what a walk records: a refusal with no image row
-beside it, an image whose ``status_error`` is NULL, a stub with no volume, and a
+beside it, an image whose ``status_error`` is NULL, a stub with no subtree, and a
 second root holding a row for every stub the first one holds.
 
 That second root is why every test here builds two.  The index is keyed by root
 and stub together, and a query that filtered on the stub alone would answer with
 the other root's rows while every single-root assertion stayed green.  The other
 root is therefore stocked so that every filter's answer changes if one of its
-rows leaks: it holds a fatal SPICE error for each stub, and a document for the
-one stub the first root deliberately has none of.
+rows leaks: it holds a fatal SPICE error for each stub, and a document for each
+of the two stubs the first root deliberately has none of -- one under the
+selected subtree and one under the subtree the enumeration passes over.
 
 The run rows are stocked the same way, because the run table is keyed by root as
 well and is read by a query of its own.  The other root is always passed over
@@ -38,24 +39,31 @@ ROOT = '/data/nav-results'
 OTHER_ROOT = '/data/other-nav-results'
 """A second ingested root, holding a row for every stub the first one holds."""
 
-VOLUME = 'COISS_2001'
-"""The selected volume."""
+SUBTREE = 'COISS_2001'
+"""The selected subtree."""
 
-OTHER_VOLUME = 'COISS_2002'
-"""A volume of the same root that the enumeration did not select."""
+OTHER_SUBTREE = 'COISS_2002'
+"""A subtree of the same root that the enumeration did not select."""
 
-SUCCESS = f'{VOLUME}/data/a/N1000000001_1_CALIB'
-SECOND_SUCCESS = f'{VOLUME}/data/a/N1000000002_1_CALIB'
-FAILURE = f'{VOLUME}/data/a/N1000000003_1_CALIB'
-SPICE_ERROR = f'{VOLUME}/data/b/N1000000004_1_CALIB'
-NONSPICE_ERROR = f'{VOLUME}/data/b/N1000000005_1_CALIB'
-ERROR_WITHOUT_STATUS_ERROR = f'{VOLUME}/data/b/N1000000006_1_CALIB'
-REFUSED = f'{VOLUME}/data/b/N1000000007_1_CALIB'
-REFUSED_OTHER_VOLUME = f'{OTHER_VOLUME}/data/b/N1000000008_1_CALIB'
-UNSELECTED_VOLUME_IMAGE = f'{OTHER_VOLUME}/data/a/N1000000009_1_CALIB'
-NO_VOLUME = 'scene_0001'
-ONLY_IN_THE_OTHER_ROOT = f'{VOLUME}/data/c/N1000000010_1_CALIB'
-ONLY_REFUSED_IN_THE_OTHER_ROOT = f'{VOLUME}/data/c/N1000000011_1_CALIB'
+SUCCESS = f'{SUBTREE}/data/a/N1000000001_1_CALIB'
+SECOND_SUCCESS = f'{SUBTREE}/data/a/N1000000002_1_CALIB'
+FAILURE = f'{SUBTREE}/data/a/N1000000003_1_CALIB'
+SPICE_ERROR = f'{SUBTREE}/data/b/N1000000004_1_CALIB'
+NONSPICE_ERROR = f'{SUBTREE}/data/b/N1000000005_1_CALIB'
+ERROR_WITHOUT_STATUS_ERROR = f'{SUBTREE}/data/b/N1000000006_1_CALIB'
+REFUSED = f'{SUBTREE}/data/b/N1000000007_1_CALIB'
+REFUSED_OTHER_SUBTREE = f'{OTHER_SUBTREE}/data/b/N1000000008_1_CALIB'
+UNSELECTED_SUBTREE_IMAGE = f'{OTHER_SUBTREE}/data/a/N1000000009_1_CALIB'
+NO_SUBTREE = 'scene_0001'
+ONLY_IN_THE_OTHER_ROOT = f'{SUBTREE}/data/c/N1000000010_1_CALIB'
+ONLY_REFUSED_IN_THE_OTHER_ROOT = f'{SUBTREE}/data/c/N1000000011_1_CALIB'
+ONLY_IN_THE_OTHER_ROOTS_OTHER_SUBTREE = f'{OTHER_SUBTREE}/data/c/N1000000012_1_CALIB'
+"""A stub only the other root holds, under the subtree the enumeration did not select.
+
+It is what makes the answer to ``select the other subtree`` a root-aware one:
+the two roots agree about every other stub of that subtree, so a query that
+dropped its root predicate would answer identically without it.
+"""
 
 EVERY_STUB = (
     SUCCESS,
@@ -65,10 +73,11 @@ EVERY_STUB = (
     NONSPICE_ERROR,
     ERROR_WITHOUT_STATUS_ERROR,
     REFUSED,
-    REFUSED_OTHER_VOLUME,
-    UNSELECTED_VOLUME_IMAGE,
-    NO_VOLUME,
+    REFUSED_OTHER_SUBTREE,
+    UNSELECTED_SUBTREE_IMAGE,
+    NO_SUBTREE,
     ONLY_IN_THE_OTHER_ROOT,
+    ONLY_IN_THE_OTHER_ROOTS_OTHER_SUBTREE,
 )
 """Every stub either root holds, so the other root can be stocked with all of them."""
 
@@ -90,8 +99,8 @@ moment instead of that root's own.
 """
 
 
-def _volume_of(stub: str) -> str | None:
-    """Return the volume column value a stub gets, as the ingest derives it.
+def _subtree_of(stub: str) -> str | None:
+    """Return the subtree column value a stub gets, as the ingest derives it.
 
     Parameters:
         stub: The results path stub.
@@ -99,8 +108,8 @@ def _volume_of(stub: str) -> str | None:
     Returns:
         Its first path segment, or None when it carries no separator.
     """
-    volume, separator, _rest = stub.partition('/')
-    return volume if separator else None
+    subtree, separator, _rest = stub.partition('/')
+    return subtree if separator else None
 
 
 def _document(stub: str, **columns: Any) -> dict[str, Any]:
@@ -120,7 +129,7 @@ def _document(stub: str, **columns: Any) -> dict[str, Any]:
     return image_row(
         root_url=ROOT,
         results_path_stub=stub,
-        volume=_volume_of(stub),
+        subtree=_subtree_of(stub),
         **{'status': 'success', 'status_error': None, **columns},
     )
 
@@ -175,21 +184,21 @@ def two_roots(tmp_path: Path) -> str:
         _document(SPICE_ERROR, status='error', status_error=SPICE),
         _document(NONSPICE_ERROR, status='error', status_error='bad_pointing'),
         _document(ERROR_WITHOUT_STATUS_ERROR, status='error', status_error=None),
-        _document(UNSELECTED_VOLUME_IMAGE),
-        _document(NO_VOLUME),
+        _document(UNSELECTED_SUBTREE_IMAGE),
+        _document(NO_SUBTREE),
     ]
     refusals = [
         {
             'root_url': root_url,
             'results_path_stub': stub,
             'reason': 'not a current-schema navigation document',
-            'volume': _volume_of(stub),
+            'subtree': _subtree_of(stub),
             'mtime_ns': 1,
             'size_bytes': 2,
         }
         for root_url, stub in (
             (ROOT, REFUSED),
-            (ROOT, REFUSED_OTHER_VOLUME),
+            (ROOT, REFUSED_OTHER_SUBTREE),
             # The other root refuses a file the root under test holds nothing
             # for, so a refusal read without its root shows up as a document
             # that exists under a root that has none.
@@ -203,7 +212,7 @@ def two_roots(tmp_path: Path) -> str:
         image_row(
             root_url=OTHER_ROOT,
             results_path_stub=stub,
-            volume=_volume_of(stub),
+            subtree=_subtree_of(stub),
             status='error',
             status_error=SPICE,
         )
@@ -221,7 +230,7 @@ def two_roots(tmp_path: Path) -> str:
 
 
 def _stubs(url: str, **filters: bool) -> ResultStubs:
-    """Read the root under test, selecting its one selected volume.
+    """Read the root under test, selecting its one selected subtree.
 
     Parameters:
         url: The index to read.
@@ -230,7 +239,7 @@ def _stubs(url: str, **filters: bool) -> ResultStubs:
     Returns:
         What the query answered.
     """
-    return read_result_stubs(url, ROOT, [VOLUME], **filters)
+    return read_result_stubs(url, ROOT, [SUBTREE], **filters)
 
 
 def test_an_ingested_document_counts_as_present(two_roots: str) -> None:
@@ -253,55 +262,61 @@ def test_another_roots_refusal_is_not_this_roots_document(two_roots: str) -> Non
     assert ONLY_REFUSED_IN_THE_OTHER_ROOT not in _stubs(two_roots).with_metadata
 
 
-def test_the_query_does_not_fetch_an_unselected_volume(two_roots: str) -> None:
-    """The volume restriction is in the query and not only in what is kept from it.
+def test_the_query_does_not_fetch_an_unselected_subtree(two_roots: str) -> None:
+    """The subtree restriction is in the query and not only in what is kept from it.
 
-    The saving is that an enumeration of one volume does not pay to read the
-    rows of every other volume of the root, and a restriction applied only to
+    The saving is that an enumeration of one subtree does not pay to read the
+    rows of every other subtree of the root, and a restriction applied only to
     the rows already fetched answers identically while paying for all of them.
     """
-    query = _stub_query(ROOT, [VOLUME], sqlalchemy.false())
+    query = _stub_query(ROOT, [SUBTREE], sqlalchemy.false())
     with opened(two_roots) as engine, engine.connect() as connection:
         fetched = {str(row[0]) for row in connection.execute(query)}
-    assert UNSELECTED_VOLUME_IMAGE not in fetched
+    assert UNSELECTED_SUBTREE_IMAGE not in fetched
 
 
-def test_an_image_of_an_unselected_volume_is_not_read(two_roots: str) -> None:
-    """The tree walk lists the selected volumes' directories and no others."""
-    assert UNSELECTED_VOLUME_IMAGE not in _stubs(two_roots).with_metadata
+def test_an_image_of_an_unselected_subtree_is_not_read(two_roots: str) -> None:
+    """The tree walk lists the selected subtrees' directories and no others."""
+    assert UNSELECTED_SUBTREE_IMAGE not in _stubs(two_roots).with_metadata
 
 
-def test_a_refusal_of_an_unselected_volume_is_not_read(two_roots: str) -> None:
-    """A refused file is under a volume like any other, and is restricted to it."""
-    assert REFUSED_OTHER_VOLUME not in _stubs(two_roots).with_metadata
+def test_a_refusal_of_an_unselected_subtree_is_not_read(two_roots: str) -> None:
+    """A refused file is under a subtree like any other, and is restricted to it."""
+    assert REFUSED_OTHER_SUBTREE not in _stubs(two_roots).with_metadata
 
 
-def test_the_query_does_not_fetch_an_unselected_volumes_refusal(two_roots: str) -> None:
+def test_the_query_does_not_fetch_an_unselected_subtrees_refusal(two_roots: str) -> None:
     """The restriction is in the query for the refusals as much as for the images.
 
     A root whose non-navigation files outnumber its results is exactly the tree
-    the refusal table was made for, and a single-volume enumeration that fetched
+    the refusal table was made for, and a single-subtree enumeration that fetched
     every refusal in the root would pay for all of them on every run.
     """
-    query = _stub_query(ROOT, [VOLUME], sqlalchemy.false())
+    query = _stub_query(ROOT, [SUBTREE], sqlalchemy.false())
     with opened(two_roots) as engine, engine.connect() as connection:
         fetched = {str(row[0]) for row in connection.execute(query)}
-    assert REFUSED_OTHER_VOLUME not in fetched
+    assert REFUSED_OTHER_SUBTREE not in fetched
 
 
-def test_a_stub_with_no_volume_is_not_read(two_roots: str) -> None:
-    """A scene name with no volume above it sits outside every walked directory."""
-    assert NO_VOLUME not in _stubs(two_roots).with_metadata
+def test_a_stub_with_no_subtree_is_not_read(two_roots: str) -> None:
+    """A scene name with no subtree above it sits outside every walked directory."""
+    assert NO_SUBTREE not in _stubs(two_roots).with_metadata
 
 
-def test_selecting_a_volume_reads_that_volume(two_roots: str) -> None:
-    """The unselected volume's images are readable when it is the one selected."""
-    stubs = read_result_stubs(two_roots, ROOT, [OTHER_VOLUME])
-    assert stubs.with_metadata == frozenset({UNSELECTED_VOLUME_IMAGE, REFUSED_OTHER_VOLUME})
+def test_selecting_a_subtree_reads_that_subtree_of_this_root(two_roots: str) -> None:
+    """The unselected subtree's files are readable when it is the one selected.
+
+    Stated as the whole set, and the other root holds a file of that subtree
+    this one does not, so the subtree predicate is pinned together with the root
+    predicate: a query restricted by subtree alone answers with the other root's
+    file as well.
+    """
+    stubs = read_result_stubs(two_roots, ROOT, [OTHER_SUBTREE])
+    assert stubs.with_metadata == frozenset({UNSELECTED_SUBTREE_IMAGE, REFUSED_OTHER_SUBTREE})
 
 
-def test_no_volume_selected_reads_nothing(two_roots: str) -> None:
-    """An enumeration that selected no volume walks no directory."""
+def test_no_subtree_selected_reads_nothing(two_roots: str) -> None:
+    """An enumeration that selected no subtree walks no directory."""
     assert read_result_stubs(two_roots, ROOT, []).with_metadata == frozenset()
 
 
@@ -362,7 +377,7 @@ def test_the_negative_error_filter_answers_for_this_root_only(tmp_path: Path) ->
     So this pair holds one stub that errored here and finished there, and one
     that finished here and errored there, and the answer is stated as the whole
     set.  The second stub is what makes the assertion a positive one: a query
-    that read no row at all -- the volume predicate emptied, the root predicate
+    that read no row at all -- the subtree predicate emptied, the root predicate
     inverted -- answers with the empty set, which a test that only denied the
     other root's stub would have accepted.
 
@@ -379,14 +394,14 @@ def test_the_negative_error_filter_answers_for_this_root_only(tmp_path: Path) ->
                 image_row(
                     root_url=OTHER_ROOT,
                     results_path_stub=SUCCESS,
-                    volume=VOLUME,
+                    subtree=SUBTREE,
                     status='success',
                     status_error=None,
                 ),
                 image_row(
                     root_url=OTHER_ROOT,
                     results_path_stub=SECOND_SUCCESS,
-                    volume=VOLUME,
+                    subtree=SUBTREE,
                     status='error',
                     status_error=SPICE,
                 ),
@@ -509,7 +524,7 @@ def test_the_time_comes_from_the_newest_pass_over_the_root(tmp_path: Path) -> No
     of time.
     """
     url = _index_with_runs(tmp_path, [EARLIER_INGESTED, INGESTED])
-    stubs = read_result_stubs(url, ROOT, [VOLUME])
+    stubs = read_result_stubs(url, ROOT, [SUBTREE])
     assert stubs.ingested_utc == INGESTED
 
 
@@ -520,14 +535,14 @@ def test_another_roots_pass_is_not_when_this_answer_was_recorded(tmp_path: Path)
     another root's: a time read without the root dates this answer by whenever
     somebody last passed over an unrelated tree.
     """
-    stubs = read_result_stubs(_index_with_runs(tmp_path, [INGESTED]), ROOT, [VOLUME])
+    stubs = read_result_stubs(_index_with_runs(tmp_path, [INGESTED]), ROOT, [SUBTREE])
     assert stubs.ingested_utc == INGESTED
 
 
 def test_a_root_with_no_completed_ingest_is_refused(two_roots: str) -> None:
     """Absence of a row means "never navigated" only under a root that was walked."""
     with pytest.raises(ValueError, match='no completed ingest') as excinfo:
-        read_result_stubs(two_roots, '/data/never-ingested', [VOLUME])
+        read_result_stubs(two_roots, '/data/never-ingested', [SUBTREE])
     assert '/data/never-ingested' in str(excinfo.value)
 
 
@@ -559,26 +574,26 @@ def test_a_failing_run_query_is_reported_rather_than_raised_as_it_came(two_roots
     name its exceptions to report on them.
     """
     with pytest.raises(ValueError, match='could not be read'):
-        read_result_stubs(_without_a_table(two_roots, 'ingest_runs'), ROOT, [VOLUME])
+        read_result_stubs(_without_a_table(two_roots, 'ingest_runs'), ROOT, [SUBTREE])
 
 
 def test_a_failing_stub_query_is_reported_the_same_way(two_roots: str) -> None:
     """The refusal covers every query the read issues, not only the first."""
     with pytest.raises(ValueError, match='could not be read'):
-        read_result_stubs(_without_a_table(two_roots, 'failed_files'), ROOT, [VOLUME])
+        read_result_stubs(_without_a_table(two_roots, 'failed_files'), ROOT, [SUBTREE])
 
 
 def test_a_failure_names_what_the_database_said(two_roots: str) -> None:
     """A refusal that did not name the missing table would leave nothing to act on."""
     with pytest.raises(ValueError) as excinfo:
-        read_result_stubs(_without_a_table(two_roots, 'failed_files'), ROOT, [VOLUME])
+        read_result_stubs(_without_a_table(two_roots, 'failed_files'), ROOT, [SUBTREE])
     assert 'failed_files' in str(excinfo.value)
 
 
 def test_no_database_exception_escapes_the_read(two_roots: str) -> None:
     """The type is the one the caller can name, and not a subclass of the one it cannot."""
     with pytest.raises(ValueError) as excinfo:
-        read_result_stubs(_without_a_table(two_roots, 'ingest_runs'), ROOT, [VOLUME])
+        read_result_stubs(_without_a_table(two_roots, 'ingest_runs'), ROOT, [SUBTREE])
     assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
 
 
@@ -586,7 +601,7 @@ def test_an_index_that_cannot_be_opened_is_an_error(tmp_path: Path) -> None:
     """A resolved URL that will not open fails the run rather than reading files."""
     url = sqlite_url_for(tmp_path / 'absent.sqlite3')
     with pytest.raises(ValueError, match='sd_stats_ingest') as excinfo:
-        read_result_stubs(url, ROOT, [VOLUME])
+        read_result_stubs(url, ROOT, [SUBTREE])
     assert 'absent.sqlite3' in str(excinfo.value)
 
 
@@ -610,19 +625,19 @@ def test_a_relative_root_names_the_root_the_ingest_recorded(
                 image_row(
                     root_url=root_url,
                     results_path_stub=SUCCESS,
-                    volume=VOLUME,
+                    subtree=SUBTREE,
                 )
             ],
         )
         connection.execute(INGEST_RUNS.insert(), [_completed_run(root_url)])
     monkeypatch.chdir(tmp_path)
-    stubs = read_result_stubs(url, root.name, [VOLUME])
+    stubs = read_result_stubs(url, root.name, [SUBTREE])
     assert SUCCESS in stubs.with_metadata
 
 
 def test_a_trailing_separator_names_the_root_the_ingest_recorded(two_roots: str) -> None:
     """One program writes the trailing slash on the root and another does not."""
-    stubs = read_result_stubs(two_roots, f'{ROOT}/', [VOLUME])
+    stubs = read_result_stubs(two_roots, f'{ROOT}/', [SUBTREE])
     assert SUCCESS in stubs.with_metadata
 
 

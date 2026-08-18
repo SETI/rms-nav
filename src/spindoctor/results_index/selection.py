@@ -3,7 +3,7 @@
 The selection filters ask two questions about each candidate image: whether its
 metadata document exists under the results root, and -- for the images whose
 document exists -- what fatal error, if any, that document records.  Asked of
-the tree, those cost one directory walk per selected volume plus
+the tree, those cost one directory walk per selected subtree plus
 a batched download of every document an error filter has to look inside.  Asked
 of the index, they cost the one query this module issues, whose answer is two
 sets of stubs the filter then tests membership in.
@@ -11,7 +11,7 @@ sets of stubs the filter then tests membership in.
 Both tables that record a file are read.  A document the ingest refused is a
 file that exists, and the tree answers a presence filter with the file rather
 than with its contents, so a refusal recorded in ``failed_files`` counts towards
-presence exactly as an ingested document does, and carries the volume it lives
+presence exactly as an ingested document does, and carries the subtree it lives
 under for the same reason.
 
 What the index answers differently
@@ -178,7 +178,7 @@ def _error_condition(
 
 
 def _stub_query(
-    root_url: str, volumes: Sequence[str], error_condition: sqlalchemy.ColumnElement[bool]
+    root_url: str, subtrees: Sequence[str], error_condition: sqlalchemy.ColumnElement[bool]
 ) -> sqlalchemy.CompoundSelect[tuple[str, bool]]:
     """Build the one query the filters are answered from.
 
@@ -186,24 +186,24 @@ def _stub_query(
     together and one database serves several roots: a query that asked about the
     stub alone would answer with another root's images.
 
-    Both arms are restricted to the selected volumes, which is the restriction
-    the tree walk applies by walking only those volumes' directories.  A stub
-    with no volume above it -- a bare scene name -- is under no walked directory
+    Both arms are restricted to the selected subtrees, which is the restriction
+    the tree walk applies by walking only those subtrees' directories.  A stub
+    with no subtree above it -- a bare scene name -- is under no walked directory
     and is matched by neither arm, because SQL's ``IN`` is false for NULL.
 
     Parameters:
         root_url: The normalized root the candidates live under.
-        volumes: Volume names the enumeration selected.
+        subtrees: Top-level directories of the root the enumeration selected.
         error_condition: What makes an image row match the error filters.
 
     Returns:
-        A query yielding one row per recorded file of the selected volumes,
+        A query yielding one row per recorded file of the selected subtrees,
         carrying its stub and whether it matches the error filters.
     """
     documents = sqlalchemy.select(
         IMAGES.c.results_path_stub,
         error_condition.label('matches_error'),
-    ).where(IMAGES.c.root_url == root_url, IMAGES.c.volume.in_(volumes))
+    ).where(IMAGES.c.root_url == root_url, IMAGES.c.subtree.in_(subtrees))
     # A refused file records no status, so it matches no error filter -- the
     # one for a document recording no fatal error included, since what such a
     # file records is unknown rather than known to be an outcome, which is also
@@ -211,14 +211,14 @@ def _stub_query(
     refusals = sqlalchemy.select(
         FAILED_FILES.c.results_path_stub,
         sqlalchemy.false(),
-    ).where(FAILED_FILES.c.root_url == root_url, FAILED_FILES.c.volume.in_(volumes))
+    ).where(FAILED_FILES.c.root_url == root_url, FAILED_FILES.c.subtree.in_(subtrees))
     return documents.union_all(refusals)
 
 
 def read_result_stubs(
     url: str,
     nav_results_root: str | Path | FCPath,
-    volumes: Iterable[str],
+    subtrees: Iterable[str],
     *,
     has_offset_error: bool = False,
     has_no_offset_error: bool = False,
@@ -227,7 +227,7 @@ def read_result_stubs(
 ) -> ResultStubs:
     """Read what a results root holds, for one enumeration's selection filters.
 
-    One query per enumeration, rather than a walk per volume and a download per
+    One query per enumeration, rather than a walk per subtree and a download per
     document.  The index is opened, asked, and closed here, so the caller holds
     no database object and no connection outlives the answer.
 
@@ -241,8 +241,9 @@ def read_result_stubs(
             whatever spelling its holder has; it is normalized here, so a
             relative path or a trailing separator names the same root the
             ingest recorded.
-        volumes: Volume names the enumeration selected.  Only images under
-            these are read, exactly as only these are walked in the tree.
+        subtrees: Top-level directories of the root the enumeration selected.
+            Only images under these are read, exactly as only these are walked
+            in the tree.
         has_offset_error: Whether any fatal error is wanted.
         has_no_offset_error: Whether a document recording no fatal error is
             wanted.  A file the ingest refused records no outcome at all and
@@ -267,7 +268,7 @@ def read_result_stubs(
     root_url = normalize_root_url(nav_results_root)
     query = _stub_query(
         root_url,
-        list(volumes),
+        list(subtrees),
         _error_condition(
             has_offset_error=has_offset_error,
             has_no_offset_error=has_no_offset_error,

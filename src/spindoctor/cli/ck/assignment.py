@@ -52,10 +52,11 @@ from spindoctor.cli.ck.index import (
     CkFile,
     CkIndex,
 )
-from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
+from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.pool import furnished
 from spindoctor.cli.ck.segment import BASE_FRAME, resolve_sclk_id
 from spindoctor.spice_ids import FROZEN_ATTITUDE_CK_IDS
+from spindoctor.support.types import NDArrayFloatType
 
 # A candidate reproduces a recorded attitude when the rotation between the two
 # is smaller than this.  It is a reproduction bound, not a navigation bound:

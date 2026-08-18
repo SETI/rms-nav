@@ -33,7 +33,7 @@ than a marked ``images`` row precisely because absence of an ``images`` row is
 what a consumer reads as "this image was never navigated": a file with no usable
 data must leave that answer alone while still recording enough for the next
 ingest to skip it.  It also carries the one fact the walk knows about a file
-whatever the file says -- the volume it lives under -- because a selection
+whatever the file says -- the subtree it lives under -- because a selection
 filter asks about the file rather than about its contents, and a refused file
 is one the tree still holds.
 
@@ -88,7 +88,7 @@ __all__ = [
     'UNKNOWN_STATUS',
 ]
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 """Column-set version of the index.
 
 Incremented by any change to the column set of any table, and by any change to
@@ -148,9 +148,10 @@ IMAGES = sqlalchemy.Table(
     # from the document, so it is exact by construction.
     sqlalchemy.Column('root_url', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('results_path_stub', sqlalchemy.Text, primary_key=True),
-    # First path segment of the stub; NULL when the stub has no separator, which
-    # is what the simulated dataset's bare scene basenames produce.
-    sqlalchemy.Column('volume', sqlalchemy.Text),
+    # First path segment of the stub, which is the top-level directory of the
+    # results tree the image sits under; NULL when the stub has no separator,
+    # which is what the simulated dataset's bare scene basenames produce.
+    sqlalchemy.Column('subtree', sqlalchemy.Text),
     # Observation.
     sqlalchemy.Column('image_name', sqlalchemy.Text, nullable=False),
     sqlalchemy.Column('instrument', sqlalchemy.Text, nullable=False),
@@ -306,9 +307,9 @@ FAILED_FILES = sqlalchemy.Table(
     sqlalchemy.Column('results_path_stub', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('reason', sqlalchemy.Text, nullable=False),
     # First path segment of the stub, derived exactly as the images column is,
-    # so that a selection restricted to some volumes is one restriction in one
+    # so that a selection restricted to some subtrees is one restriction in one
     # query rather than a second pass over every refusal the root holds.
-    sqlalchemy.Column('volume', sqlalchemy.Text),
+    sqlalchemy.Column('subtree', sqlalchemy.Text),
     # The same two metrics images carries, for the same purpose: a file that
     # was refused and has not changed since is not read again.  Without them a
     # tree whose non-navigation files outnumber its results pays to re-read

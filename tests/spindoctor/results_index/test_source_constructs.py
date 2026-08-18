@@ -70,7 +70,6 @@ _KNOWN_MODULES = frozenset(
         'report_sections.py',
         'runs.py',
         'store.py',
-        'walk.py',
     }
 )
 """The modules the scan must reach, whatever else either package grows."""

@@ -256,12 +256,13 @@ the tree excludes as well. One query separates them:
     WHERE root_url = '/path/to/nav-results'
     GROUP BY reason;
 
-``root_url`` is the results root as the ingest normalized it: absolute, with any
-trailing ``/`` removed. A selection also enumerates volumes, so add ``AND volume
-IN (...)`` to bound what one selection can be short by; a row whose ``volume`` is
-NULL sits above every volume an enumeration walks and can shorten nothing.
+``root_url`` is the results root as the ingest normalized it: absolute and
+resolved, with any
+trailing ``/`` removed. A selection also enumerates volumes, so add ``AND subtree
+IN (...)`` to bound what one selection can be short by; a row whose ``subtree``
+is NULL sits above every volume an enumeration walks and can shorten nothing.
 
-``sd_stats_ingest`` reports that count, narrowed to the rows carrying a volume,
+``sd_stats_ingest`` reports that count, narrowed to the rows carrying a subtree,
 at the end of each root's pass, as the line ``Documents under ... an error
 filter reads from the results tree and not from this index``, which is the
 root's standing total rather than what that pass refused. The two differ, and

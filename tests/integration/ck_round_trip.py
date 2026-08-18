@@ -58,7 +58,7 @@ from filecache import FCPath
 from spindoctor.cli.ck.assignment import assign_images, output_basename
 from spindoctor.cli.ck.images import ImageEntry
 from spindoctor.cli.ck.index import build_ck_index
-from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
+from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.segment import (
     CkSegment,
     build_segment,
@@ -77,6 +77,7 @@ from spindoctor.obs import (
     ObsVoyagerISS,
 )
 from spindoctor.spice_ids import FROZEN_ATTITUDE_CK_IDS
+from spindoctor.support.types import NDArrayFloatType
 from tests.integration.sidecar import LibraryRoot, Sidecar, load_sidecar
 
 # The three steps, named as the driver names them on the command line.
