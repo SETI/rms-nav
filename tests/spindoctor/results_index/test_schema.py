@@ -316,6 +316,49 @@ def test_the_stub_alone_carries_an_index() -> None:
     assert len(stub_indexes) == 1
 
 
+@pytest.mark.parametrize(
+    ('table', 'name'),
+    [
+        pytest.param(IMAGES, 'ix_images_root_url_subtree', id='images'),
+        pytest.param(FAILED_FILES, 'ix_failed_files_root_url_subtree', id='failed-files'),
+    ],
+)
+def test_the_root_and_subtree_together_carry_an_index(table: sqlalchemy.Table, name: str) -> None:
+    """A selection restricted to some subtrees filters on the pair, in both tables.
+
+    The primary key's second column is the stub, so without this the restriction
+    has no ordered path to its rows and reads every row the root holds to find
+    them.  Both tables carry it because one selection asks both the same
+    question, and the shortfall it reports is counted from the half with no
+    images row.
+
+    Parameters:
+        table: The table under test.
+        name: The index it must carry.
+    """
+    pairs = [
+        index
+        for index in table.indexes
+        if [c.name for c in index.columns] == ['root_url', 'subtree']
+    ]
+    assert [index.name for index in pairs] == [name]
+
+
+def test_a_subtree_restricted_query_is_answered_through_that_index(sqlite_url: str) -> None:
+    """The declaration above is only worth its space if the planner reaches for it.
+
+    Parameters:
+        sqlite_url: URL of an empty database file.
+    """
+    query = sqlalchemy.select(IMAGES.c.results_path_stub).where(
+        IMAGES.c.root_url.in_([ROOT_URL]), IMAGES.c.subtree.in_(['COISS_2001'])
+    )
+    with opened(sqlite_url, create=True) as engine, engine.connect() as connection:
+        rendered = str(query.compile(engine, compile_kwargs={'literal_binds': True}))
+        plan = connection.execute(sqlalchemy.text(f'EXPLAIN QUERY PLAN {rendered}')).fetchall()
+    assert 'ix_images_root_url_subtree' in ' '.join(str(step) for step in plan)
+
+
 def test_the_stub_index_is_not_unique() -> None:
     """One stub legitimately appears once per ingested root."""
     stub_index = next(

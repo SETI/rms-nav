@@ -25,7 +25,10 @@ it.
 
 ``results_path_stub`` carries a non-unique index of its own, for lookups that
 already know the root, and ``image_date`` and ``instrument`` carry one each,
-because the report groups and filters on both across a whole root.
+because the report groups and filters on both across a whole root.  Both
+``images`` and ``failed_files`` carry ``(root_url, subtree)``, because a
+selection restricted to some of a root's top-level directories filters on that
+pair in both tables and the primary key's second column is the stub.
 
 ``failed_files`` keys on the same pair and holds the files that are not
 current-schema navigation documents at all.  It is a table of its own rather
@@ -241,6 +244,12 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('mtime_ns', sqlalchemy.BigInteger),
     sqlalchemy.Column('size_bytes', sqlalchemy.BigInteger),
     sqlalchemy.Index('ix_images_results_path_stub', 'results_path_stub'),
+    # The key's second column is the stub, so a selection restricted to some
+    # subtrees has no ordered path to its rows and reads every row under the
+    # root to find them.  Both tables carry the pair, because a selection asks
+    # both of them the same question and a shortfall is counted from the half
+    # that has no images row.
+    sqlalchemy.Index('ix_images_root_url_subtree', 'root_url', 'subtree'),
     sqlalchemy.Index('ix_images_image_date', 'image_date'),
     sqlalchemy.Index('ix_images_instrument', 'instrument'),
 )
@@ -316,6 +325,7 @@ FAILED_FILES = sqlalchemy.Table(
     # every one of them on every pass, forever.
     sqlalchemy.Column('mtime_ns', sqlalchemy.BigInteger),
     sqlalchemy.Column('size_bytes', sqlalchemy.BigInteger),
+    sqlalchemy.Index('ix_failed_files_root_url_subtree', 'root_url', 'subtree'),
 )
 """One row per file that could not be read as a current-schema document."""
 
