@@ -26,6 +26,7 @@ from spindoctor.nav_records import (
     Selection,
     TreeRecordSource,
     UnreadableFile,
+    read_document,
 )
 from spindoctor.nav_records import tree as tree_module
 
@@ -344,19 +345,74 @@ def test_a_file_that_is_not_valid_json_is_reported(
     assert reasons_of(found) == ['not valid JSON']
 
 
-def test_a_document_nested_past_the_recursion_limit_is_reported(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """The decoder reports more than malformed syntax, and this is not a reason to stop.
+NO_VALUE_CAME_OUT = [
+    pytest.param(RecursionError, id='the-decoder-gave-up-on-the-nesting'),
+    pytest.param(MemoryError, id='the-decoder-ran-out-of-memory'),
+]
+"""Every way a decoder ends with no value and no decoding error to report it by.
 
-    Twenty thousand nested arrays exhaust the recursion limit rather than
-    failing to parse, and what happened is the same thing the reason states: no
-    value came out of the file.
+Both are driven through the reader rather than provoked with a document,
+because how much nesting a decoder will follow and how much memory it will ask
+for are that decoder's own business: one interpreter recurses once per level of
+nesting and gives up part way down, another does not recurse at all and parses
+the same file to a value.  A document written to trigger either one measures
+the interpreter that reads it, where what is under test here is what this code
+does once the reader has raised.
+"""
+
+
+def _reader_failing_on(
+    monkeypatch: pytest.MonkeyPatch, failure: type[BaseException], stub: str
+) -> None:
+    """Make the document reader raise on one stub's document and read every other.
+
+    Parameters:
+        monkeypatch: Fixture the reader is replaced through.
+        failure: What reading that one document raises.
+        stub: Stub of the document that will not read.
     """
-    root = tmp_path / 'results'
-    write_text(root, FIRST_STUB, '[' * 20000 + ']' * 20000)
+    # The module's own name for it, so the replacement calls the reader rather
+    # than itself; the same object either way, since the module imports this one.
+    real_read = read_document
+
+    def failing(path: Any) -> dict[str, Any]:
+        if path.as_posix().endswith(f'{stub}{METADATA_SUFFIX}'):
+            raise failure('no value came out of it')
+        return real_read(path)
+
+    monkeypatch.setattr(tree_module, 'read_document', failing)
+
+
+@pytest.mark.parametrize('failure', NO_VALUE_CAME_OUT)
+def test_a_reader_that_produces_no_value_reports_the_file_it_was_reading(
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[BaseException],
+) -> None:
+    """The decoder fails in more ways than one, and only one of them is a decoding error.
+
+    What happened in all of them is the thing the reason states: no value came
+    out of the file.
+    """
+    root = two_volume_tree(tmp_path)
+    _reader_failing_on(monkeypatch, failure, FIRST_STUB)
     found = list(tree_source(root, quiet_logger).records(Selection()))
     assert reasons_of(found) == ['not valid JSON']
+
+
+@pytest.mark.parametrize('failure', NO_VALUE_CAME_OUT)
+def test_a_reader_that_produces_no_value_does_not_end_the_pass(
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[BaseException],
+) -> None:
+    """The whole point of naming them: one file the decoder gave up on costs only itself."""
+    root = two_volume_tree(tmp_path)
+    _reader_failing_on(monkeypatch, failure, FIRST_STUB)
+    found = list(tree_source(root, quiet_logger).records(Selection()))
+    assert stubs_of(records_of(found)) == [SECOND_STUB]
 
 
 def test_a_fault_in_the_reader_itself_is_not_reported_as_a_bad_document(

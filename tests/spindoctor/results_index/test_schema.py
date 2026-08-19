@@ -336,12 +336,15 @@ def test_the_root_and_subtree_together_carry_an_index(table: sqlalchemy.Table, n
         table: The table under test.
         name: The index it must carry.
     """
-    pairs = [
-        index
+    # Compared as a set because a table's indexes are one: a second index on
+    # the pair would otherwise make a list comparison pass or fail by iteration
+    # order rather than by what the table declares.
+    pairs = {
+        index.name
         for index in table.indexes
         if [c.name for c in index.columns] == ['root_url', 'subtree']
-    ]
-    assert [index.name for index in pairs] == [name]
+    }
+    assert pairs == {name}
 
 
 def test_a_subtree_restricted_query_is_answered_through_that_index(sqlite_url: str) -> None:

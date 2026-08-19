@@ -230,7 +230,17 @@ def test_the_run_orders_the_records_rather_than_trusting_their_order(tmp_path: P
     finally:
         engine.dispose()
     with open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS) as source:
+        # The premise, asserted rather than assumed: an unordered query is the
+        # server's to answer how it likes, and one that handed them back already
+        # sorted would leave the run's own sort untested and this test unable to
+        # fail.
+        handed = [
+            entry.path.as_posix()
+            for entry in source.records(Selection(instrument=MISSION))
+            if isinstance(entry, NavRecord)
+        ]
         documents, _ = _one_mission(source)
+    assert handed != sorted(handed)
     paths = [document.path.as_posix() for document in documents]
     assert paths == sorted(paths)
 
