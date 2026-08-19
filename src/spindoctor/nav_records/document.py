@@ -217,6 +217,13 @@ def stub_for_document(root: FCPath, path: FCPath) -> str:
 def read_document(path: FCPath) -> dict[str, Any]:
     """Read one navigation document.
 
+    The bytes are decoded as UTF-8 because that is what JSON is, so a document
+    says the same thing to every machine that reads it.  A reader left to the
+    encoding its machine prefers reads some other document out of the same
+    bytes, or none: which files are documents at all would then be a property of
+    the reader rather than of the tree, and two readers of one tree would not
+    agree on it.
+
     Parameters:
         path: The file to read.
 
@@ -224,6 +231,8 @@ def read_document(path: FCPath) -> dict[str, Any]:
         The document.
 
     Raises:
+        UnicodeDecodeError: If the bytes are not UTF-8, which is a file that is
+            not a JSON document whatever else it may be.
         ValueError: If the file does not hold a JSON object.  A file holding
             valid JSON that is not an object is not a document, and reading
             fields off one would fail later and further away.
@@ -231,7 +240,7 @@ def read_document(path: FCPath) -> dict[str, Any]:
             :exc:`FileNotFoundError`, which is what a caller distinguishing an
             unnavigated image from an unreadable one catches.
     """
-    document = json.loads(path.read_text())
+    document = json.loads(path.read_text(encoding='utf-8'))
     if not isinstance(document, dict):
         raise ValueError(f'holds a {type(document).__name__}, not a JSON object')
     return cast(dict[str, Any], document)

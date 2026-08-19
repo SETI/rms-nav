@@ -110,7 +110,7 @@ def write_text(root: Path, stub: str, text: str) -> Path:
     """
     path = root / f'{stub}{METADATA_SUFFIX}'
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding='utf-8')
     return path
 
 

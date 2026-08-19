@@ -12,11 +12,16 @@ not this run's business -- another mission's document, and a record outside the
 selection's span.
 """
 
+import json
+import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pdslogger
 import pytest
+from tests.conftest import child_interpreter_environment
 
 from spindoctor.nav_records import (
     METADATA_SUFFIX,
@@ -323,16 +328,150 @@ def test_one_named_record_whose_file_never_arrives_raises_rather_than_returning(
         source.record(FIRST_STUB)
 
 
+NON_ASCII_TEXT = 'phase angle 170\u00b0'
+"""One document's text, holding a character no ASCII reader can spell.
+
+Written as an escape so that this file itself is ASCII, and read back through
+the seam to say that the character came out of the document rather than out of
+the machine that read it.
+"""
+
+FOREIGN_ENCODING_ENVIRONMENT = {
+    'LC_ALL': 'C',
+    'PYTHONUTF8': '0',
+    'PYTHONCOERCECLOCALE': '0',
+}
+"""What gives a child interpreter a preferred encoding that is not UTF-8.
+
+Naming the C locale is not enough on its own: an interpreter told to use it
+coerces it to a UTF-8 locale and turns on its own UTF-8 mode, so both of those
+are turned off as well.  What is left is the ASCII that locale names, which is
+the one encoding other than UTF-8 every machine this suite runs on can prefer:
+the Western European encodings, which decode a document's bytes into some other
+document rather than refusing them, need locales a machine has only if somebody
+generated them.
+"""
+
+FOREIGN_ENCODING_PROBE = """
+import codecs
+import json
+import locale
+import sys
+
+import pdslogger
+
+from spindoctor.nav_records import NavRecord, Selection, TreeRecordSource, UnreadableFile
+
+found = list(TreeRecordSource([sys.argv[1]], logger=pdslogger.NullLogger()).records(Selection()))
+print(
+    json.dumps(
+        {
+            'encoding': codecs.lookup(locale.getpreferredencoding(False)).name,
+            'reasons': [one.reason for one in found if isinstance(one, UnreadableFile)],
+            'texts': [
+                one.metadata['status_reason'] for one in found if isinstance(one, NavRecord)
+            ],
+        }
+    )
+)
+"""
+"""Read a results tree in a fresh interpreter and report what came out of it."""
+
+PROBE_TIMEOUT_S = 120.0
+"""A probe that hangs would otherwise stall the run with no failure to read."""
+
+
+@dataclass(frozen=True)
+class ForeignEncodingRead:
+    """What a reader running under a foreign preferred encoding made of one tree.
+
+    Parameters:
+        encoding: The preferred encoding that reader ran under, under the name
+            its codec is registered by rather than the one the machine spells
+            it: one encoding has several spellings and they differ by platform.
+        reasons: Why each file it would not read is not a record.
+        texts: The one text field of each record it read.
+    """
+
+    encoding: str
+    reasons: list[str]
+    texts: list[str]
+
+
+@pytest.fixture(scope='module')
+def read_under_a_foreign_encoding(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> ForeignEncodingRead:
+    """Read a tree of two files in an interpreter whose preferred encoding is not UTF-8.
+
+    The reader is a real subprocess because a preferred encoding is settled
+    when an interpreter starts and cannot be changed underneath one that is
+    already running.  Its environment names this checkout, so it answers for
+    this code rather than for an installed copy.
+
+    The tree holds a document whose bytes are UTF-8 and a file whose bytes are
+    not text at all, which are the two answers this reader has to get right
+    whatever machine it runs on.
+
+    Parameters:
+        tmp_path_factory: Fixture the tree is written under, at module scope so
+            that one subprocess answers for every assertion about it.
+
+    Returns:
+        What the reader reported.
+    """
+    root = tmp_path_factory.mktemp('foreign_encoding') / 'results'
+    write_text(
+        root, FIRST_STUB, json.dumps(document(status_reason=NON_ASCII_TEXT), ensure_ascii=False)
+    )
+    not_text = root / f'{SECOND_STUB}{METADATA_SUFFIX}'
+    not_text.parent.mkdir(parents=True, exist_ok=True)
+    not_text.write_bytes(b'\xff\xfe\x00\x01')
+    completed = subprocess.run(
+        [sys.executable, '-c', FOREIGN_ENCODING_PROBE, str(root)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=PROBE_TIMEOUT_S,
+        env={**child_interpreter_environment(), **FOREIGN_ENCODING_ENVIRONMENT},
+    )
+    # check=False so a failing probe reports its own stderr instead of a bare
+    # CalledProcessError that hides why the reader stopped.
+    assert completed.returncode == 0, completed.stderr
+    return ForeignEncodingRead(**json.loads(completed.stdout))
+
+
+def test_the_probe_ran_under_an_encoding_that_is_not_utf_8(
+    read_under_a_foreign_encoding: ForeignEncodingRead,
+) -> None:
+    """The claims below are about a reader whose machine prefers another encoding.
+
+    An interpreter that settled on UTF-8 after all would make both of them pass
+    for the reason every reader on this machine passes them, which is the
+    machine's answer rather than this code's.
+    """
+    assert read_under_a_foreign_encoding.encoding == 'ascii'
+
+
 def test_a_file_whose_bytes_will_not_read_as_text_is_reported(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+    read_under_a_foreign_encoding: ForeignEncodingRead,
 ) -> None:
     """It names no image, so there is nothing for a run to omit and nothing to raise."""
-    root = tmp_path / 'results'
-    path = root / f'{FIRST_STUB}{METADATA_SUFFIX}'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b'\xff\xfe\x00\x01')
-    found = list(tree_source(root, quiet_logger).records(Selection()))
-    assert reasons_of(found) == ['unreadable']
+    assert read_under_a_foreign_encoding.reasons == ['unreadable']
+
+
+def test_a_document_says_the_same_thing_to_a_reader_of_any_encoding(
+    read_under_a_foreign_encoding: ForeignEncodingRead,
+) -> None:
+    """A document is JSON and JSON is UTF-8, so what it holds is not the reader's to decide.
+
+    A reader that decodes by what its machine prefers reads another document out
+    of these bytes or refuses them, and the ingest reading the same tree beside
+    it decodes as UTF-8 and reads this one -- so the two halves of the seam would
+    disagree about what the tree holds and about which of its files are
+    documents at all.
+    """
+    assert read_under_a_foreign_encoding.texts == [NON_ASCII_TEXT]
 
 
 def test_a_file_that_is_not_valid_json_is_reported(
