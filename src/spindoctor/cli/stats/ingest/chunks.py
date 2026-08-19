@@ -126,13 +126,15 @@ def _read_document(local_path: Path, source: MetadataSource) -> ImageRows:
     except json.JSONDecodeError as exc:
         raise MetadataDocumentError(NOT_VALID_JSON, source_file=source.source_file) from exc
     except Exception as exc:
-        # The decoder reports more than malformed syntax.  Twenty thousand
-        # nested objects exhaust the recursion limit rather than failing to
-        # parse, and a decoder that runs out of memory says so its own way.
-        # None of them is a reason to end the run.  The reason names the parse
-        # and not the schema, because what happened is that no value came out
-        # of the file: nothing read a ``status`` out of it here, and nothing
-        # reading the tree reads one out of it either.
+        # The decoder reports more than malformed syntax.  A decoder that
+        # recurses once per level of nesting exhausts the recursion limit on a
+        # deeply nested document rather than failing to parse it, and one that
+        # runs out of memory says so its own way; how deep is deep enough is the
+        # decoder's business and not this code's.  None of them is a reason to
+        # end the run.  The reason names the parse and not the schema, because
+        # what happened is that no value came out of the file: nothing read a
+        # ``status`` out of it here, and nothing reading the tree reads one out
+        # of it either.
         raise MetadataDocumentError(
             f'{NOT_VALID_JSON} ({type(exc).__name__} while parsing it)',
             source_file=source.source_file,

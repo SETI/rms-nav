@@ -201,11 +201,13 @@ def test_an_unenumerated_failure_costs_only_its_own_file(
 
 
 def _tree_with_unparseable_nesting(tmp_path: Path) -> Path:
-    """Write a tree holding one document and one file the JSON decoder gives up on.
+    """Write a tree holding one document and one file no JSON value comes out of.
 
-    Twenty thousand opening braces exhaust the decoder's recursion limit rather
-    than failing to parse, so the decoder raises something other than the one
-    exception a decode guard names.
+    Twenty thousand opening braces and nothing else.  How a decoder gives up on
+    them is its own business: one that recurses once per level of nesting
+    exhausts the recursion limit part way down, and one that does not recurse
+    reports the value that never arrived.  The guard under test names neither,
+    because what it charges the file for is that nothing was parsed out of it.
 
     Parameters:
         tmp_path: Directory the tree lives under.
@@ -223,10 +225,25 @@ def _tree_with_unparseable_nesting(tmp_path: Path) -> Path:
 def test_a_document_the_decoder_gives_up_on_costs_only_itself(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """Only one of the decoder's failures is a decoding error; the run outlives all."""
+    """The file is charged and the run reads the rest, however the decoder gave up."""
     root = _tree_with_unparseable_nesting(tmp_path)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     assert (counts.files_ingested, counts.files_failed) == (1, 1)
+
+
+def test_a_document_the_decoder_gives_up_on_is_charged_to_the_parse(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """One reason covers every way a decoder ends with no value, so a tally reads as one.
+
+    The reason it carries is read on its prefix rather than whole: a decoder that
+    raises something other than a decoding error has that named after it, and
+    which decoders do is not this code's to say.
+    """
+    root = _tree_with_unparseable_nesting(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    (reason,) = counts.failures_by_reason
+    assert reason.startswith('not valid JSON')
 
 
 def test_a_document_the_decoder_gives_up_on_leaves_a_completed_run(
