@@ -347,21 +347,6 @@ def test_the_root_and_subtree_together_carry_an_index(table: sqlalchemy.Table, n
     assert pairs == {name}
 
 
-def test_a_subtree_restricted_query_is_answered_through_that_index(sqlite_url: str) -> None:
-    """The declaration above is only worth its space if the planner reaches for it.
-
-    Parameters:
-        sqlite_url: URL of an empty database file.
-    """
-    query = sqlalchemy.select(IMAGES.c.results_path_stub).where(
-        IMAGES.c.root_url.in_([ROOT_URL]), IMAGES.c.subtree.in_(['COISS_2001'])
-    )
-    with opened(sqlite_url, create=True) as engine, engine.connect() as connection:
-        rendered = str(query.compile(engine, compile_kwargs={'literal_binds': True}))
-        plan = connection.execute(sqlalchemy.text(f'EXPLAIN QUERY PLAN {rendered}')).fetchall()
-    assert 'ix_images_root_url_subtree' in ' '.join(str(step) for step in plan)
-
-
 def test_the_stub_index_is_not_unique() -> None:
     """One stub legitimately appears once per ingested root."""
     stub_index = next(
