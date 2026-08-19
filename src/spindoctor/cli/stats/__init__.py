@@ -4,7 +4,7 @@ Two programs cooperate over the results index, the database that
 :mod:`spindoctor.results_index` defines:
 
 - ``sd_stats_ingest`` (:mod:`spindoctor.cli.stats.ingest`, with the column
-  mapping in :mod:`spindoctor.cli.stats.ingest_rows`) walks one or more
+  mapping in :mod:`spindoctor.nav_records.facts`) walks one or more
   navigation-results roots -- local paths or any URL accepted by ``FCPath`` --
   reads every ``*_metadata.json`` written by ``navigate_image_files``, and
   writes one row per image keyed by its root and its results path stub.  A

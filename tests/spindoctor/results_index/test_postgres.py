@@ -19,11 +19,13 @@ alone answers from whichever schema happens to hold a table of that name.
 """
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from typing import Any
 
 import psycopg
 import pytest
 import sqlalchemy
+from sqlalchemy.engine import Connection
 from tests.spindoctor.results_index.conftest import (
     STUB,
     feature_source_row,
@@ -33,7 +35,13 @@ from tests.spindoctor.results_index.conftest import (
 )
 
 from spindoctor.cli.ck.inputs import read_whole_mission
-from spindoctor.nav_records import NavRecord, RecordSource, Selection, UnreadableFile
+from spindoctor.nav_records import (
+    ImageFacts,
+    NavRecord,
+    RecordSource,
+    Selection,
+    UnreadableFile,
+)
 from spindoctor.results_index import (
     FAILED_FILES,
     FEATURE_SOURCES,
@@ -42,6 +50,7 @@ from spindoctor.results_index import (
     SCHEMA_META,
     SCHEMA_VERSION,
     TECHNIQUES,
+    IndexRecordSource,
     open_index,
     open_record_source,
 )
@@ -263,6 +272,118 @@ def test_the_offset_round_trips_bit_for_bit(postgres_url: str) -> None:
         with engine.connect() as connection:
             stored = connection.execute(sqlalchemy.select(IMAGES.c.offset_dv)).scalar()
     assert repr(stored) == repr(FIFTEEN_DIGIT_OFFSET)
+
+
+SIGNED_ZERO_MATRIX = [[-0.0, 1e16], [1e16, 1e308]]
+"""A matrix of the three values a jsonb column does not return as they were written.
+
+Its number type is ``numeric``, which has no signed zero and no float: ``-0.0``
+comes back ``0.0``, and a float of large magnitude comes back as an integer of
+the same value.  Each of the three compares ``==`` to what was written, so the
+comparison here is on ``repr`` -- the same technique the offset column's
+bit-for-bit test uses, and the only one that can see any of these.
+"""
+
+OTHER_ROOT_MATRIX = [[-0.0, 2e16], [2e16, 1.5e308]]
+"""The same three kinds of value under a second root, differing in every entry.
+
+Two roots hold the one stub, so a select that compared the stub alone would
+answer with whichever row the server returned first.
+"""
+
+ROUND_TRIP_ROOTS = ('file:///data/nav-results', 'file:///data/nav-results-second')
+"""The two roots the JSON round-trip tests write one stub under."""
+
+
+def _stored_json_under_each_root(
+    postgres_url: str, column: sqlalchemy.Column[Any], values: Sequence[Any]
+) -> list[Any]:
+    """Write one value per root under one stub and read each back by whole key.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+        column: The JSON column under test.
+        values: What to store under each root, in root order.
+
+    Returns:
+        What each root's row holds, in root order.
+    """
+    with opened(postgres_url, create=True) as engine:
+        with engine.begin() as connection:
+            for root_url, value in zip(ROUND_TRIP_ROOTS, values, strict=True):
+                connection.execute(
+                    IMAGES.insert(), image_row(root_url=root_url, **{column.name: value})
+                )
+        with engine.connect() as connection:
+            return [
+                connection.execute(
+                    sqlalchemy.select(column).where(
+                        IMAGES.c.root_url == root_url, IMAGES.c.results_path_stub == STUB
+                    )
+                ).scalar()
+                for root_url in ROUND_TRIP_ROOTS
+            ]
+
+
+def test_a_covariance_round_trips_bit_for_bit(postgres_url: str) -> None:
+    """A jsonb column would return this matrix as three different numbers.
+
+    The column is a JSON one because a covariance is a structure, and it holds
+    floats, so it is declared plain ``json`` rather than ``jsonb``: the value
+    travels as the JSON text the driver wrote and is parsed back by the rules
+    that wrote it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    stored = _stored_json_under_each_root(
+        postgres_url, IMAGES.c.covariance_px2, (SIGNED_ZERO_MATRIX, OTHER_ROOT_MATRIX)
+    )
+    assert [repr(one) for one in stored] == [repr(SIGNED_ZERO_MATRIX), repr(OTHER_ROOT_MATRIX)]
+
+
+def test_a_recorded_attitude_round_trips_bit_for_bit(postgres_url: str) -> None:
+    """A kernel is written from these nine numbers, and this project checks kernels.
+
+    A ``-0.0`` in a recorded attitude that came back ``0.0`` would put a
+    different rotation into a kernel written from an index than into one written
+    from the same tree.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    first = [-0.0, 1e16, 1e308, 0.5, -0.5, 0.25, -0.25, 0.125, 1.0]
+    second = [-0.0, 2e16, 1e308, 0.5, -0.5, 0.25, -0.25, 0.125, 2.0]
+    stored = _stored_json_under_each_root(postgres_url, IMAGES.c.cmatrix, (first, second))
+    assert [repr(one) for one in stored] == [repr(first), repr(second)]
+
+
+def test_a_technique_covariance_round_trips_bit_for_bit(postgres_url: str) -> None:
+    """The child table's matrix column is declared exactly as the image's is.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    with opened(postgres_url, create=True) as engine:
+        with engine.begin() as connection:
+            for root_url, value in zip(
+                ROUND_TRIP_ROOTS, (SIGNED_ZERO_MATRIX, OTHER_ROOT_MATRIX), strict=True
+            ):
+                connection.execute(IMAGES.insert(), image_row(root_url=root_url))
+                connection.execute(
+                    TECHNIQUES.insert(), technique_row(root_url=root_url, covariance_px2=value)
+                )
+        with engine.connect() as connection:
+            stored = [
+                connection.execute(
+                    sqlalchemy.select(TECHNIQUES.c.covariance_px2).where(
+                        TECHNIQUES.c.root_url == root_url,
+                        TECHNIQUES.c.results_path_stub == STUB,
+                    )
+                ).scalar()
+                for root_url in ROUND_TRIP_ROOTS
+            ]
+    assert [repr(one) for one in stored] == [repr(SIGNED_ZERO_MATRIX), repr(OTHER_ROOT_MATRIX)]
 
 
 def test_a_boolean_column_round_trips_true(postgres_url: str) -> None:
@@ -1087,3 +1208,697 @@ def test_a_named_stub_only_the_other_root_refused_yields_nothing_on_postgresql(
     with _record_source(postgres_url, RECORD_ROOT) as source:
         found = list(source.records(Selection(stubs=(OTHER_REFUSED_STUB,))))
     assert found == []
+
+
+# ---------------------------------------------------------------------------
+# The per-image facts, merged out of three tables on a server
+# ---------------------------------------------------------------------------
+
+COLLATION_STUBS = (
+    f'{RECORD_SUBTREE}/data/AB_CALIB',
+    f'{RECORD_SUBTREE}/data/AB/CALIB',
+    f'{RECORD_SUBTREE}/data/A_B_CALIB',
+)
+"""Three stubs differing only in where their separators fall.
+
+Which is where a server's text order and the codepoint order a walk produces
+can part company: a collation is free to weigh a separator against an underscore
+however its locale says, and which locale a server was created under is not
+this code's to know.  The merge never compares the server's order to one
+computed anywhere else, and these are the stubs that would show it if it did.
+"""
+
+FACTS_TECHNIQUE = 'StarFieldFromCatalogNav'
+"""The technique every seeded image reports, so a row is told apart by its key."""
+
+
+def _facts_child_name(root_url: str, stub: str) -> str:
+    """Return a source name naming the image whose row carries it.
+
+    Parameters:
+        root_url: The root half of the image's key.
+        stub: The stub half.
+
+    Returns:
+        A name no other image's row carries, so a mis-paired row is visible.
+    """
+    return f'{root_url}|{stub}'
+
+
+def _seed_facts_rows(url: str) -> None:
+    """Create the index and write the images and child rows the facts read.
+
+    Two roots holding the same three stubs, and the child rows written back to
+    front, so that neither the insertion order nor the server's own unordered
+    read pairs an image with its own children by accident.
+
+    Parameters:
+        url: The index to create and write into.
+    """
+    keys = [
+        (root_url, stub)
+        for root_url in (RECORD_OTHER_ROOT, RECORD_ROOT)
+        for stub in COLLATION_STUBS
+    ]
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            IMAGES.insert(),
+            [
+                image_row(
+                    root_url=root_url,
+                    results_path_stub=stub,
+                    subtree=RECORD_SUBTREE,
+                    instrument='coiss',
+                    excluded_from_consensus=['StarRefineNav', 'BodyLimbNav'],
+                    covariance_px2=[
+                        [0.01, 0.002, 0.0003],
+                        [0.002, 0.04, 0.0005],
+                        [0.0003, 0.0005, 1e-06],
+                    ],
+                )
+                for root_url, stub in keys
+            ],
+        )
+        connection.execute(
+            TECHNIQUES.insert(),
+            [
+                technique_row(
+                    root_url=root_url,
+                    results_path_stub=stub,
+                    technique_name=FACTS_TECHNIQUE,
+                    source_names=[_facts_child_name(root_url, stub)],
+                    diagnostics={'iterations': 4},
+                )
+                for root_url, stub in reversed(keys)
+            ],
+        )
+        connection.execute(
+            FEATURE_SOURCES.insert(),
+            [
+                feature_source_row(
+                    root_url=root_url,
+                    results_path_stub=stub,
+                    source_name=_facts_child_name(root_url, stub),
+                )
+                for root_url, stub in reversed(keys)
+            ],
+        )
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': root_url,
+                    'started_utc': SELECTION_INGESTED,
+                    'finished_utc': SELECTION_INGESTED,
+                    'schema_version': SCHEMA_VERSION,
+                }
+                for root_url in (RECORD_ROOT, RECORD_OTHER_ROOT)
+            ],
+        )
+
+
+def _facts_by_stub(url: str, root_url: str) -> dict[str, ImageFacts]:
+    """Read one root's facts off the server, keyed by stub.
+
+    Parameters:
+        url: The index URL.
+        root_url: The root to read.
+
+    Returns:
+        The facts of each image.
+    """
+    with _record_source(url, root_url) as source:
+        return {
+            str(one.image['results_path_stub']): one
+            for one in source.facts(Selection())
+            if isinstance(one, ImageFacts)
+        }
+
+
+def _tables_cursored_part_way_through(url: str) -> list[str]:
+    """Return the tables this session holds an open cursor over, part-way through.
+
+    ``pg_cursors`` lists the cursors of the asking session and no other, so the
+    question is put on the very connection the stream reads on, part-way through
+    it.  A statement fetched whole has closed its cursor before the first image
+    is yielded, and one issued without a server-side cursor never appears at all.
+
+    Parameters:
+        url: The index to read.
+
+    Returns:
+        The names of the tables cursored, sorted.
+    """
+    held: list[Connection] = []
+    engine = open_index(url)
+    sqlalchemy.event.listen(engine, 'engine_connect', held.append)
+    with IndexRecordSource(engine, [RECORD_ROOT], url, RECORD_COLUMNS) as source:
+        stream = source.facts(Selection())
+        next(stream)
+        open_cursors = list(
+            held[0].execute(sqlalchemy.text('SELECT statement FROM pg_cursors')).scalars()
+        )
+        list(stream)
+    return sorted(
+        name
+        for name in ('feature_sources', 'images', 'techniques')
+        for statement in open_cursors
+        if f'FROM {name}' in statement
+    )
+
+
+def test_the_facts_stream_holds_a_cursor_over_each_table_at_once_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """Three server-side cursors, opened together and read from as the merge goes.
+
+    A merge that ran the three statements one after another, or that fetched any
+    of them whole before reading the next, would have closed the cursor it had
+    finished with by the time the first image came back.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    assert _tables_cursored_part_way_through(postgres_url) == [
+        'feature_sources',
+        'images',
+        'techniques',
+    ]
+
+
+def test_the_facts_stream_reads_every_image_of_one_root_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """The three cursors put back together answer for the root that was asked for.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    assert sorted(_facts_by_stub(postgres_url, RECORD_ROOT)) == sorted(COLLATION_STUBS)
+
+
+def test_the_merge_gives_each_image_its_own_children_on_postgresql(postgres_url: str) -> None:
+    """Under the server's own collation, which is not the order a walk produces.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    found = _facts_by_stub(postgres_url, RECORD_ROOT)
+    assert {
+        stub: [row['source_names'] for row in one.techniques] for stub, one in found.items()
+    } == {stub: [[_facts_child_name(RECORD_ROOT, stub)]] for stub in COLLATION_STUBS}
+
+
+def test_the_merge_gives_each_image_its_own_feature_sources_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """The other child table, merged onto the same stream by the same rule.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    found = _facts_by_stub(postgres_url, RECORD_ROOT)
+    assert {
+        stub: [row['source_name'] for row in one.feature_sources] for stub, one in found.items()
+    } == {stub: [_facts_child_name(RECORD_ROOT, stub)] for stub in COLLATION_STUBS}
+
+
+def test_the_merge_reads_the_selected_roots_children_on_postgresql(postgres_url: str) -> None:
+    """The other root holds the same stubs, with children named for itself.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    found = _facts_by_stub(postgres_url, RECORD_OTHER_ROOT)
+    assert {
+        stub: [row['source_name'] for row in one.feature_sources] for stub, one in found.items()
+    } == {stub: [_facts_child_name(RECORD_OTHER_ROOT, stub)] for stub in COLLATION_STUBS}
+
+
+def test_a_jsonb_matrix_comes_back_whole_on_postgresql(postgres_url: str) -> None:
+    """The covariance is jsonb here and text on SQLite, and must read alike.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    found = _facts_by_stub(postgres_url, RECORD_ROOT)
+    assert found[COLLATION_STUBS[0]].image['covariance_px2'] == [
+        [0.01, 0.002, 0.0003],
+        [0.002, 0.04, 0.0005],
+        [0.0003, 0.0005, 1e-06],
+    ]
+
+
+def test_a_jsonb_list_keeps_the_order_it_was_written_in_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """A jsonb array preserves element order, which a jsonb object would not.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    found = _facts_by_stub(postgres_url, RECORD_ROOT)
+    assert found[COLLATION_STUBS[0]].image['excluded_from_consensus'] == [
+        'StarRefineNav',
+        'BodyLimbNav',
+    ]
+
+
+def test_the_facts_carry_every_column_on_postgresql(postgres_url: str) -> None:
+    """The consumer's columns narrow a record and never the facts.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    found = _facts_by_stub(postgres_url, RECORD_ROOT)
+    assert set(found[COLLATION_STUBS[0]].image) == {column.name for column in IMAGES.columns}
+
+
+def test_the_facts_report_a_refusal_on_postgresql(postgres_url: str) -> None:
+    """A file the ingest refused is a shortfall whichever storage answered.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [one.stub for one in source.facts(Selection()) if isinstance(one, UnreadableFile)]
+    assert found == [RECORD_REFUSED_STUB]
+
+
+def test_named_stubs_come_back_as_facts_in_the_order_named_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """A batched read, merged per batch and put back into the order named.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_facts_rows(postgres_url)
+    named = (COLLATION_STUBS[2], COLLATION_STUBS[0], COLLATION_STUBS[1])
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [
+            str(one.image['results_path_stub'])
+            for one in source.facts(Selection(stubs=named))
+            if isinstance(one, ImageFacts)
+        ]
+    assert found == list(named)
+
+
+# ---------------------------------------------------------------------------
+# What the merge needs of the server that SQLite gives it for nothing
+# ---------------------------------------------------------------------------
+
+ARRIVING_STUB = f'{RECORD_SUBTREE}/data/N1294561200_1_CALIB'
+"""An image another connection commits while the read below is under way.
+
+It sorts ahead of both images already there, deliberately: its child rows are
+then the first rows a child stream meets, and a merge holding a row against a
+key its image stream never yields waits for that key for the rest of the pass
+and hands every image after it none of its own rows.
+"""
+
+ALREADY_THERE_STUBS = (
+    f'{RECORD_SUBTREE}/data/N1294561201_1_CALIB',
+    f'{RECORD_SUBTREE}/data/N1294561202_1_CALIB',
+)
+"""The images the index holds when the read starts, both of them with children."""
+
+
+def _concurrent_rows(stub: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Return one image's three rows, for the seed and for the write that races it.
+
+    Parameters:
+        stub: The image's results path stub.
+
+    Returns:
+        Its image row, its technique row and its feature-source row.
+    """
+    return (
+        image_row(
+            root_url=RECORD_ROOT,
+            results_path_stub=stub,
+            subtree=RECORD_SUBTREE,
+            instrument='coiss',
+        ),
+        technique_row(root_url=RECORD_ROOT, results_path_stub=stub, technique_name=FACTS_TECHNIQUE),
+        feature_source_row(
+            root_url=RECORD_ROOT,
+            results_path_stub=stub,
+            source_name=_facts_child_name(RECORD_ROOT, stub),
+        ),
+    )
+
+
+def _write_rows(connection: Connection, stubs: Sequence[str]) -> None:
+    """Write the image, technique and feature-source rows of some images.
+
+    Parameters:
+        connection: The connection to write on, inside its own transaction.
+        stubs: The images to write.
+    """
+    built = [_concurrent_rows(stub) for stub in stubs]
+    connection.execute(IMAGES.insert(), [one[0] for one in built])
+    connection.execute(TECHNIQUES.insert(), [one[1] for one in built])
+    connection.execute(FEATURE_SOURCES.insert(), [one[2] for one in built])
+
+
+def _seed_concurrent_rows(url: str) -> None:
+    """Create the index and write the images the racing read starts from.
+
+    Parameters:
+        url: The index to create and write into.
+    """
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        _write_rows(connection, ALREADY_THERE_STUBS)
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': RECORD_ROOT,
+                    'started_utc': SELECTION_INGESTED,
+                    'finished_utc': SELECTION_INGESTED,
+                    'schema_version': SCHEMA_VERSION,
+                }
+            ],
+        )
+
+
+def _facts_read_against_a_writer(url: str) -> tuple[bool, dict[str, list[str]]]:
+    """Read the facts with another connection committing an image part-way in.
+
+    The write is made when the first of the two child statements is issued,
+    which is after the image statement and before either child statement has
+    anything of its own: the one window in which a server free to answer each
+    statement from its own snapshot puts an image into the child streams that is
+    not in the image stream.  The writer is another engine, so the listener on
+    this one does not fire again underneath itself.
+
+    Parameters:
+        url: The index to read and to write into.
+
+    Returns:
+        Whether the write landed in that window, and the technique names the
+        merge gave each image it yielded.
+    """
+    landed: list[str] = []
+    engine = open_index(url)
+
+    def _write_between(conn: Any, cursor: Any, statement: str, *rest: Any) -> None:
+        if landed or 'FROM techniques' not in statement:
+            return
+        landed.append(statement)
+        with opened(url) as writer, writer.begin() as connection:
+            _write_rows(connection, [ARRIVING_STUB])
+
+    sqlalchemy.event.listen(engine, 'before_cursor_execute', _write_between)
+    with IndexRecordSource(engine, [RECORD_ROOT], url, RECORD_COLUMNS) as source:
+        found = {
+            str(one.image['results_path_stub']): [
+                str(row['technique_name']) for row in one.techniques
+            ]
+            for one in source.facts(Selection())
+            if isinstance(one, ImageFacts)
+        }
+    return bool(landed), found
+
+
+def test_an_image_committed_between_the_statements_leaves_the_others_whole_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """An ingest commits per chunk, so a read shares the server with a writer.
+
+    The three statements are answered from one snapshot, so an image that
+    arrives between them is in all three or in none.  Answered from three
+    snapshots it is in the child streams and not in the image stream, and the
+    merge then gives every image it does yield no rows at all.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_concurrent_rows(postgres_url)
+    _landed, found = _facts_read_against_a_writer(postgres_url)
+    assert found == {stub: [FACTS_TECHNIQUE] for stub in ALREADY_THERE_STUBS}
+
+
+def test_the_racing_write_really_lands_between_the_statements_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """Without which the test above would hold over a read nothing raced.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_concurrent_rows(postgres_url)
+    landed, _found = _facts_read_against_a_writer(postgres_url)
+    assert landed
+
+
+def _tables_read_in_order(url: str) -> list[str]:
+    """Return the table each statement of a stream of facts read, in order.
+
+    Parameters:
+        url: The index to read.
+
+    Returns:
+        One table name per statement issued, in the order they were issued.  The
+        statement that reads the refusals names ``images`` in a subquery of its
+        own, so only the statements of the merge itself are worth reading here.
+    """
+    issued: list[str] = []
+    engine = open_index(url)
+    sqlalchemy.event.listen(
+        engine,
+        'before_cursor_execute',
+        lambda conn, cursor, statement, *rest: issued.append(statement),
+    )
+    with IndexRecordSource(engine, [RECORD_ROOT], url, RECORD_COLUMNS) as source:
+        list(source.facts(Selection()))
+    return [
+        name
+        for statement in issued
+        for name in ('images', 'techniques', 'feature_sources')
+        if f'FROM {name}' in statement
+    ]
+
+
+def test_the_child_statements_are_issued_after_the_image_one_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """Which is what makes the window the write above lands in the deciding one.
+
+    A write committed there is one the image statement was issued too early to
+    see and the child statements are issued in time to see, so the two disagree
+    about what the index holds unless they are made to answer from one snapshot
+    of it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_concurrent_rows(postgres_url)
+    assert _tables_read_in_order(postgres_url)[:3] == ['images', 'techniques', 'feature_sources']
+
+
+BOUNDARY_FIRST_STUBS = (f'{RECORD_SUBTREE}/data/A_CALIB', f'{RECORD_SUBTREE}/data/M_CALIB')
+"""What the first of the two roots below holds."""
+
+BOUNDARY_SECOND_STUBS = (f'{RECORD_SUBTREE}/data/M_CALIB', f'{RECORD_SUBTREE}/data/Z_CALIB')
+"""What the second holds, beginning at the stub the first one ends on.
+
+Two adjacent image groups sharing a stub is the shape a merge key that lost its
+root half mis-pairs under: the first root's image takes the second root's rows
+as well as its own, and the second root's image comes back with none.
+"""
+
+
+def _seed_boundary_rows(url: str) -> None:
+    """Create the index and write two roots that meet on one stub.
+
+    Parameters:
+        url: The index to create and write into.
+    """
+    keys = [
+        (root_url, stub)
+        for root_url, stubs in (
+            (RECORD_ROOT, BOUNDARY_FIRST_STUBS),
+            (RECORD_OTHER_ROOT, BOUNDARY_SECOND_STUBS),
+        )
+        for stub in stubs
+    ]
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            IMAGES.insert(),
+            [
+                image_row(
+                    root_url=root_url,
+                    results_path_stub=stub,
+                    subtree=RECORD_SUBTREE,
+                    instrument='coiss',
+                )
+                for root_url, stub in keys
+            ],
+        )
+        connection.execute(
+            TECHNIQUES.insert(),
+            [
+                technique_row(
+                    root_url=root_url,
+                    results_path_stub=stub,
+                    technique_name=_facts_child_name(root_url, stub),
+                )
+                for root_url, stub in reversed(keys)
+            ],
+        )
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': root_url,
+                    'started_utc': SELECTION_INGESTED,
+                    'finished_utc': SELECTION_INGESTED,
+                    'schema_version': SCHEMA_VERSION,
+                }
+                for root_url in (RECORD_ROOT, RECORD_OTHER_ROOT)
+            ],
+        )
+
+
+def _children_over_both_roots(url: str) -> dict[tuple[str, str], list[str]]:
+    """Return the technique names the merge gave each image of a two-root stream.
+
+    Parameters:
+        url: The index to read.
+
+    Returns:
+        The names, by the whole key of the image they were merged onto.
+    """
+    with _record_source(url, RECORD_ROOT, RECORD_OTHER_ROOT) as source:
+        return {
+            (str(one.image['root_url']), str(one.image['results_path_stub'])): [
+                str(row['technique_name']) for row in one.techniques
+            ]
+            for one in source.facts(Selection())
+            if isinstance(one, ImageFacts)
+        }
+
+
+def test_a_stub_two_adjacent_roots_share_keeps_each_ones_rows_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """One stream over two roots, meeting on a stub they both hold.
+
+    The merge tells the two apart by the root alone, and there is no simpler
+    shape in which it has to.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_boundary_rows(postgres_url)
+    assert _children_over_both_roots(postgres_url) == {
+        (root_url, stub): [_facts_child_name(root_url, stub)]
+        for root_url, stubs in (
+            (RECORD_ROOT, BOUNDARY_FIRST_STUBS),
+            (RECORD_OTHER_ROOT, BOUNDARY_SECOND_STUBS),
+        )
+        for stub in stubs
+    }
+
+
+def test_the_two_roots_really_do_meet_on_one_stub() -> None:
+    """Without which the test above would hold whatever the merge compared."""
+    assert BOUNDARY_FIRST_STUBS[-1] == BOUNDARY_SECOND_STUBS[0]
+
+
+ORDER_SENSITIVE_IMAGES = 300
+"""How many images it takes for a server to answer a child read out of key order.
+
+A statement that does not say how to sort comes back in whatever order the plan
+the planner chose produces, and on a table this size that is the order the rows
+were written -- which is written here as the reverse of the key.  Below it the
+planner walks the child table's own unique index and hands back key order
+whether or not the statement asked for one, so a smaller fixture cannot tell an
+ordered read from an unordered one.
+"""
+
+
+def _seed_rows_written_back_to_front(url: str) -> tuple[str, ...]:
+    """Create the index and write enough images, in reverse of their key order.
+
+    Parameters:
+        url: The index to create and write into.
+
+    Returns:
+        The stubs written, in key order.
+    """
+    stubs = tuple(
+        f'{RECORD_SUBTREE}/data/N{index:05d}_CALIB' for index in range(ORDER_SENSITIVE_IMAGES)
+    )
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            IMAGES.insert(),
+            [
+                image_row(
+                    root_url=RECORD_ROOT,
+                    results_path_stub=stub,
+                    subtree=RECORD_SUBTREE,
+                    instrument='coiss',
+                )
+                for stub in reversed(stubs)
+            ],
+        )
+        connection.execute(
+            TECHNIQUES.insert(),
+            [
+                technique_row(
+                    root_url=RECORD_ROOT,
+                    results_path_stub=stub,
+                    technique_name=_facts_child_name(RECORD_ROOT, stub),
+                )
+                for stub in reversed(stubs)
+            ],
+        )
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': RECORD_ROOT,
+                    'started_utc': SELECTION_INGESTED,
+                    'finished_utc': SELECTION_INGESTED,
+                    'schema_version': SCHEMA_VERSION,
+                }
+            ],
+        )
+    return stubs
+
+
+def test_every_image_of_a_root_a_planner_scans_keeps_its_own_rows_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """What the child statement's own ordering is worth, where a plan does not give it.
+
+    The merge pairs a child row with its image by holding it until that image
+    comes round, which is right only while both streams arrive in one order.  A
+    child read that left its order to the plan hands the rows back as they were
+    written, and every image but the last is then given none of its own.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    stubs = _seed_rows_written_back_to_front(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = {
+            str(one.image['results_path_stub']): [
+                str(row['technique_name']) for row in one.techniques
+            ]
+            for one in source.facts(Selection())
+            if isinstance(one, ImageFacts)
+        }
+    assert found == {stub: [_facts_child_name(RECORD_ROOT, stub)] for stub in stubs}

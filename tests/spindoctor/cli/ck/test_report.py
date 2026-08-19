@@ -25,9 +25,9 @@ from tests.spindoctor.cli.ck.ck_helpers import (
 from spindoctor.cli.ck.images import OmissionReason
 from spindoctor.cli.ck.report import (
     REPORT_COLUMNS,
-    ImageFacts,
+    ImageReportFacts,
     ReportRow,
-    read_image_facts,
+    read_image_report_facts,
     report_text,
     utc_for_et,
     write_report,
@@ -72,7 +72,7 @@ def _metadata(**overrides: Any) -> dict[str, Any]:
     return image_metadata(**defaults)
 
 
-def _facts(pool: KernelPool, **overrides: Any) -> ImageFacts:
+def _facts(pool: KernelPool, **overrides: Any) -> ImageReportFacts:
     """Read the report facts of an image's metadata, with fields replaced.
 
     Parameters:
@@ -83,10 +83,10 @@ def _facts(pool: KernelPool, **overrides: Any) -> ImageFacts:
         The facts.
     """
     assert pool is not None
-    return read_image_facts(_metadata(**overrides))
+    return read_image_report_facts(_metadata(**overrides))
 
 
-def _row(facts: ImageFacts) -> dict[str, str]:
+def _row(facts: ImageReportFacts) -> dict[str, str]:
     """Return one row's cells keyed by column name.
 
     Parameters:
@@ -163,7 +163,7 @@ def test_the_image_name_comes_from_the_observation(pool: KernelPool) -> None:
 def test_a_load_error_document_reports_a_name_and_a_status(pool: KernelPool) -> None:
     """An image with no navigation result still gets its row."""
     assert pool is not None
-    facts = read_image_facts(
+    facts = read_image_report_facts(
         {'status': 'failed', 'observation': {'image_name': 'N1484573295_1.IMG'}}
     )
     assert facts.image_name == 'N1484573295_1.IMG'
@@ -173,7 +173,7 @@ def test_a_load_error_document_reports_a_name_and_a_status(pool: KernelPool) -> 
 def test_a_load_error_document_reports_no_measurement(pool: KernelPool) -> None:
     """Nothing is invented for an image that measured nothing."""
     assert pool is not None
-    facts = read_image_facts(
+    facts = read_image_report_facts(
         {'status': 'failed', 'observation': {'image_name': 'N1484573295_1.IMG'}}
     )
     assert facts.et is None
@@ -193,7 +193,7 @@ def test_a_null_sigma_is_read_as_not_recorded(pool: KernelPool) -> None:
     """The pipeline writes ``null`` for a sigma it has none of."""
     metadata = _metadata()
     metadata['navigation_result']['sigma_px'] = None
-    facts = read_image_facts(metadata)
+    facts = read_image_report_facts(metadata)
     assert facts.sigma_dv is None
     assert facts.sigma_du is None
 
@@ -223,7 +223,7 @@ def test_a_non_finite_confidence_is_refused(pool: KernelPool, value: float) -> N
     """A NaN confidence would be reported as a number no reader can attribute."""
     assert pool is not None
     with pytest.raises(ValueError, match='not finite'):
-        read_image_facts(_metadata(confidence=value))
+        read_image_report_facts(_metadata(confidence=value))
 
 
 @pytest.mark.parametrize('value', [float('nan'), float('inf')], ids=['nan', 'inf'])
@@ -231,28 +231,28 @@ def test_a_non_finite_offset_element_is_refused(pool: KernelPool, value: float) 
     """Nor is a non-finite offset rendered into the report."""
     assert pool is not None
     with pytest.raises(ValueError, match='non-finite'):
-        read_image_facts(_metadata(offset=(value, 1.0)))
+        read_image_report_facts(_metadata(offset=(value, 1.0)))
 
 
 def test_a_non_finite_midtime_is_refused(pool: KernelPool) -> None:
     """A non-finite midtime would reach the UTC conversion."""
     assert pool is not None
     with pytest.raises(ValueError, match='not finite'):
-        read_image_facts(_metadata(midtime_et=float('nan')))
+        read_image_report_facts(_metadata(midtime_et=float('nan')))
 
 
 def test_an_offset_of_one_element_is_refused(pool: KernelPool) -> None:
     """An offset is a pair; one number leaves an axis unaccounted for."""
     assert pool is not None
     with pytest.raises(ValueError, match='not two'):
-        read_image_facts(_metadata(offset=(1.0,)))
+        read_image_report_facts(_metadata(offset=(1.0,)))
 
 
 def test_an_offset_of_three_elements_is_refused(pool: KernelPool) -> None:
     """So does a third number, which no column would carry."""
     assert pool is not None
     with pytest.raises(ValueError, match='not two'):
-        read_image_facts(_metadata(offset=(1.0, 2.0, 3.0)))
+        read_image_report_facts(_metadata(offset=(1.0, 2.0, 3.0)))
 
 
 def test_an_offset_that_is_not_a_sequence_is_refused(pool: KernelPool) -> None:
@@ -261,7 +261,7 @@ def test_an_offset_that_is_not_a_sequence_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['offset'] = 1.0
     with pytest.raises(TypeError, match='not a pair'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_an_offset_of_text_is_refused(pool: KernelPool) -> None:
@@ -270,7 +270,7 @@ def test_an_offset_of_text_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['offset'] = ['1.0', '2.0']
     with pytest.raises(TypeError, match='not a number'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_an_offset_of_booleans_is_refused(pool: KernelPool) -> None:
@@ -279,7 +279,7 @@ def test_an_offset_of_booleans_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['offset'] = [True, False]
     with pytest.raises(TypeError, match='not a number'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_a_null_status_is_refused(pool: KernelPool) -> None:
@@ -288,7 +288,7 @@ def test_a_null_status_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['status'] = None
     with pytest.raises(TypeError, match='not a string'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_a_null_rank_is_refused(pool: KernelPool) -> None:
@@ -297,7 +297,7 @@ def test_a_null_rank_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['navigation_result']['confidence_rank'] = None
     with pytest.raises(TypeError, match='not a string'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_an_absent_rank_is_read_as_not_recorded(pool: KernelPool) -> None:
@@ -305,7 +305,7 @@ def test_an_absent_rank_is_read_as_not_recorded(pool: KernelPool) -> None:
     assert pool is not None
     metadata = _metadata()
     del metadata['navigation_result']['confidence_rank']
-    assert read_image_facts(metadata).confidence_rank is None
+    assert read_image_report_facts(metadata).confidence_rank is None
 
 
 def test_a_null_confidence_is_refused(pool: KernelPool) -> None:
@@ -314,20 +314,20 @@ def test_a_null_confidence_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['confidence'] = None
     with pytest.raises(TypeError, match='not a number'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_a_numeric_rank_is_refused(pool: KernelPool) -> None:
     """The rank is a name; a number where one belongs is a malformed record."""
     assert pool is not None
     with pytest.raises(TypeError, match='not a string'):
-        read_image_facts(_metadata(confidence_rank=3))
+        read_image_report_facts(_metadata(confidence_rank=3))
 
 
 def test_an_empty_image_name_is_refused() -> None:
     """A row no image can be attributed to is worse than no row."""
     with pytest.raises(ValueError, match='image_name is empty'):
-        ImageFacts(
+        ImageReportFacts(
             image_name='',
             utc=None,
             et=None,
@@ -346,7 +346,7 @@ def test_an_empty_image_name_is_refused() -> None:
 def test_an_empty_status_is_refused() -> None:
     """An empty status cell would read as an unrecorded value, not a recorded one."""
     with pytest.raises(ValueError, match='status is empty for N1234567890_1'):
-        ImageFacts(
+        ImageReportFacts(
             image_name='N1234567890_1',
             utc=None,
             et=None,
@@ -368,7 +368,7 @@ def test_a_times_block_that_is_not_a_block_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['navigation_result']['times'] = 'later'
     with pytest.raises(ValueError, match='not a section'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 # ---------------------------------------------------------------------------
@@ -485,14 +485,14 @@ def test_a_boolean_confidence_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['confidence'] = True
     with pytest.raises(TypeError, match='not a number'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_an_empty_offset_list_is_refused(pool: KernelPool) -> None:
     """An empty list is not a pair, and neither axis would be reported."""
     assert pool is not None
     with pytest.raises(ValueError, match='not two'):
-        read_image_facts(_metadata(offset=()))
+        read_image_report_facts(_metadata(offset=()))
 
 
 def test_an_offset_of_nested_lists_is_refused(pool: KernelPool) -> None:
@@ -501,7 +501,7 @@ def test_an_offset_of_nested_lists_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['offset'] = [[1.0], [2.0]]
     with pytest.raises(TypeError, match='not a number'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_an_offset_that_is_text_is_refused(pool: KernelPool) -> None:
@@ -510,7 +510,7 @@ def test_an_offset_that_is_text_is_refused(pool: KernelPool) -> None:
     metadata = _metadata()
     metadata['offset'] = 'ab'
     with pytest.raises(TypeError, match='not a pair'):
-        read_image_facts(metadata)
+        read_image_report_facts(metadata)
 
 
 def test_a_report_with_no_rows_is_its_header(pool: KernelPool) -> None:

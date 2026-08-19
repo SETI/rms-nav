@@ -33,18 +33,17 @@ never shown answers nobody's question about the selection they got.
   A file no JSON object came out of is refused too and is not one of these: the
   tree excludes such a file from every error filter as well, so the two answer
   alike about it.
-- **A file that exists and has no row at all in the index** reads as absent,
-  which is what the absence filters read as "this image was never navigated".
-  Two passes end that way, and both do so deliberately, because a recorded row
-  would be skipped for as long as the file did not change and the next pass
-  would never retry it:
+- **A file the pass could not retrieve** has no row at all in the index and
+  reads as absent, which is what the absence filters read as "this image was
+  never navigated".  Nothing is recorded for it deliberately: a recorded row
+  would be skipped for as long as the file did not change, and a download that
+  failed once says nothing that will still be true next pass.
 
-  - a file the pass could not retrieve;
-  - a document the pass read whose rows the database would not store.
-
-  A file under a directory nobody listed is not a third: an ingest that cannot
-  list a directory stops there rather than completing, so a root with a
-  completed pass is a root every directory of which was listed.
+  Two other ways a file could go unrecorded are not divergences, because
+  neither leaves a completed pass behind it: an ingest that cannot list a
+  directory stops there, and one whose writer the database refuses a document's
+  rows stops there.  So a root with a completed pass is a root every directory
+  of which was listed and every document of which was stored.
 
 - **A document rewritten in place, keeping the length and the modification time
   it had before,** keeps the row the document before it produced, so an error

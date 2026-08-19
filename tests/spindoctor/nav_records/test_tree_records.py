@@ -34,7 +34,7 @@ from spindoctor.nav_records import (
     UnreadableFile,
     read_document,
 )
-from spindoctor.nav_records import tree as tree_module
+from spindoctor.nav_records import document as document_module
 
 from .conftest import (
     FIRST_STUB,
@@ -515,8 +515,8 @@ def _reader_failing_on(
         failure: What reading that one document raises.
         stub: Stub of the document that will not read.
     """
-    # The module's own name for it, so the replacement calls the reader rather
-    # than itself; the same object either way, since the module imports this one.
+    # Replaced where the reading happens rather than where the walk asks for
+    # it, which is the one function every reader of a document goes through.
     real_read = read_document
 
     def failing(path: FCPath) -> dict[str, Any]:
@@ -524,7 +524,7 @@ def _reader_failing_on(
             raise failure('no value came out of it')
         return real_read(path)
 
-    monkeypatch.setattr(tree_module, 'read_document', failing)
+    monkeypatch.setattr(document_module, 'read_document', failing)
 
 
 @pytest.mark.parametrize('failure', NO_VALUE_CAME_OUT)
@@ -576,7 +576,7 @@ def test_a_fault_in_the_reader_itself_is_not_reported_as_a_bad_document(
     def broken(path: FCPath) -> dict[str, Any]:
         raise TypeError('the reader was changed and no longer works')
 
-    monkeypatch.setattr(tree_module, 'read_document', broken)
+    monkeypatch.setattr(document_module, 'read_document', broken)
     with pytest.raises(TypeError, match='no longer works'):
         list(tree_source(root, quiet_logger).records(Selection()))
 

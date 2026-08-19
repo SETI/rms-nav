@@ -37,6 +37,7 @@ from tests.spindoctor.cli.stats.conftest import (
 
 from spindoctor.nav_records import (
     METADATA_SUFFIX,
+    ImageFacts,
     ListedRecord,
     NavRecord,
     Selection,
@@ -246,6 +247,21 @@ def _stubs(found: Iterator[Any]) -> list[str]:
         The stubs.
     """
     return [entry.stub for entry in found]
+
+
+def _facts_stub(one: ImageFacts | UnreadableFile) -> str:
+    """Return the stub of one thing a stream of facts yielded.
+
+    Parameters:
+        one: The facts, or the file no facts came out of.
+
+    Returns:
+        The stub.  An image carries its own as a column and a file no facts came
+        out of carries it beside its path.
+    """
+    if isinstance(one, UnreadableFile):
+        return one.stub
+    return str(one.image['results_path_stub'])
 
 
 def _offsets(found: Iterator[NavRecord | UnreadableFile]) -> list[Any]:
@@ -1484,6 +1500,38 @@ def test_a_stub_both_tables_record_is_read_as_the_record_by_a_whole_root_stream(
     with _index_over(two_roots, two_roots.first) as source:
         found = [entry for entry in source.records(Selection()) if entry.stub == FIRST_STUB]
     assert [type(entry) for entry in found] == [NavRecord]
+
+
+def test_a_stub_both_tables_record_is_yielded_once_by_a_stream_of_facts(
+    two_roots: TwoRoots,
+) -> None:
+    """One image counted as navigated and as a shortfall in one pass is two answers.
+
+    The facts run their image statement and their refusal statement
+    independently, exactly as a stream of records does, so the refusal arm is
+    again the one that has to know about the other.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    _refuse_an_already_recorded_file(two_roots, two_roots.first, FIRST_STUB)
+    with _index_over(two_roots, two_roots.first) as source:
+        found = [_facts_stub(one) for one in source.facts(Selection())]
+    assert found.count(FIRST_STUB) == 1
+
+
+def test_a_stub_both_tables_record_is_read_as_the_image_by_a_stream_of_facts(
+    two_roots: TwoRoots,
+) -> None:
+    """A count of one would pass if the refusal were the one that survived.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    _refuse_an_already_recorded_file(two_roots, two_roots.first, FIRST_STUB)
+    with _index_over(two_roots, two_roots.first) as source:
+        found = [one for one in source.facts(Selection()) if _facts_stub(one) == FIRST_STUB]
+    assert [type(one) for one in found] == [ImageFacts]
 
 
 def test_a_stale_refusal_of_another_root_is_still_reported(two_roots: TwoRoots) -> None:

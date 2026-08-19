@@ -308,6 +308,18 @@ error naming the directory, and the pass ends there: the root it was under gets
 no finish time, no root named after it on the same command line is walked, and
 ``sd_stats_ingest`` exits 1. Fix what stopped the walk and run it again.
 
+**A document the index will not store stops it too.** A file that read as a
+navigation result and whose rows the database then refused is a defect in
+SpinDoctor -- in what it writes, or in the columns it writes into -- rather than
+anything about the file, and the next document of that shape would be refused
+the same way. The pass ends there, naming the file and what the database said,
+the root gets no finish time, and ``sd_stats_ingest`` exits 1. Every document
+written before it stays in, so a rerun after the fix reads only what is left.
+The alternative -- counting the file and carrying on -- put it in neither
+``images`` nor ``failed_files`` under a run stamped finished, which made an
+image nothing had ever navigated and an image SpinDoctor could not store look
+exactly alike.
+
 **A root that cannot be listed does not stop it.** That is the case above --
 the mistyped path, the unmounted share -- and it is charged to the root it is
 about: that root is reported, left unfinished and ingested not at all, every
@@ -729,13 +741,23 @@ pair with ``ON DELETE CASCADE``.
    * - ``image_path``
      - TEXT
      - Absolute path of the source image at navigate time.
+   * - ``provenance_image_et``
+     - DOUBLE
+     - Observation midtime as the navigation recorded it, TDB seconds past
+       J2000, from ``navigation_result.provenance.image_et``. NULL for an
+       image that never loaded, which has no provenance block.
+   * - ``observation_image_et``
+     - DOUBLE
+     - Observation midtime as the navigator read it out of the PDS3 index,
+       from ``observation.image_et``. NULL where the document records none.
+       Which of these two columns holds a value therefore says whether the
+       image loaded.
    * - ``image_et``
      - DOUBLE
-     - Observation midtime, TDB seconds past J2000. Taken from the
-       navigation provenance, or -- for an image that never loaded, which
-       has no provenance -- from the ``observation.image_et`` the navigator
-       read out of the PDS3 index. An image whose navigation died for want
-       of a SPICE kernel is therefore still placed in time.
+     - Whichever of the two above the document carried, ``provenance``
+       preferred: the one column a date filter and a range report compare
+       against. An image whose navigation died for want of a SPICE kernel is
+       still placed in time by it.
    * - ``image_date``
      - TEXT
      - UTC calendar date ``YYYY-MM-DD`` derived from ``image_et``; drives
@@ -767,11 +789,14 @@ pair with ``ON DELETE CASCADE``.
    * - ``sigma_dv``, ``sigma_du``
      - DOUBLE
      - Per-axis 1-sigma uncertainty of the fused offset, pixels.
-   * - ``covariance_vv``, ``covariance_vu``, ``covariance_uu``
-     - DOUBLE
-     - The 2x2 offset block of the fused covariance, pixels squared. For a
-       twist-fitted result the rotation row and column are deliberately not
-       indexed.
+   * - ``covariance_px2``
+     - JSON
+     - The fused covariance in pixels squared, square and row-major, as the
+       document wrote it: ``[[vv, vu], [vu, uu]]``, or 3x3 for a twist-fitted
+       result whose third row and column are the rotation's. Stored whole,
+       because the offset-to-rotation cross terms in that third row and column
+       are stated nowhere else. NULL where the recorded value is not a square
+       matrix of real numbers.
    * - ``sigma_along_unobservable_px``
      - DOUBLE
      - Uncertainty along the direction the scene could not constrain.
@@ -791,7 +816,9 @@ pair with ``ON DELETE CASCADE``.
      - Number of per-technique results recorded for the image.
    * - ``excluded_from_consensus``
      - JSON
-     - Technique names the ensemble excluded as outliers (``[]`` when none).
+     - Technique names the ensemble excluded as outliers (``[]`` when none),
+       in the order the document recorded them: a recorded list is stored as
+       recorded. Sort them in the query where some other order is wanted.
    * - ``image_class``
      - TEXT
      - Image-classifier verdict (e.g. ``clean``).
@@ -889,9 +916,12 @@ pair with ``ON DELETE CASCADE``.
    * - ``offset_dv``, ``offset_du``
      - DOUBLE
      - The technique's own offset estimate, pixels.
-   * - ``sigma_dv``, ``sigma_du``
-     - DOUBLE
-     - Per-axis 1-sigma from the technique's covariance.
+   * - ``covariance_px2``
+     - JSON
+     - The technique's own covariance in pixels squared, square and row-major,
+       exactly as on ``images``. The per-axis 1-sigma pair is the square root of
+       its diagonal; the off-diagonal terms state the correlation between the
+       axes, which no pair of sigmas carries.
    * - ``confidence``
      - DOUBLE
      - The technique's calibrated confidence in ``[0, 1]``.
@@ -957,13 +987,19 @@ it was read. It is what lets a second pass skip it. It is deliberately not an
 ``reason`` names one of two things. ``unreadable``, ``not valid JSON`` and ``not
 a JSON object`` are a file no JSON object came out of, which every reader
 excludes alike. A reason beginning ``not a current-schema navigation document``
-is a JSON object this schema will not take, and names in parentheses what was
-missing or what went wrong reading it; reading the results tree answers an error
-filter out of such an object, so those are the rows a selection answered from
-the index can be short by.
+is a JSON object this schema will not take, and names in parentheses which field
+said so; reading the results tree answers an error filter out of such an object,
+so those are the rows a selection answered from the index can be short by. Every
+one of the reasons is the reason a reader of the results tree gives for the same
+file, so the two never describe one file's fault two different ways.
 
 ``schema_meta`` holds a single row stamping the database with the column-set
-version that created it.
+version that created it. That version is pinned at 1, so an index carrying that
+stamp opens whatever column set it was built from -- and then answers a query
+with a column it does not have -- while one carrying any other number is
+refused, naming both. After updating SpinDoctor, drop the index and ingest again
+-- ``sd_stats_ingest --drop-index`` and then a fresh pass -- rather than relying
+on the version gate to tell you the index is out of date.
 
 Indexes exist on ``images(results_path_stub)``, ``images(image_date)``,
 ``images(instrument)``, and ``ingest_runs(root_url)``, plus the uniqueness
@@ -1012,7 +1048,14 @@ vocabularies described it:
     ORDER BY images DESC;
 
 JSON columns unpack with each backend's own JSON functions -- for example,
-counting how often each technique was excluded from the consensus. On SQLite:
+counting how often each technique was excluded from the consensus. On PostgreSQL
+the columns holding lists of names (``excluded_from_consensus``,
+``spice_kernels``, ``techniques.source_names``) are ``jsonb`` and take the
+``jsonb_`` functions; the columns that can hold numbers (``covariance_px2``,
+``cmatrix``, ``cmatrix_original``, ``techniques.diagnostics``) are ``json``,
+which returns every stored number exactly and takes the ``json_`` functions.
+Cast with ``::jsonb`` where a ``jsonb_`` function is wanted over one of those.
+On SQLite:
 
 .. code-block:: sql
 

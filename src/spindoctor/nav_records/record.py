@@ -5,7 +5,7 @@ navigation reads what that document says.  The same thing can be kept two ways -
 as the document itself, or as a row of an ingested results index -- so the shapes
 a reader meets are declared here, in a module that knows about neither storage.
 
-Three of them, answering the three questions a program asks:
+Three of them, for the four questions a program asks:
 
 * :class:`NavRecord` is a record, paired with the document it stands for.
 * :class:`UnreadableFile` is a file where a record should have been.  It is a
@@ -15,6 +15,10 @@ Three of them, answering the three questions a program asks:
   over it in silence would report itself clean while covering less than the tree.
 * :class:`ListedRecord` is what a listing knows about a document without opening
   it: where it is, and the two metrics that say whether it has changed.
+
+A stream of per-image facts answers in two of these three: the facts themselves,
+which are :mod:`spindoctor.nav_records.facts`'s, and an
+:class:`UnreadableFile` for a file no facts came out of.
 """
 
 from dataclasses import dataclass

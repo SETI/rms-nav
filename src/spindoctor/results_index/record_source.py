@@ -1,11 +1,11 @@
 """The navigation records as rows of an ingested results index.
 
-A navigation pass writes one document per image, and an ingest pass copies the
-fields a consumer reads into one row per image.  Reading a document is one file
-read per image, which on a cloud root is one paid round trip per image and a
-Cassini-scale root holds several hundred thousand; reading a row is one query
-per run.  This module is the half of the seam that reads rows, and the factory
-that decides which half a run gets.
+A navigation pass writes one document per image, and an ingest pass copies what
+a consumer reads into one row per image and its child rows.  Reading a document
+is one file read per image, which on a cloud root is one paid round trip per
+image and a Cassini-scale root holds several hundred thousand; reading a row is
+one query per run.  This module is the half of the seam that reads rows, and the
+factory that decides which half a run gets.
 
 The other half -- what a record is, what a document is named, what a caller is
 asking for, the protocol, and the implementation over the documents themselves
@@ -27,10 +27,42 @@ selecting the whole table: nobody reads forty fields.  A consumer that reads a
 field it did not select reads it as absent, which is why the columns a consumer
 names are pinned by a test rather than left to be noticed in production.
 
+**The facts do not narrow, whatever columns a consumer named.**  A record is
+defined as looking like the document it stands for, so selecting fewer columns
+gives a smaller record; the facts are defined as the whole row, so a selection
+of them would answer a different question.
+:meth:`IndexRecordSource.facts` therefore reads every column of ``images`` and
+merges on every child row, and the two storages hand back the same mappings.
+
+**A selection naming its own stubs reads no listing, so the facts built from
+the documents carry neither file metric.**  The two metrics are what a walk saw
+of a file, and naming an image walks nothing; the index carries what the walk
+that ingested the root saw.  A run that has to compare them asks for a listing,
+which is the call that answers what is there.
+
+**The order of one image's child rows is the document's on one storage and
+undefined on the other.**  A reader of documents builds the technique entries in
+the order the document wrote them; the index stores no ordinal for them, and the
+statement that reads them sorts on the image key alone, so rows of one key
+arrive in whatever order the server answers that sort in -- in practice the
+order of the index the sort is answered off, which puts the techniques of one
+image in name order rather than the document's.  Nothing in the shape depends on
+it -- a technique is identified by its name and a feature source by its type and
+source -- so a consumer that wants an order sorts on that identity.
+
 **A value the ingest could not store is rebuilt as absent**, which is the one
 class of difference the seam cannot close.  It belongs to what a column can
 hold; :mod:`spindoctor.results_index.rebuild` states it, and each consumer's
 documentation says what it does about it.
+
+**There is no image an ingest left out of both tables.**  The class above is a
+value one column could not hold inside a row that was written.  A document whose
+rows the database will not take at all ends the ingest where it happened rather
+than being counted and passed over, and the root's ingest run keeps its NULL
+finish time, so every consumer says the root has no completed ingest instead of
+reading absence under it as an answer.  What an index with a completed run holds
+is therefore every document the tree held: a stub with no row in either table is
+an image nothing navigated.
 
 **A file the ingest refused is not a row.**  It is recorded in ``failed_files``,
 and it is neither an image that was never navigated nor one whose record can be
@@ -45,11 +77,18 @@ document it cannot attribute to a mission.  And :meth:`IndexRecordSource.listing
 counts it, because a document the ingest refused is a file that exists and a
 listing answers what is there.
 
-**A refused file names no mission and no epoch**, since the ingest could not
-read one out of it, so a mission-filtered or time-filtered stream yields it
-whichever mission and whichever span is being read.  That is the walk's answer
-too: a document it can neither attribute to a mission nor place in a span is
-reported rather than passed over.
+**A refused file is reported here under every mission filter and every time
+bound, and by the walk only where the document does not answer the filter.**  A
+``failed_files`` row holds no mission and no epoch, so no filter can exclude it
+and every stream yields it.  The walk has the document rather than a row, and it
+reads the filters out of the document before it decides whether the document is
+a navigation result at all: one it can attribute to another mission, or place
+outside the span, is passed over and never refused, and one it cannot place is
+reported under the walk's own reason for what the filter found rather than under
+the reason an ingest of the same file records.  So the two agree about a refused
+file exactly while the selection places no restriction a document has to be
+opened to answer.  A run that has to compare the two under a filter reads the
+refusals unfiltered from both.
 
 **A row that cannot be placed is not a refusal here.**  The walk has only the
 document, so one naming no mission or recording no usable midtime is a file it
@@ -85,19 +124,28 @@ ingested, fails the run rather than quietly reading the tree instead.
 The order rows arrive in
 ------------------------
 
-No statement here orders on a text column, and none of the three calls promises
-a total order.  A server sorts text under its own collation, and a locale
-collation orders a separator against an underscore differently from the
-codepoint order a walk produces, so an ``ORDER BY`` on a stub or a path hands
-back one order from SQLite and another from PostgreSQL for the same tree.  A
-caller that needs a total order sorts the stream it received, which is the one
-key both storages share.
+None of the four calls promises a total order.  A server sorts text under its
+own collation, and a locale collation orders a separator against an underscore
+differently from the codepoint order a walk produces, so an ``ORDER BY`` on a
+stub or a path hands back one order from SQLite and another from PostgreSQL for
+the same tree.  A caller that needs a total order sorts the stream it received,
+which is the one key both storages share.
 
-A stream over rows yields the image records the selection covers and then the
-files the ingest refused, each in the order the server returned them.  A stream
-naming its own stubs is the exception: it yields them in the order they were
-named, because naming an image is not a narrowing and a queue task's report has
-to line up with the task it was given.
+The per-image lookup, the listing and the stream of records therefore order on
+nothing at all.  The stream of facts orders on the key, because its three
+statements have to be merged onto one another and adjacent rows are what makes
+that possible; that is safe for the one reason a text sort ever is, which is
+that all three orders are the same server's and are compared against nothing but
+each other.  It also reads them from one snapshot of the index, since an order
+three statements share is no help while they answer about three states of what
+they are ordering.  :mod:`spindoctor.results_index.facts_stream` states what the
+merge does and does not depend on.
+
+A stream over rows yields the images the selection covers and then the files the
+ingest refused, each in the order the server returned them.  A stream naming its
+own stubs is the exception: it yields them in the order they were named, because
+naming an image is not a narrowing and a queue task's report has to line up with
+the task it was given.
 """
 
 from collections.abc import Iterator, Sequence
@@ -112,6 +160,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from spindoctor.nav_records import (
     RETRIEVE_BATCH_SIZE,
+    ImageFacts,
     ListedRecord,
     NavRecord,
     RecordSource,
@@ -127,6 +176,7 @@ from spindoctor.nav_records import (
     selected_roots,
 )
 from spindoctor.results_index.engine import reporting_a_failed_read
+from spindoctor.results_index.facts_stream import facts_stream, reading_one_snapshot
 from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.rebuild import record_from_row
 from spindoctor.results_index.roots import open_index_for_roots
@@ -296,6 +346,47 @@ class IndexRecordSource:
         if not selection.stubs:
             return self._records_of(roots, selection)
         return self._records_of_stubs(root_for_stubs(roots, selection.stubs), selection)
+
+    def facts(self, selection: Selection) -> Iterator[ImageFacts | UnreadableFile]:
+        """Return what every image the selection covers says about itself.
+
+        Every column of ``images``, whatever columns this source was opened
+        with.  Those narrow :meth:`records`, where a record is defined as
+        looking like the document it stands for and nobody selects forty columns
+        to read five; the facts are by definition the whole row, so a subset of
+        them would be a different question rather than a cheaper answer to this
+        one.  The per-technique and per-feature rows are merged on afterwards
+        from their own tables, which is what a reader of the documents gets for
+        nothing out of the same file.
+
+        All three statements are streamed in server-side chunks and merged as
+        they arrive, so a stream over a root holds one image's facts at a time
+        where a root's worth of rows would otherwise be held between the server
+        and the run.  A selection naming stubs holds one batch of them instead,
+        since the answers to a batch are put back into the order it named.
+
+        Parameters:
+            selection: Which images to yield.  A selection naming stubs reads
+                exactly those, in the order it names them; one naming none takes
+                every row the selection's roots, subtrees, mission and time
+                bounds cover.
+
+        Returns:
+            One set of facts per image row, and one
+            :class:`~spindoctor.nav_records.record.UnreadableFile` per file the
+            ingest refused, carrying the reason it recorded.
+
+        Raises:
+            ValueError: If the selection names stubs without resolving to
+                exactly one root, since a stub is a key under a root; if it
+                names a root this source does not hold; or if the index cannot
+                be read, naming it with any password masked.  The last of those
+                is raised as the caller reads, since that is when the query runs.
+        """
+        roots = selected_roots(self._roots, selection.roots)
+        if not selection.stubs:
+            return self._facts_of(roots, selection)
+        return self._facts_of_stubs(root_for_stubs(roots, selection.stubs), selection)
 
     def listing(self, selection: Selection) -> Iterator[ListedRecord]:
         """Return every file the index records under the selection, in one query.
@@ -476,6 +567,92 @@ class IndexRecordSource:
                     if stub in found:
                         yield found[stub]
 
+    def _facts_of(
+        self, roots: Sequence[str], selection: Selection
+    ) -> Iterator[ImageFacts | UnreadableFile]:
+        """Stream the images the selection covers, then the files the ingest refused.
+
+        The refusals come last and separately, exactly as they do for a stream
+        of records and for the same reasons: they carry different columns, and
+        a stub in both tables is a record with a stale refusal beside it and
+        must be read as the image it is.
+
+        Parameters:
+            roots: The normalized roots to read, which every statement filters
+                on.
+            selection: The selection, for the subtrees, the mission and the time
+                bounds.
+
+        Yields:
+            One set of facts per image row, then one unreadable file per
+            refusal.
+        """
+        conditions = [
+            *self._scope(IMAGES, roots, selection.subtrees),
+            *self._what_a_document_says(selection),
+        ]
+        refusals = sqlalchemy.select(
+            FAILED_FILES.c.root_url, FAILED_FILES.c.results_path_stub, FAILED_FILES.c.reason
+        ).where(*self._scope(FAILED_FILES, roots, selection.subtrees), _has_no_record_row())
+        with reporting_a_failed_read(self._raw_url), self._reading_one_snapshot() as connection:
+            yield from facts_stream(connection, conditions)
+            for row in connection.execute(refusals):
+                yield self._refusal_of(row)
+
+    def _facts_of_stubs(
+        self, root_url: str, selection: Selection
+    ) -> Iterator[ImageFacts | UnreadableFile]:
+        """Read the images a selection named outright, in the order it named them.
+
+        Asked in batches for the reason :meth:`_records_of_stubs` is: a caller is
+        free to name a mission's worth of keys, and a statement binding every one
+        of them at once is one a driver refuses somewhere above its own parameter
+        limit.  One batch's answers are held so they can be put back into the
+        order the batch named, which is the order naming an image means.
+
+        Parameters:
+            root_url: The one normalized root those keys are under.
+            selection: The selection, for the stubs it names and the mission and
+                time bounds a row still has to satisfy.
+
+        Yields:
+            One set of facts per named stub the index holds a row for, and one
+            unreadable file per named stub it holds a refusal for.  A stub it
+            holds neither for yields nothing.
+        """
+        bounds = self._what_a_document_says(selection)
+        with reporting_a_failed_read(self._raw_url), self._reading_one_snapshot() as connection:
+            for batch in in_batches(iter(selection.stubs), RETRIEVE_BATCH_SIZE):
+                refusals = sqlalchemy.select(
+                    FAILED_FILES.c.root_url,
+                    FAILED_FILES.c.results_path_stub,
+                    FAILED_FILES.c.reason,
+                ).where(
+                    FAILED_FILES.c.root_url == root_url,
+                    FAILED_FILES.c.results_path_stub.in_(batch),
+                )
+                found: dict[str, ImageFacts | UnreadableFile] = {
+                    str(row.results_path_stub): self._refusal_of(row)
+                    for row in connection.execute(refusals)
+                }
+                # As for a stream of records: a stub in both tables is an image
+                # with a stale refusal beside it, so the images are placed
+                # second and win.
+                found.update(
+                    (str(one.image['results_path_stub']), one)
+                    for one in facts_stream(
+                        connection,
+                        [
+                            IMAGES.c.root_url == root_url,
+                            IMAGES.c.results_path_stub.in_(batch),
+                            *bounds,
+                        ],
+                    )
+                )
+                for stub in batch:
+                    if stub in found:
+                        yield found[stub]
+
     def _streaming(self) -> Connection:
         """Open a connection whose results arrive in server-side chunks.
 
@@ -488,6 +665,19 @@ class IndexRecordSource:
             The connection, which the caller closes.
         """
         return self._engine.connect().execution_options(yield_per=_ROW_FETCH_SIZE)
+
+    def _reading_one_snapshot(self) -> Connection:
+        """Open a streamed connection whose statements answer about one index.
+
+        What the merge behind :meth:`facts` needs beyond a streamed read: its
+        three statements are put back together by key, and a key present in one
+        of them and absent from another is a pass that hands back images with
+        none of their own child rows.
+
+        Returns:
+            The connection, which the caller closes.
+        """
+        return reading_one_snapshot(self._streaming())
 
     @staticmethod
     def _scope(

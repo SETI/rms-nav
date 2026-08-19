@@ -25,7 +25,7 @@ from tests.spindoctor.cli.stats.conftest import index_url, ingest_tree, write_me
 
 from spindoctor.cli.ck.images import ImageEntry
 from spindoctor.cli.ck.inputs import RECORD_COLUMNS, read_whole_mission
-from spindoctor.cli.ck.report import read_image_facts
+from spindoctor.cli.ck.report import read_image_report_facts
 from spindoctor.nav_records import (
     NavRecord,
     RecordSource,
@@ -343,8 +343,8 @@ def test_the_two_sources_agree_on_the_reported_facts(
         pool: Furnishes the leapseconds kernel the UTC column is converted with.
     """
     from_tree, from_index = both_readings
-    assert [read_image_facts(document.metadata) for document in from_index] == [
-        read_image_facts(document.metadata) for document in from_tree
+    assert [read_image_report_facts(document.metadata) for document in from_index] == [
+        read_image_report_facts(document.metadata) for document in from_tree
     ]
 
 
@@ -477,7 +477,7 @@ def test_a_value_the_ingest_could_not_store_reads_as_one_never_recorded(
     ingest_tree(url, [root], logger=null_logger())
     with open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS) as source:
         documents, _unreadable = _one_mission(source)
-    assert read_image_facts(documents[0].metadata).offset_dv is None
+    assert read_image_report_facts(documents[0].metadata).offset_dv is None
 
 
 def test_the_tree_path_refuses_the_same_document(tmp_path: Path, pool: KernelPool) -> None:
@@ -495,4 +495,4 @@ def test_the_tree_path_refuses_the_same_document(tmp_path: Path, pool: KernelPoo
     )
     documents, _unreadable = _one_mission(TreeRecordSource([root]))
     with pytest.raises(ValueError, match='offset'):
-        read_image_facts(documents[0].metadata)
+        read_image_report_facts(documents[0].metadata)

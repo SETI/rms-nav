@@ -20,7 +20,7 @@ from spindoctor.nav_records import (
     UnreadableFile,
     read_document,
 )
-from spindoctor.nav_records import tree as tree_module
+from spindoctor.nav_records import document as document_module
 
 MISSION = 'coiss'
 """The instrument identity the mission-filtered reads below keep."""
@@ -268,15 +268,15 @@ def count_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         A list that grows by one entry per document read.
     """
     read: list[str] = []
-    # The module's own name for it, so the wrapper calls the reader rather than
-    # itself; the same object either way, since the module imports this one.
+    # Wrapped where the reading happens rather than where the walk asks for it,
+    # which is the one function every reader of a document goes through.
     real_read = read_document
 
     def counting(path: FCPath) -> dict[str, Any]:
         read.append(path.as_posix())
         return real_read(path)
 
-    monkeypatch.setattr(tree_module, 'read_document', counting)
+    monkeypatch.setattr(document_module, 'read_document', counting)
     return read
 
 

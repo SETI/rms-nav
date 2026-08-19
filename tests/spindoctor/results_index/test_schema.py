@@ -46,6 +46,8 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('camera', sqlalchemy.Text, True),
     ('shutter_mode', sqlalchemy.Text, True),
     ('image_path', sqlalchemy.Text, True),
+    ('provenance_image_et', sqlalchemy.Double, True),
+    ('observation_image_et', sqlalchemy.Double, True),
     ('image_et', sqlalchemy.Double, True),
     ('image_date', sqlalchemy.Text, True),
     ('status', sqlalchemy.Text, False),
@@ -55,9 +57,7 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('offset_du', sqlalchemy.Double, True),
     ('sigma_dv', sqlalchemy.Double, True),
     ('sigma_du', sqlalchemy.Double, True),
-    ('covariance_vv', sqlalchemy.Double, True),
-    ('covariance_vu', sqlalchemy.Double, True),
-    ('covariance_uu', sqlalchemy.Double, True),
+    ('covariance_px2', sqlalchemy.JSON, True),
     ('sigma_along_unobservable_px', sqlalchemy.Double, True),
     ('rotation_deg', sqlalchemy.Double, True),
     ('sigma_rotation_deg', sqlalchemy.Double, True),
@@ -100,8 +100,7 @@ TECHNIQUES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('technique_name', sqlalchemy.Text, False),
     ('offset_dv', sqlalchemy.Double, True),
     ('offset_du', sqlalchemy.Double, True),
-    ('sigma_dv', sqlalchemy.Double, True),
-    ('sigma_du', sqlalchemy.Double, True),
+    ('covariance_px2', sqlalchemy.JSON, True),
     ('confidence', sqlalchemy.Double, True),
     ('spurious', sqlalchemy.Boolean, False),
     ('at_edge', sqlalchemy.Boolean, False),
@@ -147,22 +146,63 @@ SCHEMA_META_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('created_utc', sqlalchemy.Text, False),
 )
 
-COLUMN_SET_VERSION = 9
-"""The schema version the column sets above make up.
+JSON_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ('images.covariance_px2', 'JSON', 'JSON'),
+    ('images.excluded_from_consensus', 'JSON', 'JSONB'),
+    ('images.spice_kernels', 'JSON', 'JSONB'),
+    ('images.cmatrix', 'JSON', 'JSON'),
+    ('images.cmatrix_original', 'JSON', 'JSON'),
+    ('techniques.covariance_px2', 'JSON', 'JSON'),
+    ('techniques.source_names', 'JSON', 'JSONB'),
+    ('techniques.diagnostics', 'JSON', 'JSON'),
+)
+"""Every JSON column, and the type each backend emits for it.
 
-An index is readable only by code whose column set is the one that wrote it, and
-the stamped version is the whole of what says so: there are no migrations, and
-the remedy for a mismatch is to build the index again.  So the number is written
-down here beside the columns it belongs to as well as in the schema, and the two
-are compared, because a version compared only against itself agrees with every
-value it could be given.
+``type(column.type)`` is ``sqlalchemy.JSON`` for both of the declarations the
+schema uses, so the per-table lists above cannot tell them apart and a column
+that changed from one to the other would pass every test there.  The difference
+is what the value reads back as: PostgreSQL's ``jsonb`` number type is
+``numeric``, which has no signed zero and no float, so a column that can hold a
+number is plain ``json`` and one holding text alone is ``jsonb``.  Every entry
+here is ``(table.column, SQLite type, PostgreSQL type)``.
+"""
 
-What that catches is a version changed without the columns.  It does not catch
-the reverse, and cannot: a column removed from the schema and from the list
-above, with the version left alone, agrees with this number as readily as it
-agrees with itself, and every index in the world then reads as current while
-holding a column set no code has.  Bumping :data:`SCHEMA_VERSION` is part of
-changing a column set, and nothing here enforces it.
+JSON_COLUMN_CASES = [
+    pytest.param(name, sqlite_type, postgres_type, id=name)
+    for name, sqlite_type, postgres_type in JSON_COLUMNS
+]
+"""One case per JSON column, named so a failure says which column moved."""
+
+SQLITE_DIALECT = sqlalchemy.create_engine('sqlite://').dialect
+"""The dialect a SQLite index compiles its DDL through.
+
+Taken off an engine rather than constructed, so it is the dialect an index
+actually opens with.  The URL names no file and the engine connects to nothing:
+building one opens no database.
+"""
+
+POSTGRES_DIALECT = sqlalchemy.create_engine('postgresql+psycopg://user@host/db').dialect
+"""The dialect a PostgreSQL index compiles its DDL through, likewise."""
+
+DIALECT_CASES = [
+    pytest.param(SQLITE_DIALECT, id='sqlite'),
+    pytest.param(POSTGRES_DIALECT, id='postgres'),
+]
+"""The two backends a declaration is pinned against."""
+
+COLUMN_SET_VERSION = 1
+"""The schema version the column sets above are stamped with.
+
+The number is pinned, so it says nothing about which column set an index holds:
+two builds with different columns stamp the same version, and the gate that
+compares them lets an index built by either one open.  What keeps a column
+change from being silent is therefore the lists above and nothing else, which is
+why they restate every name, type, nullability and position rather than reading
+them off the schema they are meant to guard.
+
+Compared against :data:`~spindoctor.results_index.SCHEMA_VERSION` all the same,
+so that the stamp and the columns it is written beside cannot drift apart while
+the pin holds.
 """
 
 TABLE_CASES = [
@@ -198,11 +238,12 @@ def sqlite_url(tmp_path: Path) -> str:
 
 
 def test_the_schema_stamps_the_version_this_column_set_belongs_to() -> None:
-    """The stamp is what refuses an index an older column set wrote.
+    """The stamp and the columns written beside it name one version.
 
-    Lowered back to a version whose columns these are not, it stops refusing:
-    every index built by either column set opens, and the one built by the older
-    is read as though it carried the newer's columns.
+    The pin means the stamp cannot tell one column set from another, so this
+    pins the number rather than the column set: what guards the columns is the
+    lists above, and what guards those is that they restate the schema instead
+    of reading it.
     """
     assert SCHEMA_VERSION == COLUMN_SET_VERSION
 
@@ -251,6 +292,77 @@ def test_every_column_has_the_declared_nullability(
     """
     found = {name: table.columns[name].nullable for name, _type, _null in expected}
     assert found == {name: nullable for name, _type, nullable in expected}
+
+
+def _json_columns_of_the_schema() -> set[str]:
+    """Return every JSON column the schema declares, as ``table.column``.
+
+    Returns:
+        The qualified names.
+    """
+    return {
+        f'{table.name}.{column.name}'
+        for table in METADATA.tables.values()
+        for column in table.columns
+        if isinstance(column.type, sqlalchemy.JSON)
+    }
+
+
+def test_every_json_column_is_declared_here() -> None:
+    """A JSON column left out of the list would have its declaration pinned nowhere.
+
+    The per-table lists cannot tell the two JSON declarations apart, so this is
+    what obliges a JSON column added to the schema to say which one it takes.
+    """
+    assert _json_columns_of_the_schema() == {name for name, _sqlite, _postgres in JSON_COLUMNS}
+
+
+@pytest.mark.parametrize(('name', 'sqlite_type', 'postgres_type'), JSON_COLUMN_CASES)
+def test_every_json_column_emits_the_declared_type_on_each_backend(
+    name: str, sqlite_type: str, postgres_type: str
+) -> None:
+    """The compiled type is the one thing that tells the two declarations apart.
+
+    A column that can hold a number and compiles to ``JSONB`` returns a stored
+    ``-0.0`` as ``0.0`` and a large-magnitude float as an integer, and every
+    equality comparison in the suite passes on all three.
+
+    Parameters:
+        name: Qualified name of the column under test.
+        sqlite_type: Type the SQLite dialect emits for it.
+        postgres_type: Type the PostgreSQL dialect emits for it.
+    """
+    table_name, column_name = name.split('.')
+    column_type = METADATA.tables[table_name].columns[column_name].type
+    found = (
+        column_type.compile(dialect=SQLITE_DIALECT),
+        column_type.compile(dialect=POSTGRES_DIALECT),
+    )
+    assert found == (sqlite_type, postgres_type)
+
+
+@pytest.mark.parametrize(('name', '_sqlite_type', '_postgres_type'), JSON_COLUMN_CASES)
+@pytest.mark.parametrize('dialect', DIALECT_CASES)
+def test_every_json_column_stores_an_absent_value_as_sql_null(
+    dialect: sqlalchemy.engine.Dialect, name: str, _sqlite_type: str, _postgres_type: str
+) -> None:
+    """Absent is not empty, and without this a missing value is the JSON value null.
+
+    A column holding the JSON value ``null`` satisfies ``IS NOT NULL`` on every
+    row ever written, so a query counting the rows that carry a matrix counts
+    all of them.
+
+    Parameters:
+        dialect: The backend whose implementation of the type is under test.
+        name: Qualified name of the column under test.
+        _sqlite_type: Unused here; the case carries it for the type test.
+        _postgres_type: Unused here likewise.
+    """
+    table_name, column_name = name.split('.')
+    column_type = METADATA.tables[table_name].columns[column_name].type
+    implementation = column_type.dialect_impl(dialect)
+    assert isinstance(implementation, sqlalchemy.JSON)
+    assert implementation.none_as_null is True
 
 
 def test_no_column_anywhere_is_a_bare_float() -> None:

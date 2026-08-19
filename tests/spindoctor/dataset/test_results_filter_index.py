@@ -50,6 +50,7 @@ from tests.spindoctor.dataset.conftest import (
     selection_of,
 )
 
+from spindoctor.cli.stats.ingest import UnwritableRowError, store
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.results_filter import (
     _SPICE_STATUS_ERROR,
@@ -900,3 +901,28 @@ def test_the_index_offers_a_document_that_left_the_tree_to_the_absence_filter(
         VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
     )
     assert select_from(results_filter, images) == [SPICE_ERROR]
+
+
+def test_a_document_the_database_would_not_store_leaves_no_index_to_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It is not one of the answers the two give differently, because there is no answer.
+
+    A row the database refuses ends the pass where it happened, so the root has
+    no completed ingest run and every filter answered from the index refuses the
+    root rather than reading absence under it as "this image was never
+    navigated".
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        monkeypatch: Fixture the image write is replaced through.
+    """
+    root, _images = one_image_tree(tmp_path)
+
+    def refuse(connection: Any, rows: Any) -> None:
+        raise sqlalchemy.exc.IntegrityError('INSERT', {}, Exception('refused'))
+
+    url = index_url(tmp_path / 'index.sqlite3')
+    monkeypatch.setattr(store, '_write_image', refuse)
+    with pytest.raises(UnwritableRowError, match='would not accept its rows'):
+        ingest_tree(url, [root], logger=null_logger())

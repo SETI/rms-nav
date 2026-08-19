@@ -55,6 +55,7 @@ from spindoctor.cli.stats.drop import drop_results_index
 from spindoctor.cli.stats.ingest import (
     IngestCounts,
     TaskCompletion,
+    UnwritableRowError,
     complete_ingest_tasks,
     fan_out_ingest_tasks,
     ingest_metadata_files,
@@ -564,6 +565,20 @@ def main() -> None:
             status = _complete_cloud_tasks(engine, roots, path=arguments.complete_cloud_tasks_file)
         else:
             status = _run_ingest(engine, roots, force=arguments.force)
+    except UnwritableRowError as exc:
+        # The other failure a pass stops for.  The document read exactly as the
+        # schema says and the writer or the column set would not take it, so
+        # every document of that shape after it fails the same way; charged to
+        # the file it would be left out of both tables and the run stamped
+        # finished, after which absence reads as "never navigated".
+        MAIN_LOGGER.fatal(
+            'Ingest stopped: %s. The document is a navigation result and the index would not '
+            'store it, which is a defect in this program rather than in the file. This root '
+            'and any named after it have no completed ingest run, so no consumer reads '
+            'absence under them as an answer.',
+            exc,
+        )
+        status = 1
     except UnlistableDirectoryError as exc:
         # The one failure a pass stops for rather than charging to a file or a
         # root.  A directory nobody listed holds documents nobody recorded, and

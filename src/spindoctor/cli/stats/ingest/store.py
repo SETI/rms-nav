@@ -9,8 +9,18 @@ read.
 An image is written whole or not at all: the delete cascades to the child
 tables and runs inside the caller's transaction, so a concurrent worker never
 sees half of one image.  A chunk whose write fails is rewritten one image at a
-time, which puts every writable document in and identifies the one the database
-will not accept, instead of costing the chunk and then the run.
+time, which is what names the document the database would not take.
+
+A row the database will not accept ends the pass.  It is not a property of the
+file: the document read exactly as the schema says, and what refused it is this
+code's own writer or the column set it writes into, either of which will refuse
+the next document of the same shape the same way.  Charged to the file it would
+be counted and left out of both tables, and the pass would stamp its run
+finished -- after which absence of an ``images`` row reads as "this image was
+never navigated", which is the one answer the index exists to give and would
+now be wrong for an image nobody can name.  So the pass stops where it happened,
+the root's run keeps its NULL finish time, and every consumer says the root has
+no completed ingest until the writer is fixed and the pass rerun.
 
 A refusal replaces whatever an earlier pass recorded, in a table of its own.  A
 consumer reads absence of an ``images`` row as "this image was never
@@ -25,21 +35,26 @@ from typing import Any
 import sqlalchemy
 from pdslogger import PdsLogger
 
-from spindoctor.cli.stats.ingest.counts import IngestCounts
-from spindoctor.cli.stats.ingest_rows import NOT_A_NAVIGATION_DOCUMENT, ImageRows
+from spindoctor.nav_records.facts import NOT_A_NAVIGATION_DOCUMENT, ImageFacts
 from spindoctor.results_index import FAILED_FILES, FEATURE_SOURCES, IMAGES, TECHNIQUES
 
-__all__ = ['UNWRITABLE']
+__all__ = ['UnwritableRowError']
 
-UNWRITABLE = 'the database would not accept its rows'
-"""Reason counted against a document the database refused to store.
 
-A reason of its own rather than the driver's message, which names the individual
-file and the individual value and would therefore tally as one reason per file.
-It is also not one of the "not a current-schema navigation document" reasons:
-such a document read exactly as the schema says, and only the storage refused
-it.
-"""
+class UnwritableRowError(RuntimeError):
+    """The database would not accept the rows of a document that read cleanly.
+
+    Carries the file and the driver's own sentence, because what has to be
+    fixed is the writer or the column set rather than the file: a value one
+    backend holds and another refuses is a property of the schema, and the next
+    document of the same shape fails the same way.
+
+    Ends the pass rather than being charged to the file.  A file counted and
+    left out is in neither table, and a finished run over an index missing it
+    turns absence of an ``images`` row -- which every consumer reads as "this
+    image was never navigated" -- into an answer nobody can tell from the truth.
+    """
+
 
 _RECORDED_LOOKUP_BATCH_SIZE = 500
 """How many stubs one restricted lookup names at a time.
@@ -151,7 +166,7 @@ def _refusals_the_tree_answers_for(connection: sqlalchemy.Connection, root_url: 
 
     - The row is this root's, since one index serves several roots.
     - Its reason is the schema family
-      (:data:`~spindoctor.cli.stats.ingest_rows.NOT_A_NAVIGATION_DOCUMENT`),
+      (:data:`~spindoctor.nav_records.facts.NOT_A_NAVIGATION_DOCUMENT`),
       which is a JSON object the tree reads a ``status`` out of and this index
       records no status for.  The other reasons are a file no JSON object came
       out of, and the tree excludes such a file from every error filter exactly
@@ -238,7 +253,7 @@ def _report_refusals(engine: sqlalchemy.Engine, root_url: str, *, logger: PdsLog
     )
 
 
-def _write_image(connection: sqlalchemy.Connection, rows: ImageRows) -> None:
+def _write_image(connection: sqlalchemy.Connection, rows: ImageFacts) -> None:
     """Replace one image and its child rows.
 
     The delete cascades to the child tables, so the image is written whole or
@@ -320,33 +335,31 @@ def _connection_was_lost(exc: BaseException) -> bool:
 
 def _write_chunk(
     engine: sqlalchemy.Engine,
-    pending: Sequence[ImageRows],
+    pending: Sequence[ImageFacts],
     refused: Sequence[dict[str, Any]],
     *,
-    counts: IngestCounts,
     logger: PdsLogger,
 ) -> int:
-    """Write one chunk's images and refusals, isolating a row the database refuses.
+    """Write one chunk's images and refusals, naming a row the database refuses.
 
     The chunk is one transaction, which is what bounds the cost of a crash and
-    keeps a writer from holding a lock for the length of a run.  A document the
-    database will not store -- an identifier too large for its column, a value
-    a backend's type will not hold -- would take the whole chunk down with it
-    and then the run, leaving the root's ingest unfinished and every consumer
-    refusing it.  So a chunk that fails is written again one image at a time,
-    which puts every writable document in and identifies the one that is not.
+    keeps a writer from holding a lock for the length of a run.  A chunk that
+    fails says only that one of its documents would not go in, so it is written
+    again one image at a time: every writable document of it is stored, and the
+    one that is not is named.
 
     Parameters:
         engine: The open index.
         pending: The images to write.
         refused: The ``failed_files`` rows to write.
-        counts: Accumulator the write failures are added to.
         logger: Logger for the per-file failures.
 
     Returns:
         How many images were written.
 
     Raises:
+        UnwritableRowError: If the database will not accept some document's
+            rows, naming it.
         Exception: Whatever the database raised, if it says the connection is
             gone rather than the row unacceptable.
     """
@@ -360,36 +373,33 @@ def _write_chunk(
         if _connection_was_lost(exc):
             raise
         logger.debug('Retrying a chunk one image at a time after %s: %s', type(exc).__name__, exc)
-        return _write_separately(engine, pending, refused, counts=counts, logger=logger)
+        return _write_separately(engine, pending, refused)
     return len(pending)
 
 
 def _write_separately(
-    engine: sqlalchemy.Engine,
-    pending: Sequence[ImageRows],
-    refused: Sequence[dict[str, Any]],
-    *,
-    counts: IngestCounts,
-    logger: PdsLogger,
+    engine: sqlalchemy.Engine, pending: Sequence[ImageFacts], refused: Sequence[dict[str, Any]]
 ) -> int:
-    """Write one chunk's rows in a transaction each, counting what will not go in.
+    """Write one chunk's rows in a transaction each, naming what will not go in.
 
-    A write failure is counted but not recorded in ``failed_files``, exactly as
-    a retrieval that failed is not: the document read, so nothing about it says
-    the next pass will not store it, and a recorded refusal would be skipped for
-    as long as the file did not change.
+    Every document that goes in is committed on its own, so the work already
+    paid for is kept and a rerun after the fix reads only what is left.  The
+    first one that will not go in ends the pass: it is a fault of the writer or
+    of the column set, so the documents after it in this chunk would be written
+    against the same fault, and a pass that carried on would finish having left
+    an unknown number of images out of both tables.
 
     Parameters:
         engine: The open index.
         pending: The images to write.
         refused: The ``failed_files`` rows to write.
-        counts: Accumulator the write failures are added to.
-        logger: Logger for the per-file failures.
 
     Returns:
         How many images were written.
 
     Raises:
+        UnwritableRowError: If the database will not accept some document's
+            rows, naming it and what the driver said.
         Exception: Whatever the database raised, if it says the connection is
             gone rather than the row unacceptable.
     """
@@ -402,9 +412,10 @@ def _write_separately(
         except Exception as exc:
             if _connection_was_lost(exc):
                 raise
-            counts.record_failure(UNWRITABLE, source_file)
-            logger.debug('Skipping %s: %s: %s', source_file, type(exc).__name__, exc)
-            continue
+            raise UnwritableRowError(
+                f'{source_file}: the database would not accept its rows '
+                f'({type(exc).__name__}: {exc})'
+            ) from exc
         written += 1
     for refusal in refused:
         try:
@@ -413,7 +424,8 @@ def _write_separately(
         except Exception as exc:
             if _connection_was_lost(exc):
                 raise
-            logger.debug(
-                'Could not record the refusal of %s: %s', refusal['results_path_stub'], exc
-            )
+            raise UnwritableRowError(
+                f'{refusal["results_path_stub"]}: the database would not accept the record of '
+                f'its refusal ({type(exc).__name__}: {exc})'
+            ) from exc
     return written

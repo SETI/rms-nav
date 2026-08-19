@@ -17,13 +17,13 @@ from typing import Any
 import pytest
 from filecache import FCPath
 
-from spindoctor.cli.stats.classify import datetime_from_image_et
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.dataset_pds3 import DataSetPDS3
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
 from spindoctor.dataset.dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
 from spindoctor.dataset.dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
+from spindoctor.nav_records.derived import datetime_from_image_et
 
 # --- ^IMAGE pointer parsing (issue #12) ---
 

@@ -1,22 +1,24 @@
 """Tests for the pure helpers the report is assembled from.
 
 None of these reads a database. They cover the values the report derives from an
-image name or an epoch, the search limit it resolves from configuration, and the
+image name or an epoch, the search limit it resolves from configuration, the
 filter fragment every query splices in -- which carries named binds and its
 values beside it, because the fragment is spliced into statements that carry
 binds of their own and an inlined literal is a quoting bug waiting for a value
-that carries a quote.
+that carries a quote -- and how one column value is rendered into a CSV cell.
 """
+
+from typing import Any
 
 import pytest
 
-from spindoctor.cli.stats.classify import (
+from spindoctor.cli.stats.report_common import count_pct, image_name_from_filename, where_clause
+from spindoctor.cli.stats.report_sections import _csv_value, resolve_offset_limit
+from spindoctor.nav_records.derived import (
     date_from_image_et,
     datetime_from_image_et,
     image_number_from_name,
 )
-from spindoctor.cli.stats.report_common import count_pct, image_name_from_filename, where_clause
-from spindoctor.cli.stats.report_sections import resolve_offset_limit
 
 # ---------------------------------------------------------------------------
 # Derived values
@@ -143,3 +145,48 @@ def test_a_filter_is_a_named_bind_carrying_its_value_beside_it() -> None:
     where, params = where_clause(instrument='coiss', start_date=None, end_date=None)
     assert where == ' WHERE instrument = :instrument'
     assert params == {'instrument': 'coiss'}
+
+
+# ---------------------------------------------------------------------------
+# One CSV cell
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('value', 'expected'),
+    [
+        ([1.0, -2.5], '[1.0, -2.5]'),
+        ([], '[]'),
+        ([[1.0, 0.0], [0.0, 4.0]], '[[1.0, 0.0], [0.0, 4.0]]'),
+        ({'iterations': 4}, '{"iterations": 4}'),
+        ({}, '{}'),
+        ('BodyLimbNav', 'BodyLimbNav'),
+        (1.5, 1.5),
+        (None, None),
+    ],
+    ids=[
+        'a list',
+        'an empty list',
+        'a matrix',
+        'an object',
+        'an empty object',
+        'text',
+        'a number',
+        'nothing',
+    ],
+)
+def test_a_json_container_is_written_as_json_text_and_nothing_else_is_touched(
+    value: Any, expected: Any
+) -> None:
+    """A cell holding a Python container's repr is a cell nothing can read back.
+
+    Driven directly rather than through an export, because which backend hands
+    this function a container is the driver's decision: the export reads through
+    raw SQL, so only a backend that decodes JSON on the way out reaches the
+    container branch at all.
+
+    Parameters:
+        value: The value as a driver would return it.
+        expected: The cell it becomes.
+    """
+    assert _csv_value(value) == expected

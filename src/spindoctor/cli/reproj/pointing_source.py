@@ -29,13 +29,20 @@ What the rebuilt record carries
 
 :data:`_ROW_COLUMNS` is this consumer's declaration of what it reads, and a
 rebuilt record carries those columns and nothing else: the top-level ``status``,
-``status_error`` and ``offset``, and the ``navigation_result`` ``times`` and
-``pointing`` blocks the C-matrix mechanism needs.  It is not the document; it is
-the part of the document that decides a pointing.  The ``pointing`` block's
-``camera_frame`` is not among them although the index carries it for another
-reader: the frame identity a recorded attitude is gated against is taken from the
-observation, never from the record, so nothing here would consult a rebuilt name.
-Selecting no column for it is the whole of how that is arranged.
+``status_error`` and ``offset``, the ``navigation_result`` ``pointing`` block,
+and the one epoch of ``times`` the C-matrix gates are run against.  It is not
+the document; it is the part of the document that decides a pointing.  The rest
+of ``times`` -- the exposure bounds, the duration and the three spacecraft clock
+strings -- is not selected: no reader here consults an epoch other than
+``midtime_et``, and a column selected only to be dropped is paid for on every
+row read.  The ``pointing`` block's ``camera_frame`` is not selected either,
+although the index carries it for another reader: the frame identity a recorded
+attitude is gated against is taken from the observation, never from the record,
+so nothing here would consult a rebuilt name.  The block's two frame identities
+are selected all the same, and for their presence rather than for their values:
+a block is rebuilt exactly when a column of it carries something, and the
+block's presence is what tells a result that fitted a camera rotation from a
+record that recorded no pointing at all.
 
 How an absent column, a NOT NULL status and half a pair are rebuilt is
 :mod:`spindoctor.results_index.rebuild`'s to state, since every consumer depends
@@ -209,13 +216,7 @@ _ROW_COLUMNS = (
     IMAGES.c.status_error,
     IMAGES.c.offset_dv,
     IMAGES.c.offset_du,
-    IMAGES.c.start_et,
-    IMAGES.c.stop_et,
     IMAGES.c.midtime_et,
-    IMAGES.c.exposure_s,
-    IMAGES.c.sclk_start,
-    IMAGES.c.sclk_midtime,
-    IMAGES.c.sclk_stop,
     IMAGES.c.camera_frame_id,
     IMAGES.c.ck_frame_id,
     IMAGES.c.cmatrix,
@@ -225,9 +226,18 @@ _ROW_COLUMNS = (
 
 A row is only cheaper than a document while it carries less, so this is a
 declaration rather than a convenience: what is not here is not read, and what is
-read is here.  A test holds the list to the fields
-:mod:`spindoctor.results_index.rebuild` knows a place for, since a column
-selected that no field is rebuilt from would be paid for and dropped.
+read is here.  Both directions are held by a test.  One holds every column here
+to the fields :mod:`spindoctor.results_index.rebuild` knows a place for, since a
+column selected that no field is rebuilt from would be paid for and dropped.
+The other drops each column in turn and holds what the readers then get back to
+being different, since a column whose absence changes nothing is a column
+nothing reads.
+
+All but two are read for their values: the outcome and the error beside it, the
+two halves of the recorded offset, the two matrices, and the midtime the
+C-matrix gates are run against.  The two frame identities are read for their
+presence, which is what keeps a pointing block recording no usable attitude
+visible as the block it was.
 """
 
 

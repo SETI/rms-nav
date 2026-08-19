@@ -28,16 +28,22 @@ import pytest
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats.ingest import chunks as chunks_module
+from spindoctor.cli.stats.ingest import UnwritableRowError
 from spindoctor.cli.stats.ingest import driver as driver_module
 from spindoctor.cli.stats.ingest import store as store_module
-from spindoctor.cli.stats.ingest_rows import (
-    MetadataDocumentError,
-    MetadataSource,
-    rows_from_metadata,
+from spindoctor.nav_records import (
+    METADATA_SUFFIX,
+    NOT_VALID_JSON,
+    UnlistableDirectoryError,
 )
-from spindoctor.nav_records import METADATA_SUFFIX, UnlistableDirectoryError
+from spindoctor.nav_records import facts as facts_module
+from spindoctor.nav_records.facts import (
+    DocumentOrigin,
+    MetadataDocumentError,
+    facts_from_document,
+)
 from spindoctor.results_index import FAILED_FILES, IMAGES, INGEST_RUNS, TECHNIQUES, open_index
+from spindoctor.support.nav_record import record_status
 
 from .conftest import (
     index_url,
@@ -47,7 +53,7 @@ from .conftest import (
     write_metadata,
 )
 
-SOURCE = MetadataSource(
+SOURCE = DocumentOrigin(
     root_url='/data/nav-results',
     results_path_stub='COISS_2001/data/1294561143_1295221348/N1294561202_1_CALIB',
     source_file='/data/nav-results/x_metadata.json',
@@ -147,7 +153,7 @@ def test_a_document_of_another_shape_is_refused(document: dict[str, Any]) -> Non
         document: A document carrying one disallowed container shape.
     """
     with pytest.raises(MetadataDocumentError, match='not a current-schema navigation document'):
-        rows_from_metadata(document, SOURCE)
+        facts_from_document(document, SOURCE)
 
 
 @pytest.mark.parametrize('document', _MALFORMED_PARAMS)
@@ -169,35 +175,90 @@ def test_a_document_of_another_shape_costs_only_itself(
 
 
 class _NobodyEnumeratedThisError(Exception):
-    """An exception type the ingest source has no way to name.
+    """An exception type the document reader has no way to name.
 
-    The catch-all exists for the shapes nobody thought of, so a test that raises
-    a type the source could have listed does not exercise it: narrowing the
-    guard to that one type leaves the test passing.  This class is defined here
-    and imported nowhere, so only a guard that catches whatever comes can catch
-    it.
+    Stands for a fault in the reader rather than a shape of the document, which
+    is the case the policy under test is about.  It is defined here and imported
+    nowhere, so nothing can be catching it by name.
     """
 
 
-def test_an_unenumerated_failure_costs_only_its_own_file(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The shapes are checked, and whatever nobody thought of is caught anyway."""
+def _tree_of_two_documents(tmp_path: Path) -> Path:
+    """Write a tree holding two documents this schema accepts.
+
+    Parameters:
+        tmp_path: Directory the tree lives under.
+
+    Returns:
+        The results root.
+    """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725798_1_CALIB', metadata_document())
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    calls: list[int] = []
-    real_rows = rows_from_metadata
+    return root
 
-    def occasionally_exploding(metadata: Any, source: Any) -> Any:
+
+def _reader_that_faults_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the first document read raise a fault the reader cannot name.
+
+    Raised from inside the reading rather than from the call to it, so that a
+    guard put back anywhere along that path would catch it.
+
+    Parameters:
+        monkeypatch: Fixture one step of the reading is replaced through.
+    """
+    calls: list[int] = []
+    real_status = record_status
+
+    def occasionally_exploding(metadata: Any) -> Any:
         calls.append(1)
         if len(calls) == 1:
-            raise _NobodyEnumeratedThisError('a shape nobody enumerated')
-        return real_rows(metadata, source)
+            raise _NobodyEnumeratedThisError('a fault in this code')
+        return real_status(metadata)
 
-    monkeypatch.setattr(chunks_module, 'rows_from_metadata', occasionally_exploding)
-    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    assert (counts.files_ingested, counts.files_failed) == (1, 1)
+    monkeypatch.setattr(facts_module, 'record_status', occasionally_exploding)
+
+
+def test_a_fault_in_the_reader_ends_the_pass(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal is recorded with the file's own metrics, so the next pass skips it.
+
+    A fault in this code written down that way would outlive its own fix, and
+    every later pass would report a clean run over a tree an image is missing
+    from.  So it is not written down: it ends the pass where it happened.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the reader is replaced through.
+    """
+    root = _tree_of_two_documents(tmp_path)
+    _reader_that_faults_once(monkeypatch)
+    with pytest.raises(_NobodyEnumeratedThisError, match='a fault in this code'):
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+
+
+def test_a_fault_in_the_reader_records_no_refusal(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which is the half that would survive the fix, so it is the half pinned.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the reader is replaced through.
+    """
+    root = _tree_of_two_documents(tmp_path)
+    _reader_that_faults_once(monkeypatch)
+    url = index_url(tmp_path / 'index.sqlite3')
+    with pytest.raises(_NobodyEnumeratedThisError):
+        ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(FAILED_FILES.c.results_path_stub))
+    engine.dispose()
+    assert found == []
 
 
 def _tree_with_unparseable_nesting(tmp_path: Path) -> Path:
@@ -236,14 +297,18 @@ def test_a_document_the_decoder_gives_up_on_is_charged_to_the_parse(
 ) -> None:
     """One reason covers every way a decoder ends with no value, so a tally reads as one.
 
-    The reason it carries is read on its prefix rather than whole: a decoder that
-    raises something other than a decoding error has that named after it, and
-    which decoders do is not this code's to say.
+    Compared whole rather than by prefix: however the decoder gave up, the file
+    earns the one reason that says no value came out of it, and it is the same
+    reason a reader of the results tree gives for the same file.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
     """
     root = _tree_with_unparseable_nesting(tmp_path)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     (reason,) = counts.failures_by_reason
-    assert reason.startswith('not valid JSON')
+    assert reason == NOT_VALID_JSON
 
 
 def test_a_document_the_decoder_gives_up_on_leaves_a_completed_run(
@@ -261,7 +326,8 @@ UNSTORABLE_IMAGE_NAME = f'N{"9" * 25}_1_CALIB.IMG'
 
 ``image_number`` is derived from it, and the driver refuses the value at the
 insert rather than at any check this code makes -- which is what makes it a
-database failure rather than a document-shape one.
+database failure rather than a document-shape one.  What is under test is the
+writer's answer to a row the database will not take, whatever produced it.
 """
 
 
@@ -282,22 +348,70 @@ def _tree_with_an_unstorable_document(tmp_path: Path) -> Path:
     return root
 
 
-def test_a_document_the_database_refuses_costs_only_itself(
+def test_a_document_the_database_refuses_ends_the_pass(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A value no column can hold is found at the insert, inside the chunk's write."""
+    """Counted and passed over, it would be in neither table under a finished run.
+
+    Absence of an ``images`` row is what every consumer reads as "this image was
+    never navigated", so an image left out of both tables by a run that reported
+    itself clean is an answer nobody can tell from the truth.  What refused it is
+    this program's writer or its column set, not the file, and the next document
+    of the same shape fails the same way.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+    """
     root = _tree_with_an_unstorable_document(tmp_path)
-    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    assert (counts.files_ingested, counts.files_failed) == (1, 1)
+    with pytest.raises(UnwritableRowError, match='would not accept its rows'):
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
 
 
-def test_a_document_the_database_refuses_leaves_the_rest_of_its_chunk(
+def test_such_a_failure_names_the_document_the_database_refused(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """Rewriting the chunk one image at a time is what keeps the others in."""
+    """One of several hundred thousand files, so the message has to say which.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+    """
+    root = _tree_with_an_unstorable_document(tmp_path)
+    with pytest.raises(UnwritableRowError) as excinfo:
+        ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert 'VOL/N9999999999_1_CALIB' in str(excinfo.value)
+
+
+def test_such_a_failure_leaves_the_run_unfinished(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Which is what makes every consumer refuse the root instead of reading it.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+    """
     root = _tree_with_an_unstorable_document(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
+    with pytest.raises(UnwritableRowError):
+        ingest_tree(url, [root], logger=quiet_logger)
+    assert [time is not None for time in _finish_times(url)] == [False]
+
+
+def test_such_a_failure_keeps_the_documents_already_written(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """Writing one image per transaction is what makes a rerun cheap after the fix.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+    """
+    root = _tree_with_an_unstorable_document(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    with pytest.raises(UnwritableRowError):
+        ingest_tree(url, [root], logger=quiet_logger)
     engine = open_index(url)
     with engine.connect() as connection:
         found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub))
@@ -305,13 +419,22 @@ def test_a_document_the_database_refuses_leaves_the_rest_of_its_chunk(
     assert [row.results_path_stub for row in found] == ['VOL/N1454725799_1_CALIB']
 
 
-def test_a_document_the_database_refuses_records_no_refusal(
+def test_such_a_failure_records_no_refusal(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """It read, so nothing about it says the next pass will not store it."""
+    """A refusal carries the file's own metrics, so the next pass would skip it.
+
+    The document is a navigation result and this program would not store it;
+    recorded as a refusal, that defect would survive its own fix.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+    """
     root = _tree_with_an_unstorable_document(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=quiet_logger)
+    with pytest.raises(UnwritableRowError):
+        ingest_tree(url, [root], logger=quiet_logger)
     engine = open_index(url)
     with engine.connect() as connection:
         found = _rows(connection, sqlalchemy.select(FAILED_FILES.c.results_path_stub))
