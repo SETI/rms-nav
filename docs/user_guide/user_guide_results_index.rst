@@ -994,12 +994,9 @@ one of the reasons is the reason a reader of the results tree gives for the same
 file, so the two never describe one file's fault two different ways.
 
 ``schema_meta`` holds a single row stamping the database with the column-set
-version that created it. That version is pinned at 1, so an index carrying that
-stamp opens whatever column set it was built from -- and then answers a query
-with a column it does not have -- while one carrying any other number is
-refused, naming both. After updating SpinDoctor, drop the index and ingest again
--- ``sd_stats_ingest --drop-index`` and then a fresh pass -- rather than relying
-on the version gate to tell you the index is out of date.
+version that created it. An index whose stamp is not the version this build
+reads is refused at open, naming both; the remedy is the rebuild described under
+`Rebuilding one`_.
 
 Indexes exist on ``images(results_path_stub)``, ``images(image_date)``,
 ``images(instrument)``, and ``ingest_runs(root_url)``, plus the uniqueness

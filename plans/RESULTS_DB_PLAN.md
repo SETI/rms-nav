@@ -405,12 +405,12 @@ open_index(url: str, *, create: bool = False) -> Engine
 
 There are no migrations. Ingest is cheap relative to navigation and entirely
 reproducible from the tree, so rebuilding is always available and always
-correct. `schema_version` is pinned at 1, so the stamp does not tell one column
-set from another: what the gate refuses is a database stamped by something other
-than this build, and any change to the column set or to the constraints over it
-obliges whoever makes it to drop and rebuild every index by hand, in the same
-change. The gate replaces a column-set comparison, which detects a changed
+correct. The gate replaces a column-set comparison, which detects a changed
 column set but not a changed meaning of an unchanged column.
+
+**Development-stage decision: `SCHEMA_VERSION` and `COLUMN_SET_VERSION` are held at 1 for the duration of the record-source work.** No index is carried from one column set to the next while that work is under way -- there is none in use, and nothing on these branches builds one it then keeps -- so a column change does not raise the number and no one drops and re-ingests anything. The number resumes incrementing on a column-set change once the work reaches `main`, where the index is in real use and the stamp does its normal job.
+
+This pin is recorded here and nowhere else. The user guide and the dev guide describe the finished system: an index carries a schema version, an index whose stamp is not the version the code reads is refused, there are no migrations, rebuilding is the remedy, and a column change raises the number. A guide that narrated the pin would be describing a state its readers will not be in.
 
 ### 2.5 Backend selection
 
@@ -1058,15 +1058,7 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 
 **The rule the seam is held to: a record the two storages *classify* differently may differ in the reason and in nothing else.** The reason is a name a run-level tally counts under; the mechanism, the matrices, the midtime and the offset are what a product is built from. A difference in any of those is a defect in the reader or in what ingest stores, not an entry for the list. The list itself is derived by measurement rather than by argument: both sources are driven over every shape a record's fields can take -- absent, null, wrong type, over-long, non-finite, boolean, nested, ragged, and an integer too large for a float -- and what survives defines it.
 
-Three classes survive. Each needs a record shape no navigation produces, each is stated in the module docstring, the user guide and here with the same members, and each is pinned by a test.
-
-1. **An `offset` no reader can use** -- absent, null, a boolean pair, a non-finite pair, or anything that is not two values convertible to finite pixels. The document is classified under which of those it was; the row, which holds one NULL pair for all of them, under `null_offset`.
-2. **A `cmatrix` no column can hold** -- one whose recorded value is not one 3x3 matrix of finite real numbers in some nesting an array library reconciles into that shape. Nine values, a 3x3 nesting of them and nine rows of one all denote the same matrix and are all held; a value of any other shape, and one whose nine entries are not finite real numbers, is held by neither storage. The document is `malformed_pointing`; the row is `no_cmatrix_rotation_fitted` when something else of the block survives and `no_pointing_block` when nothing does. The file path also puts one line in the run log for it. (A `cmatrix` that *is* nine finite numbers and is not a rotation is stored, and the validator refuses it in both paths alike, which is why `malformed_pointing` has a row of its own in the table.)
-3. **A `pointing` block none of whose four columned fields survives** -- one holding only `camera_frame`, or frame identities written as floats or booleans, which the integer columns refuse. The document is `no_cmatrix_rotation_fitted`, because the block exists and carries no corrected attitude; the row is `no_pointing_block`, because the block left no trace in it.
-
-What decides class 2's membership is not a rule of its own: the store assembles a recorded matrix through the same function the reader does, so a matrix the reader can evaluate is one the column holds and a matrix the column holds nothing for is one the reader refuses. The class is exactly the recorded values that are not one 3x3 matrix of finite real numbers, in whatever nesting an array library can reconcile into that shape -- nine rows of one among them.
-
-For every record the navigator wrote and ingest stored, and for every hand-built shape outside those three classes, everything a product is built from -- the mechanism, the matrices, the midtime, the offset -- is identical in the two paths, and so is every field the readers report about it. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the same message shapes; where a message names the storage that was searched, it names the one that actually was.
+Nothing survives. The navigator's own types settle it: a `success` record carries an offset of two floats, a recorded attitude is validated as a proper rotation of finite numbers before it is written, and a pointing block always carries its baseline and both frame identities as integers. So for every record the navigator wrote and ingest stored, everything a product is built from -- the mechanism, the matrices, the midtime, the offset -- is identical in the two paths, and so is every field the readers report about it, the reason among them. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the same message shapes; where a message names the storage that was searched, it names the one that actually was.
 
 **`ResultsFilter`.** When a URL is given, the presence, absence, and error
 filters become one query per enumeration instead of a walk per volume plus
@@ -2276,8 +2268,8 @@ the modules the later phases add. Updates: `user_guide_statistics.rst` (per sect
 `user_guide_logging.rst` (program table), `introduction_configuration.rst`
 (`environment.results_db`), and a dev-guide section covering the Core
 layer, the concurrency model, the branch-local import exception, and how to
-add a column (drop and rebuild every index by hand, since the version is
-pinned). No issue numbers in any of it.
+add a column (raise the schema version, rebuild every index). No issue numbers
+in any of it.
 
 Details settled during execution, none of them a change of intent:
 

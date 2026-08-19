@@ -88,9 +88,7 @@ Versioning
 ``schema_meta`` holds a single row carrying :data:`SCHEMA_VERSION`.  There are no
 migrations: ingest is cheap relative to navigation and entirely reproducible from
 the tree, so the remedy for a column set an index does not hold is to delete the
-database and re-ingest.  The version is pinned, so the stamp does not tell a
-column set apart from any other and the operator performs that remedy by hand
-after a schema change.
+database and re-ingest.
 """
 
 from typing import Any
@@ -121,11 +119,9 @@ SCHEMA_VERSION = 1
 """Column-set version of the index.
 
 Stamped into every index at creation and compared on every later open: a
-database stamped with a different version is refused rather than migrated.  The
-number is pinned, so what the gate refuses is an index stamped by something
-other than this build rather than one built from an earlier column set of it.
-Changing a column set therefore obliges whoever changes it to drop and rebuild
-every index by hand.
+database stamped with a different version is refused rather than migrated,
+naming both versions, and the remedy it prescribes is to empty the database and
+ingest the tree again.
 """
 
 

@@ -406,13 +406,10 @@ Adding a column
 ===============
 
 There are no migrations. Any change to the column set of any table --- or to
-the constraints over it --- means every existing index is rebuilt.
-
-:data:`~spindoctor.results_index.SCHEMA_VERSION` is pinned at 1 and stays there,
-so the version gate does not perform that rebuild for you: an index built from a
-different column set carries the same stamp and opens. **Drop and rebuild every
-index you hold, by hand, in the same change.** An index left in place reads as
-current and then fails on a column that is not in it.
+the constraints over it --- means every existing index is rebuilt, and raising
+:data:`~spindoctor.results_index.schema.SCHEMA_VERSION` is what makes that happen: an
+index stamped with the earlier number is refused at open, naming both versions,
+and its holder empties it and ingests the tree again.
 
 1. Add the column to its table in
    :mod:`spindoctor.results_index.schema`. Use ``Double`` rather than ``Float``
@@ -424,12 +421,16 @@ current and then fails on a column that is not in it.
    a large-magnitude float as an integer; one holding text alone takes the
    ``jsonb`` variant, whose array and object accessors a direct-SQL query
    reaches inside without a cast.
-2. Fill it in ``spindoctor.nav_records.facts``, reading the document through
+2. **Increment** :data:`~spindoctor.results_index.schema.SCHEMA_VERSION` in the same
+   commit. Increment it again for a second change in the same branch rather
+   than reusing the bump: an index built from the intermediate state would
+   otherwise pass the gate and then fail on a column that is not there.
+3. Fill it in ``spindoctor.nav_records.facts``, reading the document through
    the accessors in ``spindoctor.support.nav_record`` that the consumers read
    it through. The invariant is that a record rebuilt from the
    columns classifies exactly as its document does; a second set of rules in
    the store is a second reader of the record, and the two drift.
-3. Sort it into one of the three groups in
+4. Sort it into one of the three groups in
    :mod:`spindoctor.results_index.rebuild`. A column copied out of one field of
    one document is an entry in ``RECORD_FIELDS`` naming where in a record that
    field sits; one that says where the document is belongs to
@@ -438,23 +439,24 @@ current and then fails on a column that is not in it.
    belongs to ``DERIVED_COLUMNS``, because no field of a record is what it came
    from. The three are asserted to be a partition of the table, so a column left
    out of all three fails rather than reading as absent from every record.
-4. Read it wherever it is consumed, by adding it to that consumer's column list,
+5. Read it wherever it is consumed, by adding it to that consumer's column list,
    and extend the reason vocabulary if the consumer classifies on it. A consumer
    that does not select a column reads its field as absent.
-5. Update the column-set lists in
+6. Update the column-set lists in
    ``tests/spindoctor/results_index/test_schema.py``: the per-table list, which
    pins each table's columns, their types, their nullability and their order,
    and --- for a JSON column --- the list of JSON columns, which pins the type
    each backend emits for it and that an absent value is stored as SQL NULL. A
    JSON column missing from the second list fails the test that holds the two
-   against the schema. With the stamp pinned, those lists are the whole of what
-   a column change has to answer to, which is why they restate every name, type,
-   nullability and position instead of reading them off the schema they guard.
-6. Update the schema tables in
+   against the schema, and ``COLUMN_SET_VERSION`` beside them takes the same
+   number the schema was stamped with: a version compared only against itself
+   agrees with every value it could be given, which is why the number is
+   written down beside the columns as well as in the schema.
+7. Update the schema tables in
    :doc:`/user_guide/user_guide_results_index`, which document the index for
    somebody writing SQL against it.
 
-Dropping a column is the same list, and the same rebuild by hand.
+Dropping a column is the same list, and the same version bump.
 
 The edits, in the order the list gives them:
 
@@ -468,6 +470,8 @@ The edits, in the order the list gives them:
         # What the column carries, and what a NULL in it means.
         sqlalchemy.Column('shutter_mode', sqlalchemy.Text),
     )
+
+    SCHEMA_VERSION = 9  # incremented by this change
 
     # spindoctor/nav_records/facts.py, inside facts_from_document
     image_row: dict[str, Any] = {
@@ -498,6 +502,8 @@ The edits, in the order the list gives them:
         ...,
         ('images.spice_kernels', 'JSON', 'JSONB'),  # column, SQLite, PostgreSQL
     )
+
+    COLUMN_SET_VERSION = 9  # the same number, written down beside the columns
 
 The value is read out of the document with the coercion its column's meaning
 calls for, and never coerced past what the document said: ``str(None)`` is

@@ -136,47 +136,19 @@ retrieve: nothing is known about it that will still be true next pass, and a
 recorded refusal is skipped for as long as the file does not change.  Such a
 file has no row in either table and reads as an image nothing navigated.
 
-The three classes read differently
-----------------------------------
+Everything else agrees
+----------------------
 
-Three classes of record the index does hold are classified under a different
-reason by the two storages, and that the reason is the whole of the difference
-is asserted rather than observed: a member whose mechanism, matrices, midtime or
-offset differed would be a defect in this module or in what ingest stores, not a
-fourth class.  The membership is measured rather than argued -- both sources are
-driven over every shape a record's fields can take, and what survives defines it
--- and each member is a shape no navigation produces, named here so that a
-record hand-built into a results tree is not read as agreeing when it does not.
+For every record the navigator wrote and the ingest stored, the two paths agree
+in the whole of what they answer: the mechanism, the matrices, the midtime, the
+offset, the outcome and the error.  The navigator's own types are what settle
+that.  A record whose status is ``success`` carries an offset of two floats, so
+the ladder's offset arm is never reached on a shape one storage can hold and the
+other cannot; a recorded attitude is validated as a proper rotation of finite
+numbers before it is written, so no document carries a matrix the column has
+nothing for; and a pointing block always carries its baseline and both frame
+identities as integers, so no block reaches a row leaving no trace in it.
 
-1. **An ``offset`` no reader can use.**  Absent, null, a boolean pair, a
-   non-finite pair, or anything else that is not two values convertible to
-   finite pixels.  The document is classified under which of those it was;
-   the row, which holds one NULL pair for all of them, under ``null_offset``.
-2. **A ``cmatrix`` no column can hold** -- one whose recorded value is not one
-   3x3 matrix of finite real numbers in some nesting an array library
-   reconciles into that shape.  Nine values, a 3x3 nesting of them and nine
-   rows of one all denote the same matrix and are all held; a value of any
-   other shape, and one whose nine entries are not finite real numbers, is
-   held by neither storage.
-   The document is ``malformed_pointing``; the row is
-   ``no_cmatrix_rotation_fitted`` when something else of the block survives
-   (which is what a fitted-rotation result looks like) and ``no_pointing_block``
-   when nothing does.  The file path also puts one line in the run log for it
-   and the index path does not.  A ``cmatrix`` that *is* nine finite numbers and
-   is not a rotation is stored, and the validator then refuses it in both paths
-   alike, which is why ``malformed_pointing`` has a row of its own above.
-3. **A ``pointing`` block none of whose four columned fields survives** -- one
-   holding only ``camera_frame``, or frame identities written as floats or
-   booleans, which the integer columns refuse.  The document is
-   ``no_cmatrix_rotation_fitted``, because the block exists and carries no
-   corrected attitude; the row is ``no_pointing_block``, because the block left
-   no trace in it.  The block a navigation writes always carries the baseline
-   and both frame identities as integers.
-
-Everything else agrees.  For every record the navigator wrote and ingest stored,
-and for every hand-built shape outside those three classes, the mechanism, the
-matrices, the midtime, the offset, the outcome and the error are identical in
-the two paths.
 """
 
 from typing import Any, Protocol

@@ -926,3 +926,32 @@ def test_a_document_the_database_would_not_store_leaves_no_index_to_read(
     monkeypatch.setattr(store, '_write_image', refuse)
     with pytest.raises(UnwritableRowError, match='would not accept its rows'):
         ingest_tree(url, [root], logger=null_logger())
+
+
+def test_a_document_the_database_would_not_store_leaves_the_root_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The state the failed pass leaves, which is what makes the absence unreadable.
+
+    Ending the pass is only half of it: what stops a filter reading the gap as
+    "this image was never navigated" is that the root keeps no completed ingest
+    run, so a filter answered from the index refuses it outright.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        monkeypatch: Fixture the image write is replaced through.
+    """
+    root, _images = one_image_tree(tmp_path)
+
+    def refuse(connection: Any, rows: Any) -> None:
+        raise sqlalchemy.exc.IntegrityError('INSERT', {}, Exception('refused'))
+
+    url = index_url(tmp_path / 'index.sqlite3')
+    monkeypatch.setattr(store, '_write_image', refuse)
+    with pytest.raises(UnwritableRowError):
+        ingest_tree(url, [root], logger=null_logger())
+    monkeypatch.undo()
+    with pytest.raises(SelectionError, match='no completed ingest'):
+        ResultsFilter(
+            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+        )

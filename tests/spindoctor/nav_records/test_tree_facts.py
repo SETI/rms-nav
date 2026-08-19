@@ -39,6 +39,7 @@ from spindoctor.nav_records import (
     TreeRecordSource,
     UnreadableFile,
 )
+from spindoctor.results_index import IMAGES
 
 REFUSED_STUB = 'VOL1/not_a_navigation_document'
 """Where a file that reads as JSON and is no navigation result sits."""
@@ -175,6 +176,27 @@ def test_the_metrics_are_the_files_own_and_not_a_placeholder(
     root = two_volume_tree(tmp_path)
     found = list(tree_source(root, quiet_logger).facts(Selection()))
     assert _facts_of(found, FIRST_STUB).image['size_bytes'] is not None
+
+
+def test_the_facts_of_a_document_carry_every_column_the_index_holds(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The shape is the row shape, so the tree owes the whole of it and not a part.
+
+    A consumer cannot see which storage answered, so a key the documents never
+    put in is a field that reads as absent over one storage and as a value over
+    the other.  Compared against the table rather than against a list restated
+    here: a column added to the index and not to this reader is exactly the
+    drift being guarded against, and a restated list would be updated by the
+    same change that caused it.
+
+    Parameters:
+        tmp_path: Directory the tree is written under.
+        quiet_logger: Logger the walk reports through.
+    """
+    root = two_volume_tree(tmp_path)
+    found = list(tree_source(root, quiet_logger).facts(Selection()))
+    assert set(_facts_of(found, FIRST_STUB).image) == {column.name for column in IMAGES.columns}
 
 
 def test_each_document_is_read_once(

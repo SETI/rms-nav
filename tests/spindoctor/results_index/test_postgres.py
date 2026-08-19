@@ -54,6 +54,7 @@ from spindoctor.results_index import (
     open_index,
     open_record_source,
 )
+from spindoctor.results_index.facts_stream import _child_statement
 from spindoctor.results_index.selection import read_result_stubs
 
 pytestmark = pytest.mark.postgres
@@ -1902,3 +1903,50 @@ def test_every_image_of_a_root_a_planner_scans_keeps_its_own_rows_on_postgresql(
             if isinstance(one, ImageFacts)
         }
     assert found == {stub: [_facts_child_name(RECORD_ROOT, stub)] for stub in stubs}
+
+
+def _child_stubs_a_plan_returns(url: str) -> list[str]:
+    """Return the images the child statement names when its order is left to the plan.
+
+    The merge's own statement with its ``ORDER BY`` cleared, so the plan is the
+    one the merge would get and the only thing removed is what is under test.
+
+    Parameters:
+        url: The index to read.
+
+    Returns:
+        One stub per technique row, in whatever order the plan produced.
+    """
+    statement = _child_statement(TECHNIQUES, [IMAGES.c.root_url == RECORD_ROOT]).order_by(None)
+    with opened(url) as engine, engine.connect() as connection:
+        return [str(row.results_path_stub) for row in connection.execute(statement)]
+
+
+def test_the_planner_really_answers_a_child_read_out_of_key_order_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """Without which the test above would hold over rows that arrived sorted anyway.
+
+    How many images it takes before a plan stops walking the child table's own
+    unique index depends on the statistics, on the server's cost settings and on
+    its version, and this fixture analyzes none of them.  A server that chose an
+    index scan at this size would leave the test above passing while the merge's
+    ordering did nothing.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    stubs = _seed_rows_written_back_to_front(postgres_url)
+    assert _child_stubs_a_plan_returns(postgres_url) != list(stubs)
+
+
+def test_the_unordered_child_read_still_answers_with_every_row_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """Without which the control above would hold over a read that answered short.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    stubs = _seed_rows_written_back_to_front(postgres_url)
+    assert sorted(_child_stubs_a_plan_returns(postgres_url)) == sorted(stubs)

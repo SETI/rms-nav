@@ -214,9 +214,12 @@ class IndexRecordSource:
             them: one index serves several roots, and a query asking about a
             stub alone would answer with another root's images.
         url: The index URL, kept for the messages that name it.
-        columns: The columns of ``images`` this consumer reads.  Each must be a
-            column :mod:`spindoctor.results_index.rebuild` knows a place for, or
-            the rebuilt record silently lacks the field it was selected for.
+        columns: The columns of ``images`` a consumer's *records* are rebuilt
+            from.  Each must be a column :mod:`spindoctor.results_index.rebuild`
+            knows a place for, or the rebuilt record silently lacks the field it
+            was selected for.  :meth:`facts` reads every column and ignores
+            this: the facts are the whole row, so a subset of them is a
+            different question rather than a cheaper answer to that one.
 
     Raises:
         ValueError: If no root is given, or if one of them is not a location.
@@ -936,9 +939,11 @@ def open_record_source(
             about them.  Two spellings of one root are one root.
         results_db_url: Connection URL of the results index, or None to read the
             documents.
-        columns: The columns of ``images`` this consumer reads.  Ignored when
-            the documents are read, which carry every field whatever is
-            selected, and needed by no caller that asks only for a listing.
+        columns: The columns of ``images`` a consumer's *records* are rebuilt
+            from.  Ignored when the documents are read, which carry every field
+            whatever is selected; ignored by a stream of facts, which is the
+            whole row over either storage; and needed by no caller that asks
+            only for a listing.
         logger: The caller's own logger, lent to the source for the one line it
             has to say: that it declined to descend a directory it had already
             listed under another name.  None says nothing at all.  Nothing here

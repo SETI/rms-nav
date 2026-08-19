@@ -49,6 +49,17 @@ quietly.  The two together are what makes waiting safe: the first removes the
 one reachable cause of a row nothing claims, and the second turns a pass that
 handed its images back short into one that says so.
 
+Neither backend holds that snapshot by default, and each withholds it
+differently.  PostgreSQL reads at ``READ COMMITTED``, where the three statements
+take three snapshots however long each of them stays open.  SQLite's reader
+holds one state of the database only while a statement of its own is still
+stepping, and the image cursor is not: a buffered read fetches ahead, so an
+image statement whose whole answer arrives in that first fetch has finished
+before either child statement is issued, and the child statements then read a
+state of the index the image statement never saw.  That is not the rare case it
+sounds like -- one image is what a stream restricted to a single named stub, or
+to a subtree holding one image, asks for.
+
 The child statements join to ``images`` under exactly the conditions the image
 statement applies, so the keys they carry are the keys the image stream yields
 and no child row is left holding at the end of a pass.  Without the join a stream
@@ -74,7 +85,7 @@ __all__ = [
 _SNAPSHOT_ISOLATION = {
     'postgresql': 'REPEATABLE READ',
 }
-"""The isolation level each backend needs to answer three statements alike.
+"""The isolation level a backend needs to answer three statements alike.
 
 PostgreSQL reads at ``READ COMMITTED`` unless told otherwise, and there every
 statement takes a snapshot of its own, so two of them issued back to back on one
@@ -82,11 +93,31 @@ connection see two states of the database.  ``REPEATABLE READ`` fixes the
 snapshot at the first statement of the transaction and every later one answers
 from it.
 
-SQLite is absent because a reader there already holds one state of the database
-for as long as a statement of its own is unfinished, which the image cursor is
-for the whole of a pass.  A backend named nowhere here is read at whatever its
-driver defaults to, which is why :mod:`spindoctor.results_index.engine` accepts
-only the two.
+SQLite is absent because its driver has no isolation level to set for this: it
+reads at ``SERIALIZABLE`` already, and what a read of three statements needs
+there is a transaction to be serializable *within* -- :data:`_OPEN_READ_TRANSACTION`.
+A backend named in neither is read at whatever its driver defaults to, which is
+why :mod:`spindoctor.results_index.engine` accepts only the two.
+"""
+
+_OPEN_READ_TRANSACTION = {
+    'sqlite': 'BEGIN',
+}
+"""What a backend needs issued to put its reads inside one transaction.
+
+SQLite's Python driver opens a transaction for a statement that writes and
+leaves a statement that only reads to fend for itself, so a sequence of
+``SELECT``\\ s is a sequence of transactions: the engine holds its read mark
+only while some statement of the sequence is still stepping, and drops it the
+moment they are all done.  A deferred ``BEGIN`` takes no lock and reads nothing
+by itself; what it does is stop the read mark being dropped, so the first
+statement to read fixes the state the rest of them answer from too.
+
+Held for as long as the caller keeps the connection, which is a whole pass.  A
+reader does not block a writer under write-ahead logging, but it does hold the
+log at the point it started reading from, so the file grows until the pass ends
+and can be checkpointed.  That is the cost of the guarantee, and it is the same
+cost a single long-running cursor already carried.
 """
 
 
@@ -102,12 +133,17 @@ def reading_one_snapshot(connection: Connection) -> Connection:
 
     Returns:
         The same connection, told to hold one snapshot where its backend would
-        otherwise answer each statement from its own.
+        otherwise answer each statement from its own.  Closing it ends the
+        transaction, which the caller does at the end of the pass.
     """
-    level = _SNAPSHOT_ISOLATION.get(connection.engine.dialect.name)
-    if level is None:
-        return connection
-    return connection.execution_options(isolation_level=level)
+    dialect = connection.engine.dialect.name
+    level = _SNAPSHOT_ISOLATION.get(dialect)
+    if level is not None:
+        connection = connection.execution_options(isolation_level=level)
+    opener = _OPEN_READ_TRANSACTION.get(dialect)
+    if opener is not None:
+        connection.exec_driver_sql(opener)
+    return connection
 
 
 def _key_of(row: sqlalchemy.Row[Any]) -> tuple[str, str]:

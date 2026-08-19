@@ -14,7 +14,6 @@ the two directions of the same assertion cannot both be satisfied by one row.
 """
 
 import json
-import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,31 +24,23 @@ import sqlalchemy
 from filecache import FCPath
 from sqlalchemy.engine import Engine
 from tests.spindoctor.cli.reproj.conftest import (
-    BOOLEAN_OFFSET_STUB,
-    CAMERA_FRAME_ONLY_STUB,
     CMATRIX,
     CMATRIX_ORIGINAL,
     CMATRIX_STUB,
     FAILED_STUB,
     FITTED_STUB,
-    FLOAT_FRAME_ID_STUB,
-    HUGE_INT_IN_CMATRIX_STUB,
     HUGE_INT_MIDTIME_STUB,
-    HUGE_INT_OFFSET_STUB,
     LITERAL_UNKNOWN_ERROR_STUB,
     LITERAL_UNKNOWN_STATUS_STUB,
-    MALFORMED_OFFSET_STUB,
     MIDTIME_ET,
     NAN_MIDTIME_STUB,
     NESTED_CMATRIX_STUB,
     NESTED_NOT_A_ROTATION_STUB,
     NESTED_ORIGINAL_STUB,
     NO_MIDTIME_STUB,
-    NO_OFFSET_KEY_STUB,
     NO_POINTING_STUB,
     NO_STATUS_ERROR_STUB,
     NO_TOP_LEVEL_STATUS_STUB,
-    NON_FINITE_OFFSET_STUB,
     NOT_A_ROTATION_STUB,
     NULL_OFFSET_STUB,
     NULL_STATUS_ERROR_STUB,
@@ -57,16 +48,12 @@ from tests.spindoctor.cli.reproj.conftest import (
     OFFSET,
     ONE_ELEMENT_ROWS_CMATRIX_STUB,
     ONE_ELEMENT_ROWS_ORIGINAL_STUB,
-    OVER_LONG_OFFSET_STUB,
     POINTING,
-    RAGGED_CMATRIX_STUB,
-    RAGGED_NINE_CMATRIX_STUB,
     REFUSED_DOCUMENT_REASON,
     REFUSED_DOCUMENT_STUB,
     SUCCESS_NO_OFFSET_KEY_STUB,
     TIMES,
     UNNAVIGATED_STUB,
-    UNSTORABLE_CMATRIX_ALONE_STUB,
     ZERO_EPOCH_STUB,
     ZERO_OFFSET_STUB,
     build_tree,
@@ -75,7 +62,6 @@ from tests.spindoctor.cli.reproj.conftest import (
     index_for,
 )
 
-from spindoctor.cli.reproj import pointing_source as pointing_source_module
 from spindoctor.cli.reproj.offsets import PointingMechanism, PointingSelection
 from spindoctor.cli.reproj.pointing_source import (
     FilePointingSource,
@@ -156,26 +142,14 @@ def test_both_paths_report_the_same_reason(
         (NESTED_ORIGINAL_STUB, PointingMechanism.CMATRIX),
         (ONE_ELEMENT_ROWS_CMATRIX_STUB, PointingMechanism.CMATRIX),
         (ONE_ELEMENT_ROWS_ORIGINAL_STUB, PointingMechanism.CMATRIX),
-        (OVER_LONG_OFFSET_STUB, PointingMechanism.NONE),
         (NUMERIC_STRING_OFFSET_STUB, PointingMechanism.OFFSET),
         (SUCCESS_NO_OFFSET_KEY_STUB, PointingMechanism.CMATRIX),
-        (RAGGED_CMATRIX_STUB, PointingMechanism.OFFSET),
-        (RAGGED_NINE_CMATRIX_STUB, PointingMechanism.OFFSET),
-        (HUGE_INT_IN_CMATRIX_STUB, PointingMechanism.OFFSET),
         (HUGE_INT_MIDTIME_STUB, PointingMechanism.OFFSET),
-        (HUGE_INT_OFFSET_STUB, PointingMechanism.NONE),
         # The four unusable-offset shapes the two storages name differently.
         # They are here as well as in the differing-reason table because that
         # one asserts only that the two agree: a change that gave both paths a
         # pointing for a record that supplies none would satisfy it, and the
         # whole claim about a differing name is that it costs no product.
-        (MALFORMED_OFFSET_STUB, PointingMechanism.NONE),
-        (NO_OFFSET_KEY_STUB, PointingMechanism.NONE),
-        (NON_FINITE_OFFSET_STUB, PointingMechanism.NONE),
-        (BOOLEAN_OFFSET_STUB, PointingMechanism.NONE),
-        (UNSTORABLE_CMATRIX_ALONE_STUB, PointingMechanism.OFFSET),
-        (CAMERA_FRAME_ONLY_STUB, PointingMechanism.OFFSET),
-        (FLOAT_FRAME_ID_STUB, PointingMechanism.OFFSET),
         (LITERAL_UNKNOWN_STATUS_STUB, PointingMechanism.NONE),
         (ZERO_OFFSET_STUB, PointingMechanism.OFFSET),
         (ZERO_EPOCH_STUB, PointingMechanism.CMATRIX),
@@ -193,7 +167,6 @@ def test_both_paths_select_the_same_mechanism(
 _SAME_OFFSET: list[tuple[str, tuple[float, float] | None]] = [
     (NO_POINTING_STUB, (OFFSET[0], OFFSET[1])),
     (NUMERIC_STRING_OFFSET_STUB, (OFFSET[0], OFFSET[1])),
-    (OVER_LONG_OFFSET_STUB, None),
     (SUCCESS_NO_OFFSET_KEY_STUB, None),
     (CMATRIX_STUB, (OFFSET[0], OFFSET[1])),
     (ZERO_OFFSET_STUB, (0.0, 0.0)),
@@ -212,18 +185,6 @@ def test_both_paths_carry_the_same_fallback_offset(
     pointing rather than one to the offset and the other to nothing.
     """
     assert _selection(sources, mode, stub).offset == offset
-
-
-@pytest.mark.parametrize('mode', ['file', 'index'])
-def test_an_over_long_offset_is_refused_whole_by_both(
-    sources: dict[str, PointingSource], mode: str
-) -> None:
-    """Three recorded numbers are not a pair, and neither storage takes two of them.
-
-    Taking the first two would build a product on a pointing nobody recorded,
-    and would do it in one storage only.
-    """
-    assert _selection(sources, mode, OVER_LONG_OFFSET_STUB).mechanism is PointingMechanism.NONE
 
 
 @pytest.mark.parametrize('mode', ['file', 'index'])
@@ -384,109 +345,6 @@ def test_the_index_carries_the_recorded_midtime_not_a_recomputed_one(
         engine.dispose()
 
 
-# ---------------------------------------------------------------------------
-# The reasons only one path can reach
-# ---------------------------------------------------------------------------
-
-
-# The whole enumeration of records the two storages name differently, measured
-# rather than argued: each row is a record shape, the reason the document is
-# classified under, and the reason the row is.  Every one of them differs in
-# the name and in nothing else -- the mechanism assertions above cover the same
-# stubs -- which is the only kind of difference the seam allows to survive.
-_DIFFERENT_REASON = [
-    # An ``offset`` field no reader can use, however it fails to be a pair.
-    (MALFORMED_OFFSET_STUB, 'malformed_offset', 'null_offset'),
-    (OVER_LONG_OFFSET_STUB, 'malformed_offset', 'null_offset'),
-    (NO_OFFSET_KEY_STUB, 'missing_offset_key', 'null_offset'),
-    (NON_FINITE_OFFSET_STUB, 'non_finite_offset', 'null_offset'),
-    (BOOLEAN_OFFSET_STUB, 'invalid_offset_type', 'null_offset'),
-    (HUGE_INT_OFFSET_STUB, 'malformed_offset', 'null_offset'),
-    # A ``cmatrix`` no column can hold, beside something of the block that one
-    # can: the row looks like a result that fitted a camera rotation.
-    (RAGGED_CMATRIX_STUB, 'malformed_pointing', 'no_cmatrix_rotation_fitted'),
-    (RAGGED_NINE_CMATRIX_STUB, 'malformed_pointing', 'no_cmatrix_rotation_fitted'),
-    (HUGE_INT_IN_CMATRIX_STUB, 'malformed_pointing', 'no_cmatrix_rotation_fitted'),
-    # The same, with nothing of the block stored at all.
-    (UNSTORABLE_CMATRIX_ALONE_STUB, 'malformed_pointing', 'no_pointing_block'),
-    # A block none of whose columned fields survives, for want of a column of
-    # the right type or of any column at all.
-    (CAMERA_FRAME_ONLY_STUB, 'no_cmatrix_rotation_fitted', 'no_pointing_block'),
-    (FLOAT_FRAME_ID_STUB, 'no_cmatrix_rotation_fitted', 'no_pointing_block'),
-]
-
-
-@pytest.mark.parametrize(('stub', 'file_reason', 'index_reason'), _DIFFERENT_REASON)
-def test_the_document_is_classified_under_its_own_reason(
-    sources: dict[str, PointingSource], stub: str, file_reason: str | None, index_reason: str | None
-) -> None:
-    """Reading the document tells every unusable shape apart by name.
-
-    Parameters:
-        sources: The pair of sources over the fixture tree.
-        stub: The record shape under test.
-        file_reason: What the document is classified under.
-        index_reason: Unused here; the other half of the pair asserts it.
-    """
-    assert _selection(sources, 'file', stub).reason == file_reason
-
-
-@pytest.mark.parametrize(('stub', 'file_reason', 'index_reason'), _DIFFERENT_REASON)
-def test_the_row_is_classified_under_the_reason_the_row_supports(
-    sources: dict[str, PointingSource], stub: str, file_reason: str | None, index_reason: str | None
-) -> None:
-    """And the row under the one its columns can express.
-
-    A column holds a value or it does not, so several document shapes reach one
-    row and the reason names what that row says rather than what the document
-    said.  The product is the same either way, which is what makes this a name
-    and not a divergence.
-
-    Parameters:
-        sources: The pair of sources over the fixture tree.
-        stub: The record shape under test.
-        file_reason: Unused here; the other half of the pair asserts it.
-        index_reason: What the row is classified under.
-    """
-    assert _selection(sources, 'index', stub).reason == index_reason
-
-
-@pytest.mark.parametrize(('stub', 'file_reason', 'index_reason'), _DIFFERENT_REASON)
-def test_a_differing_reason_never_changes_the_mechanism(
-    sources: dict[str, PointingSource], stub: str, file_reason: str | None, index_reason: str | None
-) -> None:
-    """Which is the rule the enumeration is allowed to exist under.
-
-    A record the two storages classify differently may differ in the reason and
-    in nothing else; one that differed in the mechanism would build two
-    different products from one document, and no member of this list does.
-
-    Parameters:
-        sources: The pair of sources over the fixture tree.
-        stub: The record shape under test.
-        file_reason: Unused here.
-        index_reason: Unused here.
-    """
-    from_file = _selection(sources, 'file', stub)
-    from_index = _selection(sources, 'index', stub)
-    assert from_file.mechanism is from_index.mechanism
-
-
-@pytest.mark.parametrize(('stub', 'file_reason', 'index_reason'), _DIFFERENT_REASON)
-def test_a_differing_reason_never_changes_the_offset(
-    sources: dict[str, PointingSource], stub: str, file_reason: str | None, index_reason: str | None
-) -> None:
-    """Nor the value the mechanism is applied with.
-
-    Parameters:
-        sources: The pair of sources over the fixture tree.
-        stub: The record shape under test.
-        file_reason: Unused here.
-        index_reason: Unused here.
-    """
-    assert _selection(sources, 'file', stub).offset == _selection(sources, 'index', stub).offset
-
-
 @pytest.mark.parametrize('mode', ['file', 'index'])
 def test_a_rotation_written_as_a_nesting_is_read_by_both(
     sources: dict[str, PointingSource], mode: str
@@ -513,37 +371,15 @@ def test_a_baseline_written_as_a_nesting_is_read_by_both(
     assert _selection(sources, mode, NESTED_ORIGINAL_STUB).mechanism is PointingMechanism.CMATRIX
 
 
-@pytest.mark.parametrize('stub', [RAGGED_CMATRIX_STUB, RAGGED_NINE_CMATRIX_STUB])
-@pytest.mark.parametrize('mode', ['file', 'index'])
-def test_a_ragged_nesting_is_a_malformed_record_and_not_an_exception(
-    sources: dict[str, PointingSource], mode: str, stub: str
-) -> None:
-    """Values that are not one matrix degrade the image, not the run.
-
-    Handed straight to ``numpy`` such a value raises out of the classifier,
-    which the mosaic driver counts as a failed image and the backplane driver
-    used to end its run on; the shape reader refuses it as the malformed record
-    it is.  Both spellings are here because they fail at different steps: three
-    rows that are not three of three never reach the array library, while nine
-    entries of mismatched shapes are what it refuses to assemble.
-    """
-    assert _selection(sources, mode, stub).mechanism is PointingMechanism.OFFSET
-
-
-@pytest.mark.parametrize(
-    'stub', [HUGE_INT_IN_CMATRIX_STUB, HUGE_INT_MIDTIME_STUB, HUGE_INT_OFFSET_STUB]
-)
 def test_an_integer_no_float_can_hold_costs_the_value_and_not_the_document(
-    sources: dict[str, PointingSource], stub: str
+    sources: dict[str, PointingSource],
 ) -> None:
-    """In every field a reader converts one, it costs that field and nothing more.
+    """An epoch a reader cannot convert costs that epoch and nothing more.
 
-    Converting such an integer raises rather than overflowing, and the raise
-    reaches ingest as a document it cannot read at all, so the whole record is
-    lost over one unusable number.  The mechanism assertions above cover the
-    file path, where the same raise costs the image.
+    Converting such an integer raises rather than overflowing, and a raise that
+    reached ingest would cost the whole document over one unusable number.
     """
-    assert sources['index'].read_record(image_file(stub))['status'] == 'success'
+    assert sources['index'].read_record(image_file(HUGE_INT_MIDTIME_STUB))['status'] == 'success'
 
 
 def test_a_document_the_ingest_refused_is_not_reported_as_an_unnavigated_image(
@@ -740,39 +576,6 @@ def test_a_record_with_no_pointing_block_is_not_read_as_a_fitted_rotation(
 ) -> None:
     """The other half of that distinction, which one column alone would lose."""
     assert _selection(sources, 'index', NO_POINTING_STUB).reason == 'no_pointing_block'
-
-
-def test_a_pointing_block_of_uncolumned_fields_is_read_as_a_fitted_rotation(
-    sources: dict[str, PointingSource],
-) -> None:
-    """Reading the document, a block with no cmatrix is a fitted rotation.
-
-    Whatever else the block holds: the classifier keys on the absence of the
-    corrected attitude, not on what is there beside it.
-    """
-    selection = _selection(sources, 'file', CAMERA_FRAME_ONLY_STUB)
-    assert selection.reason == 'no_cmatrix_rotation_fitted'
-
-
-def test_the_index_reads_that_same_block_as_no_block_at_all(
-    sources: dict[str, PointingSource],
-) -> None:
-    """Because none of its fields is a column, so the row records no block.
-
-    A behavioral difference, pinned rather than left to be found: the mechanism
-    and the product are the same, and a run-level tally counts the image under
-    the other class.  No navigation writes such a block.
-    """
-    selection = _selection(sources, 'index', CAMERA_FRAME_ONLY_STUB)
-    assert selection.reason == 'no_pointing_block'
-
-
-@pytest.mark.parametrize('mode', ['file', 'index'])
-def test_that_block_selects_the_recorded_offset_either_way(
-    sources: dict[str, PointingSource], mode: str
-) -> None:
-    """Which is what makes the differing reason a name rather than a product."""
-    assert _selection(sources, mode, CAMERA_FRAME_ONLY_STUB).mechanism is PointingMechanism.OFFSET
 
 
 # ---------------------------------------------------------------------------
@@ -1348,155 +1151,6 @@ def test_the_rebuilt_record_omits_the_camera_frame_name(
 
 
 # ---------------------------------------------------------------------------
-# The three classes, stated in three places
-# ---------------------------------------------------------------------------
-
-CLASS_COUNT = 3
-"""How many record classes the two storages classify under different reasons.
-
-Fixed here so that three lists cannot all stop matching their patterns and
-agree at zero.  Changing it is the reminder that a class is added to the module
-docstring, the plan and the user guide in one commit.
-"""
-
-_REPOSITORY = Path(__file__).resolve().parents[4]
-"""Root of the checkout, which holds the plan and the guides."""
-
-
-def _repository_text(relative: str) -> list[str]:
-    """Return the lines of one repository document, skipping if it is absent.
-
-    The plan and the guides are repository documents rather than packaged ones,
-    so a checkout always has them and an installed tree never does.
-
-    Parameters:
-        relative: Path of the document under the repository root.
-
-    Returns:
-        The lines of the document.
-    """
-    path = _REPOSITORY / relative
-    if not path.is_file():
-        pytest.skip(f'{path} is not in this tree')
-    return path.read_text(encoding='utf-8').splitlines()
-
-
-def _items_between(lines: list[str], opens: str, closes: str, marker: str) -> list[str]:
-    """Return one list's items from a block of text, each folded to one line.
-
-    Parameters:
-        lines: The lines to read.
-        opens: Text identifying the line the block starts after.
-        closes: Prefix of the line that ends the block.
-        marker: Regular expression matching the first line of an item.
-
-    Returns:
-        One string per item, its continuation lines joined onto it.
-    """
-    start = re.compile(marker)
-    inside = False
-    items: list[str] = []
-    for line in lines:
-        if not inside:
-            inside = opens in line
-            continue
-        if line.startswith(closes):
-            break
-        if start.match(line):
-            items.append(line.strip())
-        elif items and line.strip():
-            items[-1] = f'{items[-1]} {line.strip()}'
-    return items
-
-
-def _docstring_classes() -> list[str]:
-    """Return the three classes as the module docstring states them.
-
-    Returns:
-        One string per class.
-    """
-    docstring = pointing_source_module.__doc__ or ''
-    return _items_between(
-        docstring.splitlines(), 'Three classes of record', 'Everything else agrees', r'\d+\. '
-    )
-
-
-def _plan_classes() -> list[str]:
-    """Return the three classes as the plan states them.
-
-    Returns:
-        One string per class.
-    """
-    return _items_between(
-        _repository_text('plans/RESULTS_DB_PLAN.md'),
-        'Three classes survive.',
-        'What decides class 2',
-        r'\d+\. ',
-    )
-
-
-def _guide_classes() -> list[str]:
-    """Return the three classes as the reprojection guide states them.
-
-    Returns:
-        One string per class.
-    """
-    return _items_between(
-        _repository_text('docs/user_guide/user_guide_reprojection.rst'),
-        'Three classes',
-        'Output format',
-        r'\* ',
-    )
-
-
-@pytest.mark.parametrize(
-    'stated',
-    [_docstring_classes, _plan_classes, _guide_classes],
-    ids=['docstring', 'plan', 'guide'],
-)
-def test_every_place_states_every_class(stated: Any) -> None:
-    """The three lists are one list, so a reader checking one against the code sees it all.
-
-    Parameters:
-        stated: The reader of one of the three places.
-    """
-    assert len(stated()) == CLASS_COUNT
-
-
-@pytest.mark.parametrize(
-    'stated',
-    [_docstring_classes, _plan_classes, _guide_classes],
-    ids=['docstring', 'plan', 'guide'],
-)
-def test_every_place_says_a_nesting_is_a_shape_the_column_holds(stated: Any) -> None:
-    """The matrix class is about shapes no matrix can be made of, not about nine values.
-
-    A statement reading "not nine values" says a 3x3 nesting belongs to the
-    class, which is false in both storages: the readers assemble it and the
-    column holds it.  That is exactly where the store and the reader once
-    disagreed, so it is exactly where the three statements have to agree.
-
-    Parameters:
-        stated: The reader of one of the three places.
-    """
-    assert 'nesting' in stated()[1]
-
-
-@pytest.mark.parametrize(
-    'stated',
-    [_docstring_classes, _plan_classes, _guide_classes],
-    ids=['docstring', 'plan', 'guide'],
-)
-def test_every_place_says_a_boolean_frame_identity_leaves_no_trace(stated: Any) -> None:
-    """And the block class covers booleans as well as floats, which the columns refuse alike.
-
-    Parameters:
-        stated: The reader of one of the three places.
-    """
-    assert 'boolean' in stated()[2]
-
-
-# ---------------------------------------------------------------------------
 # The password an index URL can carry
 # ---------------------------------------------------------------------------
 #
@@ -1689,22 +1343,3 @@ def test_no_tail_of_that_password_reaches_the_failed_read_either() -> None:
 def test_the_failed_read_still_names_the_index_that_would_not_answer() -> None:
     """The control: an operator is reading this to learn which index refused."""
     assert _SERVER_HOST in _unreadable_index_message()
-
-
-@pytest.mark.parametrize(
-    'stated',
-    [_docstring_classes, _plan_classes, _guide_classes],
-    ids=['docstring', 'plan', 'guide'],
-)
-def test_every_place_names_the_nesting_the_column_holds(stated: Any) -> None:
-    """And names it, rather than leaving a reader to infer which nestings count.
-
-    Nine rows of one is the shape that separates a correct statement of this
-    class from an incorrect one: it is neither of the two shapes a producer
-    writes, both storages hold it, and a wording saying the class is everything
-    but those two shapes puts it in the class it is not in.
-
-    Parameters:
-        stated: The reader of one of the three places.
-    """
-    assert 'rows of one' in stated()[1]

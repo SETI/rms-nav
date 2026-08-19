@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 import sqlalchemy
+from sqlalchemy.dialects.postgresql.psycopg import PGDialect_psycopg
+from sqlalchemy.dialects.sqlite.pysqlite import SQLiteDialect_pysqlite
 from tests.spindoctor.results_index.conftest import (
     ROOT_URL,
     STUB,
@@ -173,15 +175,19 @@ JSON_COLUMN_CASES = [
 ]
 """One case per JSON column, named so a failure says which column moved."""
 
-SQLITE_DIALECT = sqlalchemy.create_engine('sqlite://').dialect
+SQLITE_DIALECT = SQLiteDialect_pysqlite()
 """The dialect a SQLite index compiles its DDL through.
 
-Taken off an engine rather than constructed, so it is the dialect an index
-actually opens with.  The URL names no file and the engine connects to nothing:
-building one opens no database.
+The class an index's own URL selects, instantiated rather than taken off an
+engine: constructing an engine imports the backend's driver, and a driver
+SpinDoctor ships as an optional extra is then one the tests cannot be collected
+without.  A dialect compiles DDL out of the type declarations alone and needs no
+driver to do it.
 """
 
-POSTGRES_DIALECT = sqlalchemy.create_engine('postgresql+psycopg://user@host/db').dialect
+# The driver's dialect leaves its own constructor unannotated, so calling it is
+# the one untyped call here; the SQLite one above needs no such exemption.
+POSTGRES_DIALECT = PGDialect_psycopg()  # type: ignore[no-untyped-call]
 """The dialect a PostgreSQL index compiles its DDL through, likewise."""
 
 DIALECT_CASES = [
@@ -193,16 +199,12 @@ DIALECT_CASES = [
 COLUMN_SET_VERSION = 1
 """The schema version the column sets above are stamped with.
 
-The number is pinned, so it says nothing about which column set an index holds:
-two builds with different columns stamp the same version, and the gate that
-compares them lets an index built by either one open.  What keeps a column
-change from being silent is therefore the lists above and nothing else, which is
-why they restate every name, type, nullability and position rather than reading
-them off the schema they are meant to guard.
-
-Compared against :data:`~spindoctor.results_index.SCHEMA_VERSION` all the same,
-so that the stamp and the columns it is written beside cannot drift apart while
-the pin holds.
+Written down here beside the columns and compared against
+:data:`~spindoctor.results_index.SCHEMA_VERSION`, so that the stamp and the
+column set it names cannot drift apart.  The stamp says which version wrote a
+database rather than which columns it holds, so what keeps a column change from
+being silent is the lists above, which is why they restate every name, type,
+nullability and position rather than reading them off the schema they guard.
 """
 
 TABLE_CASES = [
@@ -240,10 +242,9 @@ def sqlite_url(tmp_path: Path) -> str:
 def test_the_schema_stamps_the_version_this_column_set_belongs_to() -> None:
     """The stamp and the columns written beside it name one version.
 
-    The pin means the stamp cannot tell one column set from another, so this
-    pins the number rather than the column set: what guards the columns is the
-    lists above, and what guards those is that they restate the schema instead
-    of reading it.
+    The stamp cannot tell one column set from another, so this pins the number
+    rather than the column set: what guards the columns is the lists above, and
+    what guards those is that they restate the schema instead of reading it.
     """
     assert SCHEMA_VERSION == COLUMN_SET_VERSION
 

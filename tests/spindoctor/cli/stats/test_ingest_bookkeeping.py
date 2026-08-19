@@ -261,6 +261,32 @@ def test_a_fault_in_the_reader_records_no_refusal(
     assert found == []
 
 
+def test_a_fault_in_the_reader_stores_no_image(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pass ends where the fault happened, so the document after it is unread.
+
+    A pass that charged the fault to the one document and carried on would leave
+    the second one stored and satisfy every other test here, while the image the
+    fault struck sat in neither table under a run that raised.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the reader is replaced through.
+    """
+    root = _tree_of_two_documents(tmp_path)
+    _reader_that_faults_once(monkeypatch)
+    url = index_url(tmp_path / 'index.sqlite3')
+    with pytest.raises(_NobodyEnumeratedThisError):
+        ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub))
+    engine.dispose()
+    assert found == []
+
+
 def _tree_with_unparseable_nesting(tmp_path: Path) -> Path:
     """Write a tree holding one document and one file no JSON value comes out of.
 
@@ -331,8 +357,68 @@ writer's answer to a row the database will not take, whatever produced it.
 """
 
 
+EARLIER_STUB = 'VOL/N1454725799_1_CALIB'
+"""The stub of the two below that a pass reaches first.
+
+A pass reads a root in stub order, so which of two documents is written before
+the other is settled by their names and not by the order the tree lists them
+in.  Stated here because the tests below turn on it: what makes them evidence
+is that the failure struck after a document had already been committed.
+"""
+
+LATER_STUB = 'VOL/N9999999999_1_CALIB'
+"""The stub of the two that a pass reaches second."""
+
+
+def _stubs_as_they_are_written(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record the images a pass writes, in the order it writes them.
+
+    Parameters:
+        monkeypatch: Fixture the writer is wrapped through.
+
+    Returns:
+        The list the wrapper appends each image's stub to, which fills as the
+        pass runs.
+    """
+    written: list[str] = []
+    real_write = store_module._write_image
+
+    def recording(connection: Any, rows: Any) -> Any:
+        written.append(str(rows.image['results_path_stub']))
+        return real_write(connection, rows)
+
+    monkeypatch.setattr(store_module, '_write_image', recording)
+    return written
+
+
+def test_a_pass_writes_a_root_in_stub_order(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which is what settles what a pass has already written when one document fails.
+
+    The two files are created in the opposite order, so a pass taking the order
+    the tree happened to list them in would write them the other way round and
+    the tests below would be measuring the filesystem.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        quiet_logger: Logger the ingest reports through.
+        monkeypatch: Fixture the writer is wrapped through.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, LATER_STUB, metadata_document())
+    write_metadata(root, EARLIER_STUB, metadata_document())
+    written = _stubs_as_they_are_written(monkeypatch)
+    ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    assert written == [EARLIER_STUB, LATER_STUB]
+
+
 def _tree_with_an_unstorable_document(tmp_path: Path) -> Path:
     """Write a tree holding one document the database will not accept.
+
+    The unstorable one is the later stub, so the pass has already committed the
+    other by the time it reaches it, and it is created first so that a pass that
+    stopped ordering by stub would be seen to reach them the other way round.
 
     Parameters:
         tmp_path: Directory the tree lives under.
@@ -341,10 +427,8 @@ def _tree_with_an_unstorable_document(tmp_path: Path) -> Path:
         The results root.
     """
     root = tmp_path / 'results'
-    write_metadata(
-        root, 'VOL/N9999999999_1_CALIB', metadata_document(image_name=UNSTORABLE_IMAGE_NAME)
-    )
-    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    write_metadata(root, LATER_STUB, metadata_document(image_name=UNSTORABLE_IMAGE_NAME))
+    write_metadata(root, EARLIER_STUB, metadata_document())
     return root
 
 
@@ -380,7 +464,7 @@ def test_such_a_failure_names_the_document_the_database_refused(
     root = _tree_with_an_unstorable_document(tmp_path)
     with pytest.raises(UnwritableRowError) as excinfo:
         ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
-    assert 'VOL/N9999999999_1_CALIB' in str(excinfo.value)
+    assert LATER_STUB in str(excinfo.value)
 
 
 def test_such_a_failure_leaves_the_run_unfinished(
@@ -416,7 +500,7 @@ def test_such_a_failure_keeps_the_documents_already_written(
     with engine.connect() as connection:
         found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub))
     engine.dispose()
-    assert [row.results_path_stub for row in found] == ['VOL/N1454725799_1_CALIB']
+    assert [row.results_path_stub for row in found] == [EARLIER_STUB]
 
 
 def test_such_a_failure_records_no_refusal(
