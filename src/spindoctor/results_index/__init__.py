@@ -43,14 +43,13 @@ Public API:
     RECORD_FIELDS         -- the one correspondence between columns and record fields
     RecordField           -- one column's place in the record a row is rebuilt into
     record_from_row       -- rebuild the record a row holds, through that mapping
-    RecordSource          -- the seam a program reads its records through
-    TreeRecordSource      -- that seam over the documents
-    IndexRecordSource     -- that seam over the index
-    build_record_source   -- build whichever of the two a run resolved
+    IndexRecordSource     -- the record seam over the index
+    open_record_source    -- open whichever half of that seam a run resolved
 
-Reading a document rather than a row needs no database, so what a document is
-named, where one lives under a root and how one is read are
-:mod:`spindoctor.support.nav_document`'s.
+Reading a document rather than a row needs no database, so the seam itself --
+what a record is, what a document is named, where one lives under a root, how
+one is read, what a caller is asking for, and the half that reads documents --
+is :mod:`spindoctor.nav_records`'s.
 """
 
 from spindoctor.results_index.drop import (
@@ -67,12 +66,7 @@ from spindoctor.results_index.engine import (
 )
 from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.rebuild import RECORD_FIELDS, RecordField, record_from_row
-from spindoctor.results_index.record_source import (
-    IndexRecordSource,
-    RecordSource,
-    TreeRecordSource,
-    build_record_source,
-)
+from spindoctor.results_index.record_source import IndexRecordSource, open_record_source
 from spindoctor.results_index.roots import (
     ingested_roots,
     newest_finish_time,
@@ -114,11 +108,8 @@ __all__ = [
     'IndexContents',
     'IndexRecordSource',
     'RecordField',
-    'RecordSource',
     'ResultStubs',
     'TableContents',
-    'TreeRecordSource',
-    'build_record_source',
     'drop_index_tables',
     'index_contents',
     'index_table_names',
@@ -129,6 +120,7 @@ __all__ = [
     'open_database',
     'open_index',
     'open_index_for_roots',
+    'open_record_source',
     'read_result_stubs',
     'record_from_row',
     'reporting_a_failed_read',

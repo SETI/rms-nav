@@ -413,8 +413,8 @@ def _source_names_from_feature_ids(feature_ids: Any) -> list[str]:
     return sorted(names)
 
 
-def _volume_of(results_path_stub: str) -> str | None:
-    """The volume a stub names, or None when it names none.
+def _subtree_of(results_path_stub: str) -> str | None:
+    """The subtree a stub names, or None when it names none.
 
     Parameters:
         results_path_stub: The stub.
@@ -423,8 +423,8 @@ def _volume_of(results_path_stub: str) -> str | None:
         The first path segment, or None for a stub with no separator -- which
         is what the simulated dataset's bare scene basenames produce.
     """
-    volume, separator, _rest = results_path_stub.partition('/')
-    return volume if separator else None
+    subtree, separator, _rest = results_path_stub.partition('/')
+    return subtree if separator else None
 
 
 def _technique_rows(
@@ -614,7 +614,7 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
     image_row: dict[str, Any] = {
         'root_url': source.root_url,
         'results_path_stub': source.results_path_stub,
-        'volume': _volume_of(source.results_path_stub),
+        'subtree': _subtree_of(source.results_path_stub),
         'image_name': image_name,
         'instrument': instrument,
         # Present whenever the dataset index supplied it, including for an

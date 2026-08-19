@@ -8,8 +8,9 @@ once, and a basename two directories hold is two different kernels.
 
 Where the records come from is not tested here: reading them is the one seam
 every program shares, and it is exercised over both storages in
-``tests/spindoctor/cli/ck/test_records.py`` and
-``tests/spindoctor/support/test_nav_document.py``.
+``tests/spindoctor/cli/ck/test_records.py``,
+``tests/spindoctor/nav_records/test_tree_listing.py`` and
+``tests/spindoctor/nav_records/test_tree_records.py``.
 """
 
 from pathlib import Path
@@ -19,7 +20,7 @@ import pytest
 from filecache import FCPath
 
 from spindoctor.cli.ck import inputs
-from spindoctor.support.nav_record import NavRecord
+from spindoctor.nav_records import NavRecord
 
 
 def test_a_kernel_directory_that_does_not_exist_is_refused(tmp_path: Path) -> None:

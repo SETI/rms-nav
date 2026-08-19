@@ -21,8 +21,8 @@ from typing import Any
 import cspyce
 import numpy as np
 
-from spindoctor.cli.ck.pointing import NDArrayFloatType
 from spindoctor.cli.ck.segment import CkSegment, write_segment
+from spindoctor.support.types import NDArrayFloatType
 
 # The two CK objects the tests exercise: a bus whose baseline attitude varies
 # across the exposure, and a scan platform standing in for the frozen-attitude

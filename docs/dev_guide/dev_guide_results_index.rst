@@ -41,21 +41,28 @@ operator runs rather than an API a consumer calls.
    * - :mod:`spindoctor.results_index.masking`
      - The one rule that hides a password in a connection URL.
    * - :mod:`spindoctor.results_index.roots`
-     - Root normalization, and the per-root ingest bookkeeping that makes
-       absence of a row readable.
+     - The per-root ingest bookkeeping that makes absence of a row readable,
+       and the opener that checks it. Root normalization is a rule about
+       identity rather than about a database, so it lives in
+       :mod:`spindoctor.nav_records` and is re-exported from here.
    * - :mod:`spindoctor.results_index.selection`
      - The one query answering the results-based selection filters.
    * - :mod:`spindoctor.results_index.rebuild`
      - The one correspondence between a row's columns and a record's fields, and
        the rebuild that reads it.
    * - :mod:`spindoctor.results_index.record_source`
-     - The seam every program reads records through, over either storage.
+     - The record seam's index-backed half, and
+       :func:`~spindoctor.results_index.open_record_source`, which decides
+       which half a run gets.
    * - :mod:`spindoctor.results_index.drop`
      - Reading what a database holds, and removing the index's own tables.
-   * - :mod:`spindoctor.support.nav_document`
-     - Not part of this package: what a document is named, where one lives under
-       a root, and how one is read. Reading a document needs no database, so
-       every reader shares it whether or not its program can read an index.
+   * - :mod:`spindoctor.nav_records`
+     - Not part of this package: the record seam's database-free half. What a
+       record is, what a document is named and where one lives, what a
+       selection is, the protocol both storages implement, and the
+       implementation over the documents themselves. Reading a document needs
+       no database, so every reader shares it whether or not its program can
+       read an index.
    * - ``spindoctor.cli.stats.ingest``
      - The pass itself: walk, select, read, write, prune, complete --- in one
        process or divided into queue tasks.
@@ -96,23 +103,125 @@ none in ``images``, so both tables are read before absence is reported.
 One seam for records
 ====================
 
-Five programs read navigation records, and every one of them can read either the
-documents or the index. What decides whether they agree is that none of them
+Several programs read what a navigation pass wrote, and each of them can be
+pointed at either storage. What decides whether they agree is that none of them
 reads a storage itself: they all go through
-:class:`~spindoctor.results_index.record_source.RecordSource`, which answers in
-the two shapes the programs ask in --- one image by its stub, and one mission in
-bulk --- over either storage.
+:class:`~spindoctor.nav_records.RecordSource`, and each storage implements it.
+``sd_stats_ingest`` is the one that reads only documents, since documents are
+what it builds the index out of: it discovers them through the seam's listing
+and keeps a reading loop of its own, which owns the refusal vocabulary the
+index stores.
 
-The seam is one piece of code for a reason worth stating, because it was two.
-Each consumer used to carry its own row-to-record rebuild, its own open-and-check
-ceremony and its own account of how the two storages could differ. Two rebuilds
-of one row are two answers about what a document said: they agreed the day they
-were written, and then each grew a rule the other did not. The defect that made
-the point was an ``ORDER BY`` in one of them --- correct under SQLite's default
-collation, wrong under a PostgreSQL locale collation, and impossible for the
-other consumer to have because it read one row at a time.
+Three questions, because the programs ask three things
+------------------------------------------------------
 
-Three rules hold at the seam:
+:meth:`~spindoctor.nav_records.RecordSource.record` takes one stub and returns
+one record. It is the shape a per-image loop asks in --- the backplane and
+mosaic stages reading the pointing an image is built with --- so it is the call
+an implementation answers in a single round trip. A stub is a key under a root,
+so a source holding more than one root refuses it, naming them.
+
+:meth:`~spindoctor.nav_records.RecordSource.records` takes a selection and
+yields the records it covers, one at a time. It is what a program that
+summarizes or sweeps asks once per run: the kernel writer reading a mission, the
+statistics report reading a root. It also takes an explicit list of stubs, which
+is what a queue task carries --- a worker must read exactly the files it was
+given, and read them in batches, so looping the per-image call would cost it a
+round trip apiece on the storage that batching exists for.
+
+:meth:`~spindoctor.nav_records.RecordSource.listing` takes a selection and
+yields what is there --- each stub, where it lives, and the size and
+modification time that say whether it has changed --- without opening a single
+document. On a cloud root one directory listing returns up to a thousand entries
+with their metrics, against one round trip per document, which is what the
+ingest's discovery and its unchanged-file skip are both built on. What a listing
+cannot do is answer anything a document says, so a selection restricting on a
+mission or a span is refused rather than partly honored.
+
+Two more methods hold the run together rather than answering a question:
+``describe()`` says which storage answered, for the run log, and ``close()``
+releases what the source opened. A stream may hold a connection or a cursor, so
+a caller that walks away mid-loop must still release it: a source is a context
+manager, and a run writes ``with open_record_source(...) as source:``.
+
+**A stream yields, and returns no list.** A caller that wants one writes
+``list(...)`` and owns that decision. Nothing is accumulated on a caller's
+behalf, so a program sweeping a mission holds one record at a time rather than
+the mission --- and a program wanting many summaries of one stream is forced to
+compute them in one pass, which is the constraint that makes the stream worth
+having. Nothing promises an order either: a walk cannot know an image's epoch
+before it has read the document, and a database sorting text sorts it under the
+server's own collation, so each implementation yields in the order it finds
+records, says what that order is, and a caller needing a total order calls
+``sorted()`` and pays for it knowingly.
+
+**A failure arrives from** ``next()``. A file that could not be read is yielded
+into the stream as an :class:`~spindoctor.nav_records.UnreadableFile` rather
+than raised, so one of them costs itself and not the rest of the pass. A
+refusal that ends a pass --- a
+directory nobody can list, an index that stops answering --- surfaces in the
+middle of the caller's loop, so a program using the stream finishes its pass
+before it writes its output.
+
+Two backends, and why the package is split
+------------------------------------------
+
+:class:`~spindoctor.nav_records.TreeRecordSource` answers from the documents:
+it walks directory by directory, carrying each entry's metrics out of the
+listing, and retrieves documents in batches underneath a stream that yields them
+one at a time. :class:`~spindoctor.results_index.IndexRecordSource` answers from
+the rows: one query per call, streamed in server-side chunks, with the
+per-technique and per-feature rows merged onto the images stream by key.
+:func:`~spindoctor.results_index.open_record_source` is what a program calls; it
+returns the first when the run names no index and the second when it names one.
+
+**The seam is split along the database line, and the line is not a matter of
+taste.** ``import spindoctor.dataset`` must not import SQLAlchemy: every
+navigation run imports that package and most of them name no index. The
+enumeration is a reader of documents and lives in that package, so the half of
+the seam that reads documents has to be reachable from it without acquiring a
+database. :mod:`spindoctor.nav_records` --- what a record is, what a document is
+named and where one lives, what a selection is, the protocol, and the
+implementation over the documents --- therefore imports no database layer, and a
+subprocess test pins that. The half that reads rows needs SQLAlchemy by
+definition, so it lives in :mod:`spindoctor.results_index` alongside the schema
+it reads, and so does the factory that chooses between the two. That is why a
+consumer on the navigation path resolves its index half through a branch-local
+import rather than at the top of its module.
+
+What a caller asks for
+----------------------
+
+:class:`~spindoctor.nav_records.Selection` is the one value every stream is
+asked in terms of: which of the source's roots to read, which top-level
+directories to descend, which stubs to read outright, one mission, and a span of
+exposure midtimes. Every field narrows and the fields combine, and a field left
+at its default narrows nothing, so the empty selection covers everything the
+source holds. Each backend applies whichever restrictions it can answer
+cheaply --- a walk by looking at fewer directories, a query in its ``WHERE``
+clause --- and the answer is the same either way.
+
+It is frozen, and everything it carries is checked in its constructor: a subtree
+is one directory immediately under a root, a stub is a key rather than a path,
+and a time bound is a finite number with the start no later than the stop.
+**That is what makes the two backends refuse alike.** A walk and a query cannot
+be made to refuse identically by writing the same refusal twice; they refuse
+identically because there is one place a selection can be wrong and neither of
+them is reached from it. Left to a backend, an unusable value is refused in that
+storage's own terms --- one raises out of a query builder in a language its
+caller cannot name, another yields nothing, and an inverted range selects
+nothing at all, which a run cannot tell from a clean pass over a quiet span.
+
+The rules that hold at the seam
+-------------------------------
+
+**One piece of code, because two would be two answers.** A consumer carrying its
+own row-to-record rebuild, its own open-and-check ceremony and its own account
+of how the two storages differ is a second reader of the record: two rebuilds
+agree the day they are written and then each grows a rule the other does not.
+The defect that makes the point is an ``ORDER BY`` on text --- correct under
+SQLite's default collation, wrong under a PostgreSQL locale collation, and
+invisible to a consumer that reads one row at a time.
 
 **A consumer names the columns it reads.** A row is only cheaper than a document
 while it carries less, so nobody selects forty columns to read five. The columns
@@ -133,11 +242,23 @@ consumer is caught rather than read as absent by everything.
 row carries what its consumer selected.** That is the one difference a consumer
 has to know about, and it is why the columns are pinned rather than assumed.
 
-:func:`~spindoctor.results_index.roots.open_index_for_roots` is the other half of
-the unification: it opens an index, refuses a root the index has no completed
-ingest of, and disposes of the engine before the refusal leaves it. Written out
-per call site, that sequence lost a step at a time --- an engine left undisposed
-on a refusal, a root checked after the first query rather than before it.
+**A key is checked where it is written, not where it is read.** A results root
+is normalized to one absolute, resolved spelling by
+:func:`~spindoctor.nav_records.normalize_root_url` the moment a program is
+handed one, and a stub and a subtree are checked as keys by
+:class:`~spindoctor.nav_records.Selection` the moment a caller writes one: a
+stub names no absolute path, no parent directory and no null byte, and a subtree
+is one directory immediately under a root. Everything below that point is a
+join, with one answer, so no reader carries a rule of its own about what a join
+may have produced --- which is what a walk and a query could not have been made
+to agree about by writing the same rule twice.
+
+:func:`~spindoctor.results_index.roots.open_index_for_roots` is where the index
+side's opening ceremony lives: it opens an index, refuses a root the index has
+no completed ingest of, and disposes of the engine before the refusal leaves it.
+Written out per call site, that sequence loses a step at a time --- an engine
+left undisposed on a refusal, a root checked after the first query rather than
+before it.
 
 Opening an index
 ================
@@ -184,7 +305,7 @@ them.
 **Writes are chunked, not batched into one transaction.** ``sd_stats_ingest``
 commits every ``INGEST_COMMIT_CHUNK_SIZE`` images, which bounds both what a
 crash costs and how long a writer holds its lock. Retrieval is batched
-separately (``INGEST_RETRIEVE_BATCH_SIZE``), because one bounds a download and
+separately (``RETRIEVE_BATCH_SIZE``), because one bounds a download and
 the other bounds a transaction. A chunk whose write fails is rewritten one
 image at a time, so a single unstorable document costs itself rather than its
 chunk.
@@ -200,8 +321,11 @@ PostgreSQL.
 a row is an answer, so presence has to mean the tree still holds the document,
 which is why each pass removes the rows of documents its walk did not find. A
 worker handed a share of a root has no evidence about the stubs outside its
-share and would delete its peers' rows, so nothing hands a worker a listing and
-the prune refuses anything that is not a whole-root listing. In a
+share and would delete its peers' rows, so nothing hands a worker a listing. The
+licence is a type rather than a check: one function builds the listing the prune
+takes, it builds one only for a root it listed entirely, and it carries the root
+it listed --- so a share of a root, a partial listing and a prune of one root on
+the evidence of another are all unrepresentable rather than refused. In a
 queue-divided pass the fan-out is the one step that sees a whole root, and it
 prunes before it cuts the shares --- so the prune and the workers' writes
 cannot touch the same stub.
@@ -211,6 +335,13 @@ before the walk and its finish time is left NULL until the pass completes, so
 every consumer treats a root that is being ingested as one nobody has ingested.
 A pass that cannot list a directory under its root stops rather than
 completing, so a run that carries a finish time listed the whole of its root.
+That rule belongs to the walk rather than to the ingest: the walk is
+:class:`~spindoctor.nav_records.TreeRecordSource`'s, so a kernel-writing or
+reporting run over the same tree stops at the same directory. A root that
+cannot be listed **at all** raises
+:exc:`~spindoctor.nav_records.UnlistableRootError` instead, which the ingest
+catches to charge a mistyped root to that root and go on to the next one, and
+which every other consumer lets end its run.
 
 The import exception on the navigation path
 ===========================================
@@ -227,9 +358,23 @@ that does not need it, which is what this is and what the GUI toolkit's inline
 imports are; it is not a cycle workaround, and the comment at the import says
 which of the two it is.
 
-A test pins it, in a subprocess: by the time any test in the session runs,
-something has already imported SQLAlchemy, so the same assertion inside the
-process would pass whatever the package did.
+The same rule is what puts the record seam's database-free half in
+:mod:`spindoctor.nav_records` rather than here. The enumeration reads documents
+through that seam, so a database layer imported anywhere under it would be
+imported by every navigation run --- and an inline import cannot save a package
+whose whole surface is on that path. The split is the arrangement instead: the
+record types, the document rules, the selection, the protocol and the tree
+backend acquire no database, and the index-backed half and the factory live on
+this side, where SQLAlchemy is already a dependency.
+
+Both halves of that are pinned in a subprocess, and have to be: by the time any
+test in the session runs, something has already imported SQLAlchemy, so the same
+assertion inside the process would pass whatever the packages did. One probe
+imports :mod:`spindoctor.dataset` and one imports
+:mod:`spindoctor.nav_records`, each asserting that no module of SQLAlchemy
+loaded --- and the second asserts as well that the walk itself loaded, since a
+guarantee about a package that imported almost nothing is a guarantee about
+nothing.
 
 Adding a column
 ===============
@@ -288,7 +433,7 @@ The edits, in the order the list gives them:
         sqlalchemy.Column('shutter_mode', sqlalchemy.Text),
     )
 
-    SCHEMA_VERSION = 8  # incremented by this change
+    SCHEMA_VERSION = 9  # incremented by this change
 
     # spindoctor/cli/stats/ingest_rows.py, inside rows_from_metadata
     image_row: dict[str, Any] = {
@@ -314,7 +459,7 @@ The edits, in the order the list gives them:
         ('shutter_mode', sqlalchemy.Text, True),  # name, type, nullable
     )
 
-    COLUMN_SET_VERSION = 8  # the same number, written down beside the columns
+    COLUMN_SET_VERSION = 9  # the same number, written down beside the columns
 
 The value is read out of the document with the coercion its column's meaning
 calls for, and never coerced past what the document said: ``str(None)`` is

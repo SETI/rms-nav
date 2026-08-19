@@ -23,7 +23,7 @@ derivation, the angular-velocity rationale, the writer's structure).
 Section 4 records what each phase delivered and what it measured. Section 5
 records the acceptance criteria and their status. What remains:
 
-- **Suite coverage is below criterion 8's bound**, at 77% against the 90%
+- **Suite coverage is below criterion 7's bound**, at 77% against the 90%
   the criterion asks for. That is the project's standing figure rather than
   a regression from this work: measured over the unit suite, every module in
   `spindoctor/cli/ck/` is at 99-100% and `spindoctor/spice_ids.py` at 100%,
@@ -62,7 +62,7 @@ This plan does two things:
    files that mirror the coverage of the original kernels they correct.
 
 The kernel writer consumes the recorded C-matrix. It performs no
-offset-to-rotation conversion of its own, and it does not import oops.
+offset-to-rotation conversion of its own.
 
 **In scope:** the C-matrix computation and its metadata fields; the exposure
 and clock fields the writer needs; the `sd_create_ck` program and its writer
@@ -332,10 +332,9 @@ The computation lives in `spindoctor/support/cmatrix.py`, a single entry
 point taking the observation, the offset, and the fitted-rotation flag, and
 returning a frozen dataclass carrying both matrices, the frame identities,
 and the times block. It imports oops -- it must, to read the observation's
-frame and FOV -- which is fine on the pipeline side; the constraint that
-bans oops applies to the kernel writer (section 3.6). When oops gains its
-own corrected-attitude API, this module's body is replaced and its
-interface stays. A `#` comment records that intent.
+frame and FOV. When oops gains its own corrected-attitude API, this
+module's body is replaced and its interface stays. A `#` comment records
+that intent.
 
 `NavResult` is constructed inside the ensemble, which never sees the
 observation, and it is a frozen dataclass -- so the wiring is: `NavResult`
@@ -893,8 +892,9 @@ The per-image logs go under a `ck` backend, which is added to
 
 The arguments as built: a positional mission (`coiss`, `gossi`, `nhlorri`,
 `vgiss`, spelled in the driver rather than read from the observation
-registry, which is behind an oops import); `--nav-results-root`, whose tree
-is walked for `*_metadata.json` and filtered on `observation.instrument`;
+registry, which would drag every host class into a program that needs only
+their names); `--nav-results-root`, whose records are read and filtered on
+`observation.instrument`;
 `--kernel-dir`, repeatable and required, which is both the set of
 directories indexed for candidate C-kernels and the set that resolves the
 basenames provenance records; `--start-time` / `--stop-time` as UTC, applied
@@ -958,25 +958,20 @@ elsewhere would fail on the first correction -- after the originals had
 already loaded, leaving the consumer with an uncorrected pool rather than an
 empty one.
 
-### 3.6 The writer's imports, and cspyce
+### 3.6 The writer, and cspyce
 
-The writer core lives in `spindoctor/cli/ck/` and imports `cspyce` and
-nothing from oops -- and nothing from `spindoctor.support`, which is where
-the oops-importing `cmatrix` module lives; one careless helper import there
-would drag oops in transitively. The guarantee is asserted on `sys.modules`
-after importing the writer package in a fresh interpreter, not by scanning
-source text.
+The writer core lives in `spindoctor/cli/ck/` and writes kernels through
+`cspyce`.
 
 The one fact the writer and the attitude computation must agree on -- which
-spacecraft clock each CK object's time tags are encoded against -- therefore
-lives in `spindoctor/spice_ids.py`, a top-level constants module importing
-only the standard library, which both sides read. It is deliberately not
-under `spindoctor/support/`, which the writer may not import at all. That
-mapping is the check against `ckmeta` computing a clock id rather than
-validating one, so a second copy of it would be a silent way for the check
-to rot on one side while it kept passing on the other; `cmatrix` derives
-each instrument's clock from it, and the writer's `resolve_sclk_id`
-validates against it. Both keep their own error type and message.
+spacecraft clock each CK object's time tags are encoded against -- lives in
+`spindoctor/spice_ids.py`, a top-level constants module importing only the
+standard library, which both sides read. That mapping is the check against
+`ckmeta` computing a clock id rather than validating one, so a second copy
+of it would be a silent way for the check to rot on one side while it kept
+passing on the other; `cmatrix` derives each instrument's clock from it, and
+the writer's `resolve_sclk_id` validates against it. Both keep their own
+error type and message.
 
 The same rule covers the widest snapped lookup tolerance (80000 ticks),
 for the same reason: the index widens a frozen-attitude object's coverage
@@ -1295,8 +1290,7 @@ the meta-kernel, the naming convention, the report columns, and every
 `sd_create_ck` argument.
 `docs/dev_guide/dev_guide_ck_kernels.rst`: the frame relations of section
 2.1 including the oops-flip table, the derivation of section 2.2, why
-angular velocity is copied verbatim, why the writer imports no oops and
-nothing from `spindoctor.support`, why assignment is by reproduction, and
+angular velocity is copied verbatim, why assignment is by reproduction, and
 the writer's module structure. Both are in the Sphinx toctrees;
 `spindoctor.cli.ck` gets no API-reference page, matching every other
 `spindoctor.cli` subpackage, and is nitpick-ignored in `docs/conf.py` the
@@ -1328,25 +1322,22 @@ same way.
    either a `source_bc` or an `omission_reason` from the section 3.3 set.
 6. No image whose recorded baseline no candidate kernel reproduces
    receives a segment.
-7. Importing the writer package in a fresh interpreter loads no oops
-   module and nothing from `spindoctor.support`, asserted on
-   `sys.modules`.
-8. `ruff check`, `ruff format --check`, `mypy --strict`, `sphinx-build -W`
+7. `ruff check`, `ruff format --check`, `mypy --strict`, `sphinx-build -W`
    and `pymarkdown scan` all pass; suite coverage stays at or above 90%,
    with the writer core covered by the hermetic self-written-kernel tests
    of Phase B, not only by integration runs.
 
 ### Status
 
-Criteria 1-7 are met, each by the tests named in section 4: 1 and 2 by
+Criteria 1-6 are met, each by the tests named in section 4: 1 and 2 by
 Phase A's hermetic and per-instrument integration tests, 3 by the Phase D
 round trip on Cassini NAC, Cassini WAC, Voyager and LORRI (Galileo is
 excluded by this plan's own rotation rule, and Phase D pins that as a
 measurement), 4 by the Phase B lookup tests over a furnished baseline
-including the `sxform` half, 5 and 6 by the Phase C and E report and
-assignment tests, and 7 by the fresh-interpreter `sys.modules` probe.
+including the `sxform` half, and 5 and 6 by the Phase C and E report and
+assignment tests.
 
-Criterion 8 is met except for its coverage bound: the lint, type, docs and
+Criterion 7 is met except for its coverage bound: the lint, type, docs and
 markdown gates all pass, and the writer core is covered hermetically rather
 than only by integration runs, but suite coverage measures 77% against the
 90% asked for. Section 0 records what that figure is made of; the bound

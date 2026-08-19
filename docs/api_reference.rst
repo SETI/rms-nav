@@ -13,6 +13,7 @@ This section provides detailed API documentation for the SpinDoctor system.
    api_reference/api_nav_model
    api_reference/api_nav_technique
    api_reference/api_reproj
+   api_reference/api_nav_records
    api_reference/api_results_index
    api_reference/api_dataset
    api_reference/api_obs

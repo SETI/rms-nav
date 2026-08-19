@@ -19,7 +19,7 @@ exactly that rather than as a broken ingest.
 A refused file is recorded in ``failed_files`` with everything the walk knows
 about it and nothing the document would have said: the same two metrics an
 ingested one records, so an unchanged refusal is skipped on the next pass
-instead of being downloaded and parsed again forever, plus the volume it lives
+instead of being downloaded and parsed again forever, plus the subtree it lives
 under, which is what a selection filter asks of a file it never opens.  A
 retrieval that never delivered the file is counted without being recorded: it
 says nothing about the file that will still be true next pass, and a recorded
@@ -53,18 +53,17 @@ from pdslogger import PdsLogger
 
 from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.store import _write_chunk
-from spindoctor.cli.stats.ingest.walk import METADATA_SUFFIX, _ListedFile
 from spindoctor.cli.stats.ingest_rows import (
     NOT_A_NAVIGATION_DOCUMENT,
     ImageRows,
     MetadataDocumentError,
     MetadataSource,
-    _volume_of,
+    _subtree_of,
     rows_from_metadata,
 )
+from spindoctor.nav_records import METADATA_SUFFIX, RETRIEVE_BATCH_SIZE, ListedRecord
 
 __all__ = [
-    'INGEST_RETRIEVE_BATCH_SIZE',
     'NOT_A_JSON_OBJECT',
     'NOT_VALID_JSON',
     'UNREADABLE',
@@ -87,13 +86,6 @@ NOT_A_JSON_OBJECT = 'not a JSON object'
 
 _Item = TypeVar('_Item')
 """What one slice of a batched sequence holds."""
-
-INGEST_RETRIEVE_BATCH_SIZE = 64
-"""How many metadata files are retrieved in one batched download.
-
-A cloud backend downloads a batch in parallel, so the batch size trades peak
-memory and per-request concurrency against the number of round trips.
-"""
 
 
 def _batched(items: Sequence[_Item], size: int) -> Iterator[Sequence[_Item]]:
@@ -134,13 +126,15 @@ def _read_document(local_path: Path, source: MetadataSource) -> ImageRows:
     except json.JSONDecodeError as exc:
         raise MetadataDocumentError(NOT_VALID_JSON, source_file=source.source_file) from exc
     except Exception as exc:
-        # The decoder reports more than malformed syntax.  Twenty thousand
-        # nested objects exhaust the recursion limit rather than failing to
-        # parse, and a decoder that runs out of memory says so its own way.
-        # None of them is a reason to end the run.  The reason names the parse
-        # and not the schema, because what happened is that no value came out
-        # of the file: nothing read a ``status`` out of it here, and nothing
-        # reading the tree reads one out of it either.
+        # The decoder reports more than malformed syntax.  A decoder that
+        # recurses once per level of nesting exhausts the recursion limit on a
+        # deeply nested document rather than failing to parse it, and one that
+        # runs out of memory says so its own way; how deep is deep enough is the
+        # decoder's business and not this code's.  None of them is a reason to
+        # end the run.  The reason names the parse and not the schema, because
+        # what happened is that no value came out of the file: nothing read a
+        # ``status`` out of it here, and nothing reading the tree reads one out
+        # of it either.
         raise MetadataDocumentError(
             f'{NOT_VALID_JSON} ({type(exc).__name__} while parsing it)',
             source_file=source.source_file,
@@ -166,7 +160,7 @@ def _read_document(local_path: Path, source: MetadataSource) -> ImageRows:
 def _ingest_chunk(
     engine: sqlalchemy.Engine,
     root: FCPath,
-    chunk: Sequence[_ListedFile],
+    chunk: Sequence[ListedRecord],
     *,
     root_url: str,
     counts: IngestCounts,
@@ -187,10 +181,8 @@ def _ingest_chunk(
     """
     pending: list[ImageRows] = []
     refused: list[dict[str, Any]] = []
-    for batch in _batched(chunk, INGEST_RETRIEVE_BATCH_SIZE):
-        sub_paths: list[str | Path] = [
-            f'{listed.results_path_stub}{METADATA_SUFFIX}' for listed in batch
-        ]
+    for batch in _batched(chunk, RETRIEVE_BATCH_SIZE):
+        sub_paths: list[str | Path] = [f'{listed.stub}{METADATA_SUFFIX}' for listed in batch]
         # retrieve() rather than get_local_path(): on a cloud root the latter
         # names a file it never downloads.  exception_on_fail=False keeps one
         # unreadable file from ending the run.
@@ -200,8 +192,8 @@ def _ingest_chunk(
         for listed, local_path in zip(batch, local_paths, strict=True):
             source = MetadataSource(
                 root_url=root_url,
-                results_path_stub=listed.results_path_stub,
-                source_file=(root / f'{listed.results_path_stub}{METADATA_SUFFIX}').as_posix(),
+                results_path_stub=listed.stub,
+                source_file=(root / f'{listed.stub}{METADATA_SUFFIX}').as_posix(),
                 mtime_ns=listed.mtime_ns,
                 size_bytes=listed.size_bytes,
             )
@@ -220,16 +212,16 @@ def _ingest_chunk(
                 refused.append(
                     {
                         'root_url': root_url,
-                        'results_path_stub': listed.results_path_stub,
+                        'results_path_stub': listed.stub,
                         'reason': exc.reason,
                         # The walk knows this whatever the file says, and a
                         # selection filter asks about the file rather than
                         # about its contents: a refused document is one the
-                        # tree still holds, under a volume.  The volume is
+                        # tree still holds, under a subtree.  The subtree is
                         # derived by the same function the images row uses, so
-                        # the two tables can never disagree about which volume
+                        # the two tables can never disagree about which subtree
                         # a stub is under.
-                        'volume': _volume_of(listed.results_path_stub),
+                        'subtree': _subtree_of(listed.stub),
                         'mtime_ns': listed.mtime_ns,
                         'size_bytes': listed.size_bytes,
                     }

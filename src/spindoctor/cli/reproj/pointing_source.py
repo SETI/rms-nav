@@ -10,9 +10,10 @@ results index answers the same questions with one row.  So the seam is explicit:
 and :class:`IndexPointingSource` reads rows.
 
 Neither implementation classifies anything itself, and neither reads its storage
-itself.  Both are thin wrappers over
-:mod:`spindoctor.results_index.record_source`, the one seam every program reads
-navigation records through, and both hand what it returns to the one classifier,
+itself.  Both are thin wrappers over the record seam
+(:mod:`spindoctor.nav_records`, and :mod:`spindoctor.results_index.record_source`
+for the half that reads rows) that every program reads navigation records
+through, and both hand what it returns to the one classifier,
 :func:`spindoctor.cli.reproj.offsets.select_pointing`.  So the two paths cannot
 disagree about which pointing a record supplies -- there is only one ladder, and
 it is the same code in both modes -- and neither can disagree with the other
@@ -181,21 +182,20 @@ from spindoctor.cli.reproj.offsets import (
     NO_METADATA_MESSAGE,
     PointingSelection,
     load_pointing_if_any,
+    nav_metadata_path,
     none_selection,
-    resolved_nav_metadata_path,
     select_pointing,
 )
 from spindoctor.config import IMAGE_LOGGER
 from spindoctor.dataset.dataset import ImageFile
+from spindoctor.nav_records import RecordSource, read_document
 from spindoctor.results_index import (
     IMAGES,
     IndexRecordSource,
-    RecordSource,
     masked_url,
     normalize_root_url,
     open_index_for_roots,
 )
-from spindoctor.support.nav_document import read_document
 
 __all__ = [
     'FilePointingSource',
@@ -318,13 +318,12 @@ class FilePointingSource:
                 f'{image_file.results_path_stub}: no navigation results root was resolved, '
                 f'so no navigation record can be read for this image'
             )
-        # Resolved through the one guard every reader of a document shares
-        # rather than joined here: the class would otherwise apply different
-        # rules about which paths a results root may be read at depending on
-        # which of its two methods was called.  This wrapper of the guard is the
-        # one that reports a refused path against the image, which is why this
-        # method calls it rather than asking the seam for the document.
-        metadata_file = resolved_nav_metadata_path(self._nav_results_root, image_file)
+        # Named through the one wrapper that reports a refused key against the
+        # image, rather than joined here: the class would otherwise apply
+        # different rules about what makes a stub a key depending on which of
+        # its two methods was called, and the seam's own reader has no image to
+        # report a refusal against.
+        metadata_file = nav_metadata_path(self._nav_results_root, image_file)
         if metadata_file is None:
             raise FileNotFoundError(
                 f'{image_file.results_path_stub}: does not name a navigation record under '
@@ -371,7 +370,7 @@ class IndexPointingSource:
         bug reports, and a connection URL can carry a database password.
         """
         url = engine.url.render_as_string(hide_password=False)
-        self._records: RecordSource = IndexRecordSource(engine, root_url, url, _ROW_COLUMNS)
+        self._records: RecordSource = IndexRecordSource(engine, [root_url], url, _ROW_COLUMNS)
         # An index is a snapshot of its last ingest, so a row can be absent
         # because nothing navigated the image or because the image was
         # navigated after that ingest.  Neither the row nor its absence can say
@@ -400,7 +399,7 @@ class IndexPointingSource:
                 and this image was navigated -- the index simply cannot say
                 what it recorded.
         """
-        return self._records.read_record(image_file.results_path_stub)
+        return self._records.record(image_file.results_path_stub).metadata
 
     def load_pointing(self, image_file: ImageFile) -> PointingSelection:
         """Read and classify one image's recorded pointing from its row.
@@ -422,7 +421,7 @@ class IndexPointingSource:
                 of a row is a classifiable answer.
         """
         try:
-            record = self._records.read_record(image_file.results_path_stub)
+            record = self._records.record(image_file.results_path_stub).metadata
         except FileNotFoundError:
             IMAGE_LOGGER.warning(NO_METADATA_MESSAGE, image_file.image_file_url, self._storage)
             return none_selection(NO_METADATA)

@@ -160,10 +160,10 @@ def test_two_volumes_with_one_basename_produce_two_rows_on_postgresql(
     engine = open_index(postgres_url)
     with engine.connect() as connection:
         found = list(
-            connection.execute(sqlalchemy.select(IMAGES.c.volume).order_by(IMAGES.c.volume))
+            connection.execute(sqlalchemy.select(IMAGES.c.subtree).order_by(IMAGES.c.subtree))
         )
     engine.dispose()
-    assert [row.volume for row in found] == ['COISS_2001', 'COISS_2002']
+    assert [row.subtree for row in found] == ['COISS_2001', 'COISS_2002']
 
 
 def test_an_absent_cmatrix_is_sql_null_on_postgresql(

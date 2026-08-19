@@ -7,19 +7,20 @@ configuration key or an environment variable, and those three routinely differ
 by a trailing slash or by being relative to the working directory.
 
 These are assertions about the functions' contracts rather than about any one
-backend's behavior: that two spellings of one root produce one string, that the
-filesystem root -- the one root whose separator is its whole name -- survives
-intact, that when a pass finished is read from the runs over the root it was
-asked about, and that the refusal of a root nobody ingested names its index
-without its password and its roots exactly as they were given.
+backend's behavior: that when a pass finished is read from the runs over the
+root it was asked about, and that the refusal of a root nobody ingested names
+its index without its password and its roots exactly as they were given.
+
+How a root is spelled is one rule for both storages, so it is asserted where it
+lives, in ``tests/spindoctor/nav_records/test_roots.py``.
 """
 
 from pathlib import Path
 
 import pytest
-from filecache import FCPath
 from tests.spindoctor.results_index.conftest import opened, sqlite_url_for
 
+from spindoctor import nav_records
 from spindoctor.results_index import (
     INGEST_RUNS,
     SCHEMA_VERSION,
@@ -48,65 +49,16 @@ SECOND_FINISHED = '2026-03-04T05:06:07+00:00'
 """When the pass over the second root finished, which is later and is not the first."""
 
 
-def test_a_trailing_separator_does_not_make_two_roots() -> None:
-    """One program writes the trailing slash and another does not."""
-    assert normalize_root_url('/data/nav-results/') == normalize_root_url('/data/nav-results')
+def test_the_index_re_exports_the_one_spelling_of_a_results_root() -> None:
+    """The rule lives with the record seam, and a consumer of the index reads it here.
 
-
-def test_a_repeated_separator_does_not_make_two_roots() -> None:
-    """A root pasted together from two settings arrives with the join doubled."""
-    assert normalize_root_url('/data//nav-results') == '/data/nav-results'
-
-
-def test_a_relative_root_becomes_an_absolute_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A root named relatively on one run and absolutely on the next is one root."""
-    monkeypatch.chdir(tmp_path)
-    assert normalize_root_url('results') == (tmp_path / 'results').as_posix()
-
-
-def test_the_filesystem_root_keeps_its_separator() -> None:
-    """It is the one root whose trailing separator is the whole of its name."""
-    assert normalize_root_url('/') == '/'
-
-
-def test_a_cloud_root_keeps_its_scheme() -> None:
-    """A results root is any URL the file layer accepts, not only a local path."""
-    assert normalize_root_url('gs://rms-nav-results/coiss/') == 'gs://rms-nav-results/coiss'
-
-
-def test_an_fcpath_normalizes_the_same_way_as_its_text() -> None:
-    """A caller holding the path object must not get a second spelling of it."""
-    assert normalize_root_url(FCPath('/data/nav-results/')) == normalize_root_url(
-        '/data/nav-results'
-    )
-
-
-def test_a_root_spelled_as_nothing_at_all_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An empty spelling renders as the working directory, and is not a root.
-
-    ``--nav-results-root "$ROOT"`` with the variable unset hands a program an
-    empty word, and a program that resolved it would walk whatever directory it
-    happens to be in, write those documents under a root nobody named, and
-    report a pass that completed.
+    A results root is not a database concept, so the spelling rule is kept where
+    a reader of documents can reach it without reaching a database.  It is
+    re-exported from the index so that a consumer of rows reads the root and the
+    bookkeeping about it out of one place, and so that the two can never come to
+    hold different versions of what one root is.
     """
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(ValueError, match='not a location'):
-        normalize_root_url('')
-
-
-def test_a_root_carrying_a_null_byte_is_refused() -> None:
-    """It renders perfectly well, and fails at the first call that reaches disk.
-
-    Refused where the root is spelled, it is charged to the root; left to
-    render, it becomes an exception out of a directory listing, naming the
-    listing rather than the word that caused it.
-    """
-    with pytest.raises(ValueError, match='null byte'):
-        normalize_root_url('/data/nav\x00results')
+    assert normalize_root_url is nav_records.normalize_root_url
 
 
 def _refusal_of_an_unknown_root(tmp_path: Path) -> str:

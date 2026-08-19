@@ -706,9 +706,9 @@ def test_the_volumes_are_fixed_at_the_boundary_for_the_tree(tree: Path) -> None:
 
 
 def _reads_recorded_by(reads: list[list[str]]) -> Any:
-    """Return a stand-in read that reads its volumes twice and records both.
+    """Return a stand-in read that reads its selected directories twice and records both.
 
-    Reading twice is the contract under test.  ``volumes`` arrives here as
+    Reading twice is the contract under test.  The argument arrives here as
     whatever the constructor passed on, and an iterator passed through would be
     empty the second time -- which is exactly what the boundary exists to stop,
     and what an end-to-end comparison of a list against an iterator cannot see,
@@ -723,10 +723,10 @@ def _reads_recorded_by(reads: list[list[str]]) -> Any:
     """
 
     def recording(
-        url: str, nav_results_root: Any, volumes: Iterable[str], **flags: bool
+        url: str, nav_results_root: Any, subtrees: Iterable[str], **flags: bool
     ) -> ResultStubs:
-        reads.append(list(volumes))
-        reads.append(list(volumes))
+        reads.append(list(subtrees))
+        reads.append(list(subtrees))
         return ResultStubs(with_metadata=frozenset(), matching_error=frozenset())
 
     return recording

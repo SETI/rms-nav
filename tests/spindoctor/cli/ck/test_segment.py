@@ -34,13 +34,14 @@ from tests.spindoctor.cli.ck.ck_helpers import (
     write_ck,
 )
 
-from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
+from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.segment import (
     BaselineCoverageGapError,
     CkSegment,
     build_segment,
     resolve_sclk_id,
 )
+from spindoctor.support.types import NDArrayFloatType
 
 # The correction the tests plant, expressed in the CK object's own frame.  It is
 # far larger than a navigated correction ever is and turns about an axis shared

@@ -39,8 +39,9 @@ leaves a row that would answer for an image the tree no longer holds, so the
 rows of one root whose stub the walk did not find are deleted with it.  That is
 sound only for a pass that listed the whole root: a worker handed a share of a
 root has no evidence about the stubs outside its share, and deleting on that
-evidence would delete its peers' work.  The prune therefore reads a whole-root
-listing and refuses anything else.
+evidence would delete its peers' work.  The prune therefore takes a listing of
+a whole root and nothing else, and a share of a root is a list of files that
+cannot become one.
 
 A walk supplies one or it stops: a directory it cannot list ends the pass where
 it finds it, so a run that reaches the prune at all listed every directory
@@ -50,6 +51,7 @@ passes that finished.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import sqlalchemy
 from filecache import FCPath
@@ -59,10 +61,16 @@ from spindoctor.cli.stats.ingest.chunks import _batched, _ingest_chunk
 from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.runs import _finish_run, _start_run
 from spindoctor.cli.stats.ingest.store import _recorded_files, _RecordedFile, _report_refusals
-from spindoctor.cli.stats.ingest.walk import _ListedFile, _RootListing, _walk_root
-from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url
+from spindoctor.nav_records import (
+    ListedRecord,
+    Selection,
+    TreeRecordSource,
+    UnlistableRootError,
+    distinct_roots,
+)
+from spindoctor.results_index import FAILED_FILES, IMAGES
 
-__all__ = ['INGEST_COMMIT_CHUNK_SIZE', 'distinct_roots', 'ingest_metadata_files']
+__all__ = ['INGEST_COMMIT_CHUNK_SIZE', 'ingest_metadata_files']
 
 INGEST_COMMIT_CHUNK_SIZE = 512
 """How many images are written per database transaction.
@@ -74,39 +82,96 @@ worker never sees half of an image.
 """
 
 
-def distinct_roots(roots: Sequence[str]) -> list[str]:
-    """Normalize the given roots and drop the repeats, keeping their order.
+@dataclass(frozen=True)
+class _RootListing:
+    """Everything one listing of a whole results root found.
 
-    ``/data/x`` and ``/data/x/`` are one root, and a command line naming both
-    means the tree once.  Walking it twice reads every document twice and gives
-    one root two ingest runs; in a pass divided into cloud tasks it also hands
-    every document out in two shares, leaves the first of the two runs
-    unfinished forever, and -- since a completion stamps the newest run and then
-    finds nothing outstanding -- tells the operator that a root it has just
-    finished was never divided up.
-
-    Every mode of the pass reads the roots through this, and so does the driver
-    that reports which roots it was given: a run that named a root two ways and
-    then reported on it once reads as a root having gone missing.
+    Only :func:`_listing_of_root` builds one, and it builds one only for a root
+    it listed entirely, which is what makes this type the prune's license: a
+    share of a root is a list of files and can never become one of these, so a
+    worker cannot reach for evidence it does not have.  The root travels with
+    the documents for the same reason -- a prune is evidence about the root that
+    was listed and about no other, and the rows it deletes carry that root as
+    half of their key.
 
     Parameters:
-        roots: The roots as their holder spelled them.
+        root_url: Normalized URL of the root this is a listing of.
+        documents: The navigation documents found under it, in stub order.
+        has_file_metrics: Whether every one of them reported both a size and a
+            modification time.  A listing that reports neither cannot answer
+            "has this changed", so such a root is re-read in full.
+    """
+
+    root_url: str
+    documents: tuple[ListedRecord, ...]
+    has_file_metrics: bool
+
+
+def _listing_of_root(root_url: str, *, logger: PdsLogger) -> _RootListing | None:
+    """List one results root whole, or report that nothing under it was listed.
+
+    The listing itself is
+    :class:`~spindoctor.nav_records.TreeRecordSource`'s, because every program
+    that reads a results tree needs the same one and a rule about which
+    directories were listed is not a rule while two readers hold different
+    versions of it.  What is here is the accounting a pass keeps around it: the
+    stream collected whole, because a pass compares it against the rows the
+    index already holds and then prunes on the strength of holding all of it.
+
+    The documents are put in stub order, which the stream does not promise: a
+    fan-out cuts its tasks out of this listing in the order it holds them, and a
+    task file is an operator-visible artifact that should describe the same
+    tree the same way however the storage layer happened to enumerate it.
+
+    Parameters:
+        root_url: Normalized URL of the results root to list.
+        logger: Logger for the scan summary, the degraded-listing warning and
+            the root that could not be listed at all.
 
     Returns:
-        The normalized roots, first spelling first.
+        What the listing found, or None when the root itself could not be
+        listed.  A root that is not there is a different thing from a root that
+        is empty, and only the second one has been ingested when the pass ends,
+        so the two are told apart by the type rather than by a count: there is
+        no listing of the first for a prune to act on.  The root is also the one
+        directory whose refusal is reported rather than raised, because a pass
+        over several roots accounts for each of them separately and a mistyped
+        root is the commonest thing an operator types.
 
     Raises:
-        ValueError: If a root is not a location: one the storage layer refuses
-            to render absolute, one carrying a null byte, or an empty spelling,
-            which is the working directory rather than a root anybody named.
+        UnlistableDirectoryError: If a directory under the root could not be
+            listed, which ends the whole pass rather than this root's part of
+            it.  A directory nobody enumerated holds documents nobody recorded,
+            and absence of a row is exactly what every consumer reads as "this
+            image was never navigated", so a pass that finished around the gap
+            would stamp that reading as an answer.
     """
-    distinct: dict[str, None] = {}
-    for root in roots:
-        distinct.setdefault(normalize_root_url(root), None)
-    return list(distinct)
+    source = TreeRecordSource([root_url], logger=logger)
+    try:
+        documents = sorted(source.listing(Selection()), key=lambda listed: listed.stub)
+    except UnlistableRootError:
+        logger.error(
+            'Results root %s could not be listed, so nothing under it has been ingested: '
+            'check the spelling of the root',
+            root_url,
+        )
+        return None
+    logger.info('Results scan found %d metadata file(s) under %s', len(documents), root_url)
+    listing = _RootListing(
+        root_url=root_url,
+        documents=tuple(documents),
+        has_file_metrics=all(listed.has_metrics for listed in documents),
+    )
+    if not listing.has_file_metrics:
+        logger.warning(
+            'Listing of %s reports no size or modification time, so every document '
+            'is re-read: this root cannot be ingested incrementally',
+            root_url,
+        )
+    return listing
 
 
-def _is_unchanged(listed: _ListedFile, recorded: _RecordedFile | None) -> bool:
+def _is_unchanged(listed: ListedRecord, recorded: _RecordedFile | None) -> bool:
     """Whether a listed file is exactly what the index already read.
 
     The comparison is the two metrics the listing supplies, and they are
@@ -137,12 +202,12 @@ def _is_unchanged(listed: _ListedFile, recorded: _RecordedFile | None) -> bool:
 
 
 def _files_to_read(
-    files: Sequence[_ListedFile],
+    files: Sequence[ListedRecord],
     recorded: dict[str, _RecordedFile],
     *,
     force: bool,
     has_file_metrics: bool,
-) -> list[_ListedFile]:
+) -> list[ListedRecord]:
     """Select the metadata files this pass has to read.
 
     A file the last pass refused is skipped on the same evidence as one it
@@ -166,16 +231,11 @@ def _files_to_read(
     """
     if force or not has_file_metrics:
         return list(files)
-    return [
-        listed
-        for listed in files
-        if not _is_unchanged(listed, recorded.get(listed.results_path_stub))
-    ]
+    return [listed for listed in files if not _is_unchanged(listed, recorded.get(listed.stub))]
 
 
 def _prune_missing(
     engine: sqlalchemy.Engine,
-    root_url: str,
     listing: _RootListing,
     recorded: dict[str, _RecordedFile],
     *,
@@ -188,27 +248,26 @@ def _prune_missing(
     A re-navigation that renames or removes documents otherwise leaves rows
     that answer confidently for images nothing produced.
 
+    Rows may only be removed on the evidence of a listing of a whole root, and
+    a :class:`_RootListing` is the only thing that is one: a pass over a share
+    of a root knows nothing about the stubs outside its share and would delete
+    another worker's rows on that evidence, and it holds a list of files that
+    this will not take.  The root deleted under is the listing's own for the
+    same reason, since the rows carry it as half of their key and a listing of
+    one root is no evidence at all about another.
+
     Parameters:
         engine: The open index.
-        root_url: Normalized URL of the root being ingested.
-        listing: The walk this prune is entitled to act on.
+        listing: The listing this prune is entitled to act on, and the root it
+            was a listing of.
         recorded: What the index held about the root before this pass.
         logger: Logger for the count removed.
 
     Returns:
         How many image rows were deleted.
-
-    Raises:
-        ValueError: If the listing is not one of the whole root.  A pass over a
-            share of a root knows nothing about the stubs outside its share,
-            and would delete another worker's rows on that evidence.
     """
-    if not listing.root_listed:
-        raise ValueError(
-            f'{root_url}: rows may only be removed on the evidence of a listing of the '
-            f'whole root, and this walk did not produce one'
-        )
-    found = {listed.results_path_stub for listed in listing.metadata_files}
+    root_url = listing.root_url
+    found = {listed.stub for listed in listing.documents}
     gone = sorted(stub for stub in recorded if stub not in found)
     if not gone:
         return 0
@@ -291,19 +350,19 @@ def ingest_metadata_files(
         counts = IngestCounts()
         run_id = _start_run(engine, root_url)
         logger.info('Ingesting %s', root_url)
-        listing = _walk_root(root, logger=logger)
-        counts.files_seen = len(listing.metadata_files)
-        if not listing.root_listed:
+        listing = _listing_of_root(root_url, logger=logger)
+        if listing is None:
             # The run row keeps its NULL finish time, so every consumer treats
             # this root as one nobody has ingested rather than as one that
             # holds nothing.
             counts.roots_unreadable = 1
             total.add(counts)
             continue
+        counts.files_seen = len(listing.documents)
         with engine.connect() as connection:
             recorded = _recorded_files(connection, root_url)
         to_read = _files_to_read(
-            listing.metadata_files,
+            listing.documents,
             recorded,
             force=force,
             has_file_metrics=listing.has_file_metrics,
@@ -318,7 +377,7 @@ def ingest_metadata_files(
                 counts=counts,
                 logger=logger,
             )
-        counts.files_removed = _prune_missing(engine, root_url, listing, recorded, logger=logger)
+        counts.files_removed = _prune_missing(engine, listing, recorded, logger=logger)
         _finish_run(engine, run_id, counts)
         logger.info(
             'Ingested %d, skipped %d unchanged, failed %d, removed %d of %d file(s) under %s',

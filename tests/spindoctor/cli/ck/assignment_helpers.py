@@ -28,7 +28,7 @@ from tests.spindoctor.cli.ck.ck_helpers import (
 )
 
 from spindoctor.cli.ck.images import ImageEntry
-from spindoctor.cli.ck.pointing import NDArrayFloatType
+from spindoctor.support.types import NDArrayFloatType
 
 # The clocks the two test objects are tagged against, matching the test SCLK.
 CASSINI_SCLK_ID = -82

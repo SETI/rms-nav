@@ -5,11 +5,6 @@ camera attitude as a C-matrix in the SPICE camera frame convention at the
 exposure midtime, beside the frame identities and the exposure epochs a
 C-kernel segment needs.  This module turns that recorded metadata block into
 the single input type the segment writer accepts.
-
-The writer reads the metadata rather than sharing the pipeline's in-memory
-dataclass on purpose: the pipeline's version is produced by code that imports
-oops, and a kernel writer that imports oops defeats the point of writing
-kernels.
 """
 
 import math
@@ -17,11 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-import numpy.typing as npt
 
-# Spelled here rather than imported from ``spindoctor.support.types`` because
-# the writer must not import ``spindoctor.support``: its modules pull in oops.
-NDArrayFloatType = npt.NDArray[np.floating[Any]]
+from spindoctor.support.types import NDArrayFloatType
 
 # A recorded C-matrix must be a proper rotation to this tolerance.  Anything
 # looser is a defect in what was recorded, not something to orthonormalize

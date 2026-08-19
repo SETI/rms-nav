@@ -18,20 +18,15 @@ import pytest
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats.ingest import (
-    INGEST_COMMIT_CHUNK_SIZE,
-    INGEST_RETRIEVE_BATCH_SIZE,
-    METADATA_SUFFIX,
-    ingest_metadata_files,
-)
+from spindoctor.cli.stats.ingest import INGEST_COMMIT_CHUNK_SIZE, ingest_metadata_files
 from spindoctor.cli.stats.ingest import chunks as chunks_module
 from spindoctor.cli.stats.ingest import driver as driver_module
-from spindoctor.cli.stats.ingest import walk as walk_module
 from spindoctor.cli.stats.ingest_rows import (
     MetadataDocumentError,
     MetadataSource,
     rows_from_metadata,
 )
+from spindoctor.nav_records import METADATA_SUFFIX, RETRIEVE_BATCH_SIZE
 from spindoctor.results_index import (
     IMAGES,
     INGEST_RUNS,
@@ -89,14 +84,14 @@ def test_the_root_is_recorded_as_given() -> None:
     assert rows.image['root_url'] == SOURCE.root_url
 
 
-def test_the_volume_is_the_stubs_first_segment() -> None:
-    """A volume-qualified stub yields the volume without string surgery in SQL."""
+def test_the_subtree_is_the_stubs_first_segment() -> None:
+    """A stub under a directory yields it without string surgery in SQL."""
     rows = rows_from_metadata(metadata_document(), SOURCE)
-    assert rows.image['volume'] == 'COISS_2001'
+    assert rows.image['subtree'] == 'COISS_2001'
 
 
-def test_a_bare_basename_stub_has_no_volume() -> None:
-    """The simulated dataset produces a stub with no separator, and no volume."""
+def test_a_bare_basename_stub_has_no_subtree() -> None:
+    """The simulated dataset produces a stub with no separator, and no subtree."""
     source = MetadataSource(
         root_url='/data/nav-results',
         results_path_stub='sim_scene_000042',
@@ -105,7 +100,7 @@ def test_a_bare_basename_stub_has_no_volume() -> None:
         size_bytes=2,
     )
     rows = rows_from_metadata(metadata_document(instrument='sim'), source)
-    assert rows.image['volume'] is None
+    assert rows.image['subtree'] is None
 
 
 def test_the_stored_offset_is_the_top_level_one() -> None:
@@ -648,9 +643,9 @@ def test_two_volumes_with_one_basename_produce_two_rows(
     ingest_tree(url, [root], logger=quiet_logger)
     engine = open_index(url)
     with engine.connect() as connection:
-        volumes = _rows(connection, sqlalchemy.select(IMAGES.c.volume).order_by(IMAGES.c.volume))
+        subtrees = _rows(connection, sqlalchemy.select(IMAGES.c.subtree).order_by(IMAGES.c.subtree))
     engine.dispose()
-    assert [row.volume for row in volumes] == ['COISS_2001', 'COISS_2002']
+    assert [row.subtree for row in subtrees] == ['COISS_2001', 'COISS_2002']
 
 
 def test_each_colliding_image_is_independently_retrievable(
@@ -678,19 +673,19 @@ def test_each_colliding_image_is_independently_retrievable(
     assert [row.status for row in found] == ['failed']
 
 
-def test_a_bare_basename_stub_ingests_with_a_null_volume(
+def test_a_bare_basename_stub_ingests_with_a_null_subtree(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A simulated scene lives at the root of the tree and names no volume."""
+    """A simulated scene lives at the root of the tree and names no subtree."""
     root = tmp_path / 'results'
     write_metadata(root, 'sim_scene_000042', metadata_document(instrument='sim'))
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
     engine = open_index(url)
     with engine.connect() as connection:
-        found = _rows(connection, sqlalchemy.select(IMAGES.c.volume))
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.subtree))
     engine.dispose()
-    assert [row.volume for row in found] == [None]
+    assert [row.subtree for row in found] == [None]
 
 
 def _ingest_a_file_named_only_by_the_suffix(
@@ -701,7 +696,7 @@ def _ingest_a_file_named_only_by_the_suffix(
     It is the last bracket case of the suffix test: a name that ends in the
     suffix and is nothing else, so trimming the suffix leaves an empty stub.
     The pass treats it as any other document, which puts it in under the empty
-    stub with no volume above it -- a row every volume-restricted query passes
+    stub with no subtree above it -- a row every subtree-restricted query passes
     over, which is what a selection is.
 
     Parameters:
@@ -709,7 +704,7 @@ def _ingest_a_file_named_only_by_the_suffix(
         logger: Logger the pass reports through.
 
     Returns:
-        The stub and volume of every row the pass wrote.
+        The stub and subtree of every row the pass wrote.
     """
     root = tmp_path / 'results'
     root.mkdir(parents=True, exist_ok=True)
@@ -718,7 +713,7 @@ def _ingest_a_file_named_only_by_the_suffix(
     ingest_tree(url, [root], logger=logger)
     engine = open_index(url)
     with engine.connect() as connection:
-        found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub, IMAGES.c.volume))
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.results_path_stub, IMAGES.c.subtree))
     engine.dispose()
     return found
 
@@ -731,12 +726,12 @@ def test_a_file_named_only_by_the_suffix_ingests_under_an_empty_stub(
     assert [row.results_path_stub for row in found] == ['']
 
 
-def test_a_file_named_only_by_the_suffix_ingests_with_a_null_volume(
+def test_a_file_named_only_by_the_suffix_ingests_with_a_null_subtree(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """So it is under no volume, and no enumeration of volumes reaches it."""
+    """So it is under no subtree, and no enumeration of subtrees reaches it."""
     found = _ingest_a_file_named_only_by_the_suffix(tmp_path, quiet_logger)
-    assert [row.volume for row in found] == [None]
+    assert [row.subtree for row in found] == [None]
 
 
 def _tree_with_a_file_that_is_not_a_document(tmp_path: Path) -> Path:
@@ -808,10 +803,9 @@ def test_a_file_that_is_not_a_document_is_no_part_of_what_the_walk_found(
     again on every pass afterwards.
     """
     root = _tree_with_a_file_that_is_not_a_document(tmp_path)
-    listing = walk_module._walk_root(FCPath(root), logger=quiet_logger)
-    assert [found.results_path_stub for found in listing.metadata_files] == [
-        'VOL/N1454725799_1_CALIB'
-    ]
+    listing = driver_module._listing_of_root(root.as_posix(), logger=quiet_logger)
+    assert listing is not None
+    assert [found.stub for found in listing.documents] == ['VOL/N1454725799_1_CALIB']
 
 
 def test_re_ingesting_an_image_replaces_its_child_rows(
@@ -910,22 +904,6 @@ def test_a_first_ingest_asks_about_no_single_file_either(
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     assert counts.files_ingested == 1
     assert [path for path in asked if path.endswith(METADATA_SUFFIX)] == []
-
-
-def test_a_cloud_directory_is_not_stat_ed_at_all(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Recognizing a directory already walked costs a cloud root nothing.
-
-    A cloud location has no links for a walk to go round in, and asking a
-    bucket about a prefix is a round trip per directory per run. The identity
-    is therefore taken only where a loop is possible, and the check that
-    decides is a string test that reaches no backend.
-    """
-
-    def forbidden(self: FCPath, *args: Any, **kwargs: Any) -> Any:
-        raise AssertionError('ingest asked a cloud backend about a directory')
-
-    monkeypatch.setattr(FCPath, 'stat', forbidden)
-    assert walk_module._directory_identity(FCPath('gs://rms-nav/nav-offset-results')) is None
 
 
 def test_a_touched_file_is_read_again(tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
@@ -1159,14 +1137,14 @@ def test_an_ingest_run_is_recorded_at_the_start(
     engine = open_index(url, create=True)
     seen: list[Any] = []
 
-    real_walk = walk_module._walk_root
+    real_listing = driver_module._listing_of_root
 
-    def watching(walk_root: Any, **kwargs: Any) -> Any:
+    def watching(listed_root: Any, **kwargs: Any) -> Any:
         with engine.connect() as connection:
             seen.extend(_rows(connection, sqlalchemy.select(INGEST_RUNS.c.finished_utc)))
-        return real_walk(walk_root, **kwargs)
+        return real_listing(listed_root, **kwargs)
 
-    monkeypatch.setattr(driver_module, '_walk_root', watching)
+    monkeypatch.setattr(driver_module, '_listing_of_root', watching)
     ingest_metadata_files(engine, [root.as_posix()], logger=quiet_logger)
     engine.dispose()
     assert [row.finished_utc for row in seen] == [None]
@@ -1229,7 +1207,7 @@ def test_a_chunk_boundary_is_crossed_mid_run(
 ) -> None:
     """More images than one transaction holds must all still arrive."""
     monkeypatch.setattr(driver_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
-    monkeypatch.setattr(chunks_module, 'INGEST_RETRIEVE_BATCH_SIZE', 2)
+    monkeypatch.setattr(chunks_module, 'RETRIEVE_BATCH_SIZE', 2)
     root = tmp_path / 'results'
     for index in range(7):
         write_metadata(
@@ -1247,7 +1225,7 @@ def test_a_chunk_boundary_leaves_every_row_readable(
 ) -> None:
     """Counting is not the same as having committed."""
     monkeypatch.setattr(driver_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
-    monkeypatch.setattr(chunks_module, 'INGEST_RETRIEVE_BATCH_SIZE', 2)
+    monkeypatch.setattr(chunks_module, 'RETRIEVE_BATCH_SIZE', 2)
     root = tmp_path / 'results'
     for index in range(7):
         write_metadata(
@@ -1266,7 +1244,7 @@ def test_a_chunk_boundary_leaves_every_row_readable(
 
 def test_the_batch_and_chunk_sizes_are_independent() -> None:
     """One bounds a download and the other a transaction; neither implies the other."""
-    assert (INGEST_RETRIEVE_BATCH_SIZE, INGEST_COMMIT_CHUNK_SIZE) == (64, 512)
+    assert (RETRIEVE_BATCH_SIZE, INGEST_COMMIT_CHUNK_SIZE) == (64, 512)
 
 
 def _cloud_style_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stubs: list[str]) -> Path:

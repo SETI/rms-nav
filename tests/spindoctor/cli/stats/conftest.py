@@ -388,7 +388,7 @@ def refusal_report(root: Path | str, refused: int) -> str:
         f'results tree and not from this index: {refused}, whichever pass recorded them. '
         f'Each is a JSON object the ingest refused, so this index records no status for it '
         f'and no error filter answered here selects its image. The count is the whole root, '
-        f'so it bounds rather than measures how short a selection over some of its volumes '
+        f'so it bounds rather than measures how short a selection over some of its subtrees '
         f'comes.'
     )
 

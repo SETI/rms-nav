@@ -37,8 +37,8 @@ from spindoctor.cli.ck.index import (
     build_ck_index,
     kernel_class_for_basename,
 )
-from spindoctor.cli.ck.pointing import NDArrayFloatType
 from spindoctor.cli.ck.segment import CkSegment
+from spindoctor.support.types import NDArrayFloatType
 
 # The clocks the two test objects are tagged against, matching the test SCLK.
 _CASSINI_SCLK_ID = -82

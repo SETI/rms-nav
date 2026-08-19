@@ -168,9 +168,11 @@ cloud-hosted results ingest the same way as local ones.
 
 One index holds as many roots as you ingest into it, and each consumer is
 answered only from the rows recorded under the root it was pointed at. Roots
-are compared in one normalized spelling -- absolute, with any trailing
-separator removed -- so a root named relatively on one run and absolutely on
-the next is one root.
+are compared in one normalized spelling -- absolute and resolved, with any
+trailing separator removed -- so a root named relatively on one run and
+absolutely on the next, written with a ``~`` or a ``..`` in it, or reached
+through a symbolic link on one machine and at its own location on another, is
+one root.
 
 **The roots are navigation-results roots**, resolved the way every other
 program resolves one: ``--nav-results-root`` (repeatable), then the
@@ -291,7 +293,7 @@ holds for that root whichever pass wrote them, restricted to the ones a
 selection can be short by. Those are the rows whose ``reason`` begins ``not a
 current-schema navigation document`` -- a JSON object the index will not take,
 which reading the tree answers every error filter out of -- and that carry a
-volume, since an enumeration reads the volumes it selected and nothing above
+subtree, since an enumeration reads the volumes it selected and nothing above
 them. The other reasons record a file no JSON object came out of, which the tree
 excludes from every error filter as well, so they are refusals without being a
 difference. Read the count as a bound on how much shorter a selection answered
@@ -335,6 +337,24 @@ brings the walk to a directory it has already listed; it says so, declines to
 list it twice, and goes on. The documents under it are already in the listing,
 under the path the walk met first, and walking it again would only write them a
 second time under identifiers no consumer asks about.
+
+**Do not put symbolic links inside a results tree.** Which of the two paths to
+such a directory the walk meets first is whichever the directory listings
+returned first, and that is not defined. Every document under it is therefore
+recorded under one of two identifiers, either of them; a later pass can meet the
+other one first, at which point the identifiers the earlier pass recorded name
+documents that are no longer in the tree, and the pass removes those rows and
+writes the other set. Two passes over one unchanged tree can each undo the
+other, and nothing about either pass looks wrong: both complete, both stamp the
+root, and both report that they removed the rows of documents that had left it.
+
+**A results root that is itself a link is a different matter and is handled.**
+Every program resolves the root it is given to the location that root names
+before it reads anything, so ``--nav-results-root /data/latest`` pointing at
+``/data/results-2026`` is the same root as naming ``/data/results-2026``
+outright: one set of rows, and either spelling finds them. What is undefined is
+a link *inside* the tree being walked, which is what the paragraph above is
+about.
 
 **The exit status says whether the pass completed, not what it found.**
 ``sd_stats_ingest`` exits 0 when every named root was walked, whatever mix of
@@ -674,14 +694,16 @@ pair with ``ON DELETE CASCADE``.
    * - ``root_url``
      - TEXT
      - Navigation-results root this image was ingested from, normalized to
-       one absolute form with no trailing separator. Half of the primary key.
+       one absolute, resolved form with no trailing separator. Half of the
+       primary key.
    * - ``results_path_stub``
      - TEXT
      - The image's path under that root, without the ``_metadata.json``
        suffix. The other half of the primary key.
-   * - ``volume``
+   * - ``subtree``
      - TEXT
-     - First path segment of the stub, e.g. ``COISS_2001``. NULL for a stub
+     - First path segment of the stub, i.e. the top-level directory of the
+       results tree the image sits under, e.g. ``COISS_2001``. NULL for a stub
        with no separator, which is what the simulated dataset produces.
    * - ``image_name``
      - TEXT
@@ -926,11 +948,11 @@ that does carry a finish time covers the whole of its root, because a pass that
 could not list a directory stops rather than finishing.
 
 ``failed_files`` records one row per file that is not a current-schema
-navigation document: the root and stub that identify it, the volume it is under,
-the reason it was refused, and the size and modification time it had when it was
-read. It is what lets a second pass skip it. It is deliberately not an ``images``
-row, because a file with no usable data must not answer the question ``images``
-exists to answer.
+navigation document: the root and stub that identify it, the subtree it is
+under, the reason it was refused, and the size and modification time it had when
+it was read. It is what lets a second pass skip it. It is deliberately not an
+``images`` row, because a file with no usable data must not answer the question
+``images`` exists to answer.
 
 ``reason`` names one of two things. ``unreadable``, ``not valid JSON`` and ``not
 a JSON object`` are a file no JSON object came out of, which every reader

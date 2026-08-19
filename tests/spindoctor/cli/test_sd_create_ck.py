@@ -277,6 +277,25 @@ def test_the_run_log_counts_each_omission_reason(
     assert 'Images omitted, no_reproducing_baseline: 1' in run_log(run_tree)
 
 
+def test_a_directory_the_walk_declined_reaches_the_run_log(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """The walk says this, and it only reaches an operator through the run's own log.
+
+    The results root is given a second path to a directory it already holds, so
+    the walk meets that directory twice and declines the second visit.  The root
+    is still wholly listed, which is why the run goes on -- and why a run told
+    nothing would read as one that met no such thing at all.  The record source
+    holds no logger of its own, so the line appears only because the program
+    lends the source the log it is already writing.
+    """
+    (run_tree['results'] / 'vol' / 'again').symlink_to(
+        run_tree['results'] / 'vol', target_is_directory=True
+    )
+    run_driver(run_tree, monkeypatch)
+    assert 'reached a second way' in run_log(run_tree)
+
+
 def test_the_run_log_counts_the_images_corrected(
     run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
 ) -> None:

@@ -28,16 +28,15 @@ import pytest
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats.ingest import METADATA_SUFFIX, UnlistableDirectoryError
 from spindoctor.cli.stats.ingest import chunks as chunks_module
 from spindoctor.cli.stats.ingest import driver as driver_module
 from spindoctor.cli.stats.ingest import store as store_module
-from spindoctor.cli.stats.ingest import walk as walk_module
 from spindoctor.cli.stats.ingest_rows import (
     MetadataDocumentError,
     MetadataSource,
     rows_from_metadata,
 )
+from spindoctor.nav_records import METADATA_SUFFIX, UnlistableDirectoryError
 from spindoctor.results_index import FAILED_FILES, IMAGES, INGEST_RUNS, TECHNIQUES, open_index
 
 from .conftest import (
@@ -202,11 +201,13 @@ def test_an_unenumerated_failure_costs_only_its_own_file(
 
 
 def _tree_with_unparseable_nesting(tmp_path: Path) -> Path:
-    """Write a tree holding one document and one file the JSON decoder gives up on.
+    """Write a tree holding one document and one file no JSON value comes out of.
 
-    Twenty thousand opening braces exhaust the decoder's recursion limit rather
-    than failing to parse, so the decoder raises something other than the one
-    exception a decode guard names.
+    Twenty thousand opening braces and nothing else.  How a decoder gives up on
+    them is its own business: one that recurses once per level of nesting
+    exhausts the recursion limit part way down, and one that does not recurse
+    reports the value that never arrived.  The guard under test names neither,
+    because what it charges the file for is that nothing was parsed out of it.
 
     Parameters:
         tmp_path: Directory the tree lives under.
@@ -224,10 +225,25 @@ def _tree_with_unparseable_nesting(tmp_path: Path) -> Path:
 def test_a_document_the_decoder_gives_up_on_costs_only_itself(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """Only one of the decoder's failures is a decoding error; the run outlives all."""
+    """The file is charged and the run reads the rest, however the decoder gave up."""
     root = _tree_with_unparseable_nesting(tmp_path)
     counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     assert (counts.files_ingested, counts.files_failed) == (1, 1)
+
+
+def test_a_document_the_decoder_gives_up_on_is_charged_to_the_parse(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """One reason covers every way a decoder ends with no value, so a tally reads as one.
+
+    The reason it carries is read on its prefix rather than whole: a decoder that
+    raises something other than a decoding error has that named after it, and
+    which decoders do is not this code's to say.
+    """
+    root = _tree_with_unparseable_nesting(tmp_path)
+    counts = ingest_tree(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    (reason,) = counts.failures_by_reason
+    assert reason.startswith('not valid JSON')
 
 
 def test_a_document_the_decoder_gives_up_on_leaves_a_completed_run(
@@ -1061,20 +1077,63 @@ def test_a_link_to_a_directory_outside_the_walk_is_followed(
     assert counts.files_ingested == 1
 
 
-def test_the_prune_refuses_a_listing_that_is_not_of_the_whole_root(
+# ---------------------------------------------------------------------------
+# What licenses a prune
+# ---------------------------------------------------------------------------
+
+
+def test_a_pass_stopped_at_a_directory_removes_no_row(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prune is licensed by a listing of the whole root, and this pass has none.
+
+    The rows of the volume that would not list are exactly the rows a pass that
+    pruned on a partial listing would delete, and their images are still in the
+    tree: deleting them would answer "never navigated" for images that were.
+    """
+    root = _two_volume_tree(tmp_path)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    _unlistable_subdirectory(monkeypatch, PermissionError)
+    with pytest.raises(UnlistableDirectoryError, match='VOL2 could not be listed'):
+        ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(
+            connection,
+            sqlalchemy.select(IMAGES.c.results_path_stub).order_by(IMAGES.c.results_path_stub),
+        )
+    engine.dispose()
+    assert [row.results_path_stub for row in found] == [
+        'VOL1/N1454725799_1_CALIB',
+        'VOL2/N1454725800_1_CALIB',
+    ]
+
+
+def test_the_prune_deletes_only_under_the_root_it_listed(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A worker holding a share of a root would otherwise delete its peers' rows."""
+    """The key is ``(root_url, results_path_stub)``, and the stub half is not unique.
+
+    Two roots holding one stub between them is the ordinary case -- a tree
+    copied to a second location, a mirror being filled -- and a prune reading
+    only the stub would delete the other root's row for every document that has
+    left this one.
+    """
+    first = tmp_path / 'first'
+    second = tmp_path / 'second'
+    stub = 'VOL/N1454725799_1_CALIB'
+    gone = write_metadata(first, stub, metadata_document())
+    write_metadata(second, stub, metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
-    engine = open_index(url, create=True)
-    listing = walk_module._RootListing(root_listed=False)
-    try:
-        with pytest.raises(ValueError, match='whole root'):
-            driver_module._prune_missing(
-                engine, '/data/nav-results', listing, {}, logger=quiet_logger
-            )
-    finally:
-        engine.dispose()
+    ingest_tree(url, [first, second], logger=quiet_logger)
+    gone.unlink()
+    ingest_tree(url, [first], logger=quiet_logger)
+    engine = open_index(url)
+    with engine.connect() as connection:
+        found = _rows(connection, sqlalchemy.select(IMAGES.c.root_url))
+    engine.dispose()
+    assert [row.root_url for row in found] == [second.as_posix()]
 
 
 # ---------------------------------------------------------------------------

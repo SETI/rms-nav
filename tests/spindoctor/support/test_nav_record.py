@@ -19,6 +19,7 @@ from spindoctor.support.nav_record import (
     NULL_OFFSET,
     UNKNOWN_STATUS,
     finite_float,
+    record_midtime_et,
     record_offset,
     record_rotation_matrix,
     record_status,
@@ -453,3 +454,74 @@ def test_nine_finite_numbers_that_are_no_rotation_are_still_read() -> None:
     two storages disagreeing about which records exist at all.
     """
     assert record_rotation_matrix([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]) is not None
+
+
+# ---------------------------------------------------------------------------
+# One recorded exposure midtime
+# ---------------------------------------------------------------------------
+
+
+def test_a_recorded_midtime_is_read_as_the_number_it_records() -> None:
+    """The ordinary case the refusals below are exceptions to."""
+    assert record_midtime_et({'navigation_result': {'times': {'midtime_et': 1.5}}}) == 1.5
+
+
+def test_a_recorded_midtime_of_zero_is_a_midtime() -> None:
+    """J2000 itself is a perfectly good epoch, and is falsy in Python."""
+    assert record_midtime_et({'navigation_result': {'times': {'midtime_et': 0}}}) == 0.0
+
+
+@pytest.mark.parametrize(
+    'midtime',
+    [
+        pytest.param(float('nan'), id='nan'),
+        pytest.param(float('inf'), id='inf'),
+        pytest.param(float('-inf'), id='minus-inf'),
+        pytest.param(None, id='null'),
+        pytest.param(True, id='boolean'),
+        pytest.param('later', id='text'),
+    ],
+)
+def test_a_value_no_reader_can_place_in_time_is_read_as_no_midtime(midtime: Any) -> None:
+    """Every comparison against a NaN is False, so a NaN satisfies every range at once.
+
+    An infinity is the same defect one step along: it falls inside any
+    half-bounded range it can have no business in.  Both are read as no midtime
+    rather than passed on, which is what makes a bounded selection able to say
+    that it could not place the image.
+
+    Parameters:
+        midtime: The value recorded where a midtime belongs.
+    """
+    assert record_midtime_et({'navigation_result': {'times': {'midtime_et': midtime}}}) is None
+
+
+def test_a_recorded_integer_no_float_can_hold_is_read_as_no_midtime() -> None:
+    """JSON puts no bound on an integer literal, and asking whether one is finite raises.
+
+    A midtime of several hundred digits is a value a reader cannot use rather
+    than an error for a caller to meet.  Read as an error it would end a
+    time-bounded stream over the documents on one malformed file, while the same
+    file ingested into the index places no image at all -- so the two storages
+    would disagree about a document neither of them can place.
+    """
+    recorded = {'navigation_result': {'times': {'midtime_et': 10**400}}}
+    assert record_midtime_et(recorded) is None
+
+
+@pytest.mark.parametrize(
+    'metadata',
+    [
+        pytest.param({}, id='no-result'),
+        pytest.param({'navigation_result': 'later'}, id='result-not-a-block'),
+        pytest.param({'navigation_result': {}}, id='no-times'),
+        pytest.param({'navigation_result': {'times': 'later'}}, id='times-not-a-block'),
+    ],
+)
+def test_a_record_with_no_usable_times_records_no_midtime(metadata: dict[str, Any]) -> None:
+    """A load-error record records no exposure, and each way of recording none counts.
+
+    Parameters:
+        metadata: A record holding nothing a midtime can be read out of.
+    """
+    assert record_midtime_et(metadata) is None

@@ -39,8 +39,7 @@ from spindoctor.cli.ck.assignment import Assignment
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason
 from spindoctor.cli.ck.index import CkFile, KernelClass
 from spindoctor.cli.ck.pointing import ImagePointing
-from spindoctor.support.nav_document import METADATA_SUFFIX
-from spindoctor.support.nav_record import NavRecord
+from spindoctor.nav_records import METADATA_SUFFIX, NavRecord
 
 
 @pytest.fixture(scope='module', autouse=True)
@@ -74,6 +73,53 @@ def test_a_remote_output_directory_is_refused() -> None:
 # ---------------------------------------------------------------------------
 # What the run says when something goes wrong
 # ---------------------------------------------------------------------------
+
+
+def _unlistable_volume(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the one volume of the run tree refuse to be listed.
+
+    Parameters:
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    real_iterdir = FCPath.iterdir_metadata
+
+    def unlistable_vol(self: FCPath) -> Any:
+        if self.name == 'vol':
+            raise PermissionError(self.as_posix())
+        yield from real_iterdir(self)
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', unlistable_vol)
+
+
+def test_a_directory_that_cannot_be_listed_stops_the_run(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A kernel set covering less than the tree is worse than one that stops.
+
+    The walk refuses the directory, and this program is a console entry point:
+    it owes its caller a status rather than a traceback, which is what the
+    ingest already does with the same refusal.
+    """
+    _unlistable_volume(monkeypatch)
+    run_driver(run_tree, monkeypatch, expected_exit=1)
+
+
+def test_the_directory_that_stopped_the_run_is_named(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """An operator has one thing to fix and the log has to say which."""
+    _unlistable_volume(monkeypatch)
+    run_driver(run_tree, monkeypatch, expected_exit=1)
+    assert 'could not be listed' in run_log(run_tree)
+
+
+def test_a_run_stopped_by_a_directory_writes_nothing(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Nothing has been built at that point, so nothing claims to say what was."""
+    _unlistable_volume(monkeypatch)
+    run_driver(run_tree, monkeypatch, expected_exit=1)
+    assert list(run_tree['output'].glob('*.bc')) == []
 
 
 def test_an_unreadable_metadata_file_is_named_in_the_run_log(

@@ -18,15 +18,16 @@ from typing import Any
 import pdslogger
 import pytest
 import sqlalchemy
+from filecache import FCPath
 
 from spindoctor.cli.stats.ingest import (
     TaskResult,
-    UnlistableDirectoryError,
     fan_out_ingest_tasks,
     ingest_metadata_files,
     ingest_task_share,
 )
 from spindoctor.cli.stats.ingest.store import _RECORDED_LOOKUP_BATCH_SIZE, _recorded_files
+from spindoctor.nav_records import UnlistableDirectoryError
 from spindoctor.results_index import (
     FEATURE_SOURCES,
     IMAGES,
@@ -77,6 +78,55 @@ def test_every_document_reaches_exactly_one_task(
     tasks = fan_out(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
     handed = [entry['results_path_stub'] for task in tasks for entry in task['data']['files']]
     assert sorted(handed) == stubs
+
+
+def _listing_in_reverse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every directory listing arrive in the reverse of stub order.
+
+    A directory listing arrives in whatever order the storage layer produced it,
+    which for a local filesystem is the order the entries happen to sit in and
+    for a bucket is the order the service returned.  A test that let the tree
+    decide would therefore be asserting about this machine.
+
+    Parameters:
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    real_iterdir = FCPath.iterdir_metadata
+
+    def reversed_entries(self: FCPath) -> Any:
+        yield from reversed(list(real_iterdir(self)))
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', reversed_entries)
+
+
+def test_the_shares_are_cut_in_stub_order_however_the_storage_enumerated_the_tree(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A task file is an operator-visible artifact and describes one tree one way.
+
+    The shares are cut straight off the listing, so the order the listing is
+    held in decides which files are in which task.  Two fan-outs over one
+    unchanged tree that cut different shares make a task file unreadable as a
+    description of the tree and a re-run of one task a different piece of work.
+    """
+    root = tmp_path / 'results'
+    stubs = build_tree(root, 5)
+    _listing_in_reverse(monkeypatch)
+    tasks = fan_out(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    handed = [entry['results_path_stub'] for task in tasks for entry in task['data']['files']]
+    assert handed == stubs
+
+
+def test_each_share_holds_the_files_stub_order_puts_together(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cut, not just the concatenation: which task a file lands in is the promise."""
+    root = tmp_path / 'results'
+    stubs = build_tree(root, 5)
+    _listing_in_reverse(monkeypatch)
+    tasks = fan_out(index_url(tmp_path / 'index.sqlite3'), [root], logger=quiet_logger)
+    first = [entry['results_path_stub'] for entry in tasks[0]['data']['files']]
+    assert first == stubs[:2]
 
 
 def test_a_task_carries_the_metrics_the_walk_reported(

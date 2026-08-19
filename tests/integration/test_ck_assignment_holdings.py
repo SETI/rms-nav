@@ -69,7 +69,7 @@ from spindoctor.cli.ck.index import (  # noqa: E402  (guarded import)
     KernelClass,
     build_ck_index,
 )
-from spindoctor.cli.ck.pointing import NDArrayFloatType  # noqa: E402  (guarded import)
+from spindoctor.support.types import NDArrayFloatType  # noqa: E402  (guarded import)
 from tests.kernel_pool import isolated_kernel_pool  # noqa: E402  (guarded import)
 
 _CASSINI_CK_FRAME_ID = -82000

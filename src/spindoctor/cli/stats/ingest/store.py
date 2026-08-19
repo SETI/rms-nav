@@ -157,10 +157,10 @@ def _refusals_the_tree_answers_for(connection: sqlalchemy.Connection, root_url: 
       out of, and the tree excludes such a file from every error filter exactly
       as this index answers none for it, so the two agree and the row is not a
       gap.
-    - It carries a volume, because a selection asks about the volumes it
+    - It carries a subtree, because a selection asks about the subtrees it
       enumerated and :func:`~spindoctor.results_index.selection._stub_query`
       restricts both arms by ``IN`` over them, which is false for NULL.  A
-      refusal under no volume is in no selection's answer either way.
+      refusal under no subtree is in no selection's answer either way.
 
     Parameters:
         connection: An open connection to the index.
@@ -178,7 +178,7 @@ def _refusals_the_tree_answers_for(connection: sqlalchemy.Connection, root_url: 
         .where(
             FAILED_FILES.c.root_url == root_url,
             FAILED_FILES.c.reason.startswith(NOT_A_NAVIGATION_DOCUMENT, autoescape=True),
-            FAILED_FILES.c.volume.is_not(None),
+            FAILED_FILES.c.subtree.is_not(None),
         )
     )
     return int(connection.execute(total).scalar_one())
@@ -196,7 +196,7 @@ def _report_refusals(engine: sqlalchemy.Engine, root_url: str, *, logger: PdsLog
     every refusal: a file no JSON object came out of is one the tree excludes
     from every error filter too, and counting it would report a gap where the
     two agree.  It is still the whole root's count, and a selection enumerates
-    volumes, so it bounds one selection's shortfall rather than measuring it.
+    subtrees, so it bounds one selection's shortfall rather than measuring it.
 
     The report is informational, so a failure of it costs the report and nothing
     else.  It runs after the root's rows are written and its run is stamped, and
@@ -232,7 +232,7 @@ def _report_refusals(engine: sqlalchemy.Engine, root_url: str, *, logger: PdsLog
         'index: %d, whichever pass recorded them. Each is a JSON object the ingest refused, '
         'so this index records no status for it and no error filter answered here selects '
         'its image. The count is the whole root, so it bounds rather than measures how '
-        'short a selection over some of its volumes comes.',
+        'short a selection over some of its subtrees comes.',
         root_url,
         refused,
     )

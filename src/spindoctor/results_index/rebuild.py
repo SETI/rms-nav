@@ -183,7 +183,7 @@ a later pass skip a document it has already read.
 
 DERIVED_COLUMNS = frozenset(
     {
-        'volume',
+        'subtree',
         'image_et',
         'image_date',
         'image_number',
@@ -196,13 +196,15 @@ DERIVED_COLUMNS = frozenset(
 )
 """Columns the ingest computes from a document rather than copying out of it.
 
-``image_et`` is read from either of two fields, whichever the document has;
-``image_date`` is rendered from that epoch and ``image_number`` from the image
-name; ``n_techniques`` counts a list; ``excluded_from_consensus`` is stored
-sorted rather than as written; and the three covariance columns are the offset
-block lifted out of a matrix whose shape they no longer carry.  A rebuild that
-put any of them back would be inventing a field the document did not have, so
-each is read as a column by whatever wants it and none is a record field.
+``subtree`` is the first path segment of the stub, which the walk knows and no
+document states; ``image_et`` is read from either of two fields, whichever the
+document has; ``image_date`` is rendered from that epoch and ``image_number``
+from the image name; ``n_techniques`` counts a list; ``excluded_from_consensus``
+is stored sorted rather than as written; and the three covariance columns are
+the offset block lifted out of a matrix whose shape they no longer carry.  A
+rebuild that put any of them back would be inventing a field the document did
+not have, so each is read as a column by whatever wants it and none is a record
+field.
 """
 
 

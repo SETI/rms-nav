@@ -24,16 +24,16 @@ from tests.spindoctor.cli.ck.ck_helpers import KernelPool, image_metadata
 from tests.spindoctor.cli.stats.conftest import index_url, ingest_tree, write_metadata
 
 from spindoctor.cli.ck.images import ImageEntry
-from spindoctor.cli.ck.inputs import RECORD_COLUMNS
+from spindoctor.cli.ck.inputs import RECORD_COLUMNS, read_whole_mission
 from spindoctor.cli.ck.report import read_image_facts
-from spindoctor.results_index import (
-    IMAGES,
-    IndexRecordSource,
+from spindoctor.nav_records import (
+    NavRecord,
+    RecordSource,
+    Selection,
     TreeRecordSource,
-    build_record_source,
-    open_index,
+    UnreadableFile,
 )
-from spindoctor.support.nav_record import NavRecord
+from spindoctor.results_index import IMAGES, IndexRecordSource, open_index, open_record_source
 
 MISSION = 'coiss'
 """The instrument identity the runs below write kernels for."""
@@ -141,9 +141,21 @@ def _both_sources(tmp_path: Path) -> tuple[TreeRecordSource, IndexRecordSource]:
     root = _tree(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    index_source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
+    index_source = open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS)
     assert isinstance(index_source, IndexRecordSource)
-    return TreeRecordSource(FCPath(root)), index_source
+    return TreeRecordSource([root]), index_source
+
+
+def _one_mission(source: RecordSource) -> tuple[list[NavRecord], list[UnreadableFile]]:
+    """Read one mission through a source, exactly as the driver reads it.
+
+    Parameters:
+        source: The source to read.
+
+    Returns:
+        The records and the unreadable files, in the order the driver puts them.
+    """
+    return read_whole_mission(source.records(Selection(instrument=MISSION)))
 
 
 @pytest.fixture
@@ -169,8 +181,8 @@ def both_readings(tmp_path: Path) -> BothReadings:
     """
     tree, index = _both_sources(tmp_path)
     try:
-        from_tree, _ = tree.read_records(MISSION)
-        from_index, _ = index.read_records(MISSION)
+        from_tree, _ = _one_mission(tree)
+        from_index, _ = _one_mission(index)
     finally:
         index.close()
     return from_tree, from_index
@@ -194,16 +206,17 @@ def test_the_two_sources_return_the_same_images(both_readings: BothReadings) -> 
     assert [document.stub for document in from_index] == [document.stub for document in from_tree]
 
 
-def test_the_source_orders_the_rows_rather_than_trusting_their_order(tmp_path: Path) -> None:
-    """The query asks for no order, so the source is the only thing imposing one.
+def test_the_run_orders_the_records_rather_than_trusting_their_order(tmp_path: Path) -> None:
+    """No query asks for an order, so the run is the only thing imposing one.
 
     A server sorts text under its own collation, and a locale collation orders
     a separator against an underscore differently from the codepoint order the
-    walk sorts its paths by -- so an ORDER BY would agree with the walk on
-    SQLite and disagree on PostgreSQL, which the SQLite-only tier here could
-    never show.  The rows are therefore put back in an order no walk would
-    produce, which is what the unordered query then returns them in: the run
-    must still get them in path order.
+    walk produces -- so an ORDER BY would agree with the walk on SQLite and
+    disagree on PostgreSQL, which the SQLite-only tier here could never show.
+    The rows are therefore put back in an order no walk would produce, which is
+    what the unordered query then returns them in: the run must still get them
+    in path order, because that is what makes its kernels, its report and its
+    log identical whichever storage answered.
     """
     root = _tree(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
@@ -216,11 +229,18 @@ def test_the_source_orders_the_rows_rather_than_trusting_their_order(tmp_path: P
             connection.execute(IMAGES.insert(), list(reversed(stored)))
     finally:
         engine.dispose()
-    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
-    try:
-        documents, _ = source.read_records(MISSION)
-    finally:
-        source.close()
+    with open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS) as source:
+        # The premise, asserted rather than assumed: an unordered query is the
+        # server's to answer how it likes, and one that handed them back already
+        # sorted would leave the run's own sort untested and this test unable to
+        # fail.
+        handed = [
+            entry.path.as_posix()
+            for entry in source.records(Selection(instrument=MISSION))
+            if isinstance(entry, NavRecord)
+        ]
+        documents, _ = _one_mission(source)
+    assert handed != sorted(handed)
     paths = [document.path.as_posix() for document in documents]
     assert paths == sorted(paths)
 
@@ -350,11 +370,8 @@ def test_another_roots_images_are_not_this_runs(tmp_path: Path) -> None:
     write_metadata(other, 'COISS_2002/data/N1454999999_1_CALIB', _navigated('N1454999999_1.IMG'))
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root, other], logger=null_logger())
-    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
-    try:
-        documents, _unreadable = source.read_records(MISSION)
-    finally:
-        source.close()
+    with open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS) as source:
+        documents, _unreadable = _one_mission(source)
     assert [document.stub for document in documents] == [
         'COISS_2001/data/N1454725799_1_CALIB',
         'COISS_2001/data/N1454725800_1_CALIB',
@@ -372,12 +389,9 @@ def test_a_document_the_ingest_refused_is_reported_as_unreadable(tmp_path: Path)
     (root / 'COISS_2001' / 'data' / 'junk_metadata.json').write_text('{}', encoding='utf-8')
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
-    try:
-        _documents, unreadable = source.read_records(MISSION)
-    finally:
-        source.close()
-    assert [path.as_posix() for path, _reason in unreadable] == [
+    with open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS) as source:
+        _documents, unreadable = _one_mission(source)
+    assert [entry.path.as_posix() for entry in unreadable] == [
         (root / 'COISS_2001' / 'data' / 'junk_metadata.json').as_posix()
     ]
 
@@ -388,12 +402,9 @@ def test_the_refusal_reason_travels_with_the_file(tmp_path: Path) -> None:
     (root / 'COISS_2001' / 'data' / 'junk_metadata.json').write_text('{}', encoding='utf-8')
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
-    try:
-        _documents, unreadable = source.read_records(MISSION)
-    finally:
-        source.close()
-    assert 'navigation document' in unreadable[0][1]
+    with open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS) as source:
+        _documents, unreadable = _one_mission(source)
+    assert 'navigation document' in unreadable[0].reason
 
 
 def test_a_root_with_no_completed_ingest_is_refused(tmp_path: Path) -> None:
@@ -404,17 +415,14 @@ def test_a_root_with_no_completed_ingest_is_refused(tmp_path: Path) -> None:
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [other], logger=null_logger())
     with pytest.raises(ValueError, match='no completed ingest'):
-        build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
+        open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS)
 
 
 def test_no_index_url_reads_the_tree(tmp_path: Path) -> None:
     """Reading files is the default, and nothing opens a database to do it."""
     root = _tree(tmp_path)
-    source = build_record_source(FCPath(root), results_db_url=None, columns=RECORD_COLUMNS)
-    try:
+    with open_record_source([root], results_db_url=None, columns=RECORD_COLUMNS) as source:
         assert isinstance(source, TreeRecordSource)
-    finally:
-        source.close()
 
 
 def test_the_index_source_says_which_index_it_read(tmp_path: Path) -> None:
@@ -434,7 +442,7 @@ def test_the_description_hides_a_password_in_the_index_url(tmp_path: Path) -> No
     ingest_tree(url, [root], logger=null_logger())
     source = IndexRecordSource(
         open_index(url),
-        FCPath(root).as_posix(),
+        [FCPath(root).as_posix()],
         'postgresql+psycopg://svc:sup3rs3cr3t@db.example/spindoctor',
         RECORD_COLUMNS,
     )
@@ -467,11 +475,8 @@ def test_a_value_the_ingest_could_not_store_reads_as_one_never_recorded(
     )
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
-    source = build_record_source(FCPath(root), results_db_url=url, columns=RECORD_COLUMNS)
-    try:
-        documents, _unreadable = source.read_records(MISSION)
-    finally:
-        source.close()
+    with open_record_source([root], results_db_url=url, columns=RECORD_COLUMNS) as source:
+        documents, _unreadable = _one_mission(source)
     assert read_image_facts(documents[0].metadata).offset_dv is None
 
 
@@ -488,6 +493,6 @@ def test_the_tree_path_refuses_the_same_document(tmp_path: Path, pool: KernelPoo
         'COISS_2001/data/N1454725799_1_CALIB',
         _navigated('N1454725799_1.IMG', offset=(1.5, -2.5, 0.5)),
     )
-    documents, _unreadable = TreeRecordSource(FCPath(root)).read_records(MISSION)
+    documents, _unreadable = _one_mission(TreeRecordSource([root]))
     with pytest.raises(ValueError, match='offset'):
         read_image_facts(documents[0].metadata)

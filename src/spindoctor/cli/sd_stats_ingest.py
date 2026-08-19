@@ -55,9 +55,7 @@ from spindoctor.cli.stats.drop import drop_results_index
 from spindoctor.cli.stats.ingest import (
     IngestCounts,
     TaskCompletion,
-    UnlistableDirectoryError,
     complete_ingest_tasks,
-    distinct_roots,
     fan_out_ingest_tasks,
     ingest_metadata_files,
     task_results_from_event_log,
@@ -71,6 +69,7 @@ from spindoctor.config import (
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_STATS_INGEST
+from spindoctor.nav_records import UnlistableDirectoryError, distinct_roots
 from spindoctor.results_index import open_index
 from spindoctor.support.command_line import masked_command_line
 from spindoctor.support.file import json_as_string

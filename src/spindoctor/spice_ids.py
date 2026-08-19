@@ -21,10 +21,7 @@ The clock is not derivable from the CK object by arithmetic.  Python's
 ``-31100 // 1000`` is -32, which is the other Voyager, so each object states
 its clock explicitly.
 
-This module holds constants and imports only the standard library, which is
-what lets the kernel writer read it: the writer must pull in neither oops nor
-anything from ``spindoctor.support``, and that guarantee is asserted on
-``sys.modules`` in a fresh interpreter.
+This module holds constants and imports only the standard library.
 """
 
 from collections.abc import Mapping
