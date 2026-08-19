@@ -21,6 +21,7 @@ from typing import Any
 
 import pdslogger
 import pytest
+from filecache import FCPath
 from tests.conftest import child_interpreter_environment
 
 from spindoctor.nav_records import (
@@ -302,13 +303,17 @@ def test_named_stubs_are_read_when_the_selection_narrows_to_one_root(
 def test_a_file_that_never_arrived_is_reported_rather_than_raised(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """One file that would not download must not cost the rest of the pass."""
+    """One file that would not download must not cost the rest of the pass.
+
+    Two reasons that read alike say nothing about which files they came from,
+    so the files are named as well: one file reported twice and the other lost
+    is the same two reasons.
+    """
     source = tree_source(two_volume_tree(tmp_path), quiet_logger)
     failing_retrievals(monkeypatch)
-    assert reasons_of(list(source.records(Selection()))) == [
-        'could not be retrieved',
-        'could not be retrieved',
-    ]
+    found = list(source.records(Selection()))
+    assert reasons_of(found) == ['could not be retrieved', 'could not be retrieved']
+    assert sorted(stubs_of(found)) == sorted([FIRST_STUB, SECOND_STUB])
 
 
 def test_one_named_record_whose_file_never_arrives_raises_rather_than_returning(
@@ -514,7 +519,7 @@ def _reader_failing_on(
     # than itself; the same object either way, since the module imports this one.
     real_read = read_document
 
-    def failing(path: Any) -> dict[str, Any]:
+    def failing(path: FCPath) -> dict[str, Any]:
         if path.as_posix().endswith(f'{stub}{METADATA_SUFFIX}'):
             raise failure('no value came out of it')
         return real_read(path)
@@ -532,12 +537,15 @@ def test_a_reader_that_produces_no_value_reports_the_file_it_was_reading(
     """The decoder fails in more ways than one, and only one of them is a decoding error.
 
     What happened in all of them is the thing the reason states: no value came
-    out of the file.
+    out of the file, and the file it names is the one that would not read: a
+    reason on its own reads the same when the document beside it is the one
+    reported, which is a pass that names a tree's good document as its bad one.
     """
     root = two_volume_tree(tmp_path)
     _reader_failing_on(monkeypatch, failure, FIRST_STUB)
     found = list(tree_source(root, quiet_logger).records(Selection()))
     assert reasons_of(found) == ['not valid JSON']
+    assert [entry.stub for entry in found if isinstance(entry, UnreadableFile)] == [FIRST_STUB]
 
 
 @pytest.mark.parametrize('failure', NO_VALUE_CAME_OUT)
@@ -565,7 +573,7 @@ def test_a_fault_in_the_reader_itself_is_not_reported_as_a_bad_document(
     root = tmp_path / 'results'
     write_document(root, FIRST_STUB, document())
 
-    def broken(path: Any) -> dict[str, Any]:
+    def broken(path: FCPath) -> dict[str, Any]:
         raise TypeError('the reader was changed and no longer works')
 
     monkeypatch.setattr(tree_module, 'read_document', broken)
