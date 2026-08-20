@@ -653,10 +653,9 @@ def facts_from_document(metadata: dict[str, Any], source: DocumentOrigin) -> Ima
         'camera': _str_or_none(observation.get('camera')),
         'shutter_mode': _str_or_none(observation.get('shutter_mode')),
         'image_path': _str_or_none(observation.get('image_path')),
-        # The epoch twice over: a copy of the document's own field, which is
-        # what a rebuilt record carries it back as, and the column a filter
-        # and a report compare against alongside the date rendered from it.
-        'provenance_image_et': image_et,
+        # A copy of the epoch the document recorded as provenance, which is
+        # what a rebuilt record carries it back as and what a filter and a
+        # report compare against, with the calendar date rendered from it.
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
         # The document's own top-level field, read by the function every

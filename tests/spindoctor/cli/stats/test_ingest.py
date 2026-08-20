@@ -183,21 +183,8 @@ def test_each_roots_epoch_survives_the_database(
 
     Whether a document carried an epoch at all is the difference between the
     two roots, so a read that answered from the wrong one reports an image that
-    never loaded as one that did.
+    never loaded as one that did, and places it in time for a date filter.
     """
-    navigated = metadata_document(image_et=170002800.0)
-    unloaded = metadata_document(status='error', status_error='missing_spice_data', offset=None)
-    unloaded['navigation_result'].pop('provenance')
-    stored = _two_roots_holding_one_stub(
-        tmp_path, (navigated, unloaded), IMAGES.c.provenance_image_et, logger=quiet_logger
-    )
-    assert stored == [170002800.0, None]
-
-
-def test_each_roots_derived_epoch_survives_the_database(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
-) -> None:
-    """The column a date filter compares against, told apart the same way."""
     navigated = metadata_document(image_et=170002800.0)
     unloaded = metadata_document(status='error', status_error='missing_spice_data', offset=None)
     unloaded['navigation_result'].pop('provenance')

@@ -198,11 +198,10 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('shutter_mode', sqlalchemy.Text),
     sqlalchemy.Column('image_path', sqlalchemy.Text),
     # A copy of the epoch the document recorded as provenance, which is the
-    # observation's midtime.  NULL for an image that never loaded, since the
-    # epoch comes from the observation the load never built.
-    sqlalchemy.Column('provenance_image_et', sqlalchemy.Double),
-    # The same epoch under the name a filter and a report ask for it by, with
-    # the calendar date rendered from it beside it.
+    # observation's midtime, under the name a filter and a report ask for it by,
+    # with the calendar date rendered from it beside it.  NULL for an image that
+    # never loaded, since the epoch comes from the observation the load never
+    # built.
     sqlalchemy.Column('image_et', sqlalchemy.Double),
     sqlalchemy.Column('image_date', sqlalchemy.Text),
     # Outcome.  status_error and status_reason are different vocabularies:

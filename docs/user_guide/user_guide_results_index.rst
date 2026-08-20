@@ -741,19 +741,15 @@ pair with ``ON DELETE CASCADE``.
    * - ``image_path``
      - TEXT
      - Absolute path of the source image at navigate time.
-   * - ``provenance_image_et``
-     - DOUBLE
-     - Observation midtime as the navigation recorded it, TDB seconds past
-       J2000, from ``navigation_result.provenance.image_et``. NULL for an
-       image that never loaded, which built no observation and so has no
-       provenance block.
    * - ``image_et``
      - DOUBLE
-     - The same epoch under the name a date filter and a range report ask
-       for it by, alongside the date rendered from it. NULL wherever
-       ``provenance_image_et`` is, so an image whose navigation died for
-       want of a SPICE kernel is placed nowhere in time and is passed over
-       by any date bound and by the reported time span.
+     - Observation midtime as the navigation recorded it, TDB seconds past
+       J2000, from ``navigation_result.provenance.image_et``. This is the
+       column a date filter and a range report ask for the epoch by. NULL for
+       an image that never loaded, which built no observation and so has no
+       provenance block, so an image whose navigation died for want of a SPICE
+       kernel is placed nowhere in time and is passed over by any date bound
+       and by the reported time span.
    * - ``image_date``
      - TEXT
      - UTC calendar date ``YYYY-MM-DD`` derived from ``image_et``; drives

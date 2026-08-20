@@ -91,15 +91,8 @@ def test_each_roots_frame_id_comes_back_from_that_root(two_roots: TwoRoots, whic
 def test_an_image_that_never_loaded_records_no_epoch(two_roots: TwoRoots) -> None:
     """An epoch is an observation's midtime, and this image built no observation.
 
-    Parameters:
-        two_roots: The two ingested roots and their index.
-    """
-    found = facts_of(facts_from_index(two_roots, 'first', Selection()), UNLOADED_STUB)
-    assert found.image['provenance_image_et'] is None
-
-
-def test_an_image_that_never_loaded_is_placed_nowhere_in_time(two_roots: TwoRoots) -> None:
-    """The column a date filter compares against is NULL rather than standing in.
+    The column a date filter compares against is NULL rather than standing in,
+    so the image is placed nowhere in time.
 
     Parameters:
         two_roots: The two ingested roots and their index.
@@ -115,7 +108,7 @@ def test_a_navigated_image_records_its_epoch_as_provenance(two_roots: TwoRoots) 
         two_roots: The two ingested roots and their index.
     """
     found = facts_of(facts_from_index(two_roots, 'first', Selection()), SUCCESS_STUB)
-    assert found.image['provenance_image_et'] == 0.0
+    assert found.image['image_et'] == 0.0
 
 
 def test_an_image_naming_no_outcome_carries_no_error(two_roots: TwoRoots) -> None:

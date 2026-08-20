@@ -434,11 +434,11 @@ and its holder empties it and ingests the tree again.
    :mod:`spindoctor.results_index.rebuild`. A column copied out of one field of
    one document is an entry in ``RECORD_FIELDS`` naming where in a record that
    field sits; one that says where the document is belongs to
-   ``IDENTITY_COLUMNS``; one the ingest computes rather than copies --- an epoch
-   read from whichever of two fields the document had, a count of a list ---
-   belongs to ``DERIVED_COLUMNS``, because no field of a record is what it came
-   from. The three are asserted to be a partition of the table, so a column left
-   out of all three fails rather than reading as absent from every record.
+   ``IDENTITY_COLUMNS``; one the ingest computes rather than copies --- a date
+   rendered from the recorded epoch, a count of a list --- belongs to
+   ``DERIVED_COLUMNS``, because no field of a record is what it came from. The
+   three are asserted to be a partition of the table, so a column left out of
+   all three fails rather than reading as absent from every record.
 5. Read it wherever it is consumed, by adding it to that consumer's column list,
    and extend the reason vocabulary if the consumer classifies on it. A consumer
    that does not select a column reads its field as absent.

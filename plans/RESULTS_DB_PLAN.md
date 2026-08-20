@@ -161,8 +161,8 @@ The `images` table:
 | `image_name`, `instrument` | `observation.*` | NOT NULL; ingest rejects a document lacking either |
 | `camera` | `observation.camera` | present whenever the dataset index supplied it, including for an image that never loaded; NULL only when no camera column exists for the dataset |
 | `image_path` | `observation.image_path` | |
-| `provenance_image_et` | `navigation_result.provenance.image_et` | the observation's midtime; NULL for an image that never loaded, which built no observation |
-| `image_et`, `image_date` | the recorded epoch, and the UTC date rendered from it | the columns a date filter and a range report compare against; both NULL where the epoch is |
+| `image_et` | `navigation_result.provenance.image_et` | the observation's midtime, and the column a date filter and a range report compare against; NULL for an image that never loaded, which built no observation |
+| `image_date` | the UTC date rendered from `image_et` | NULL wherever the epoch is |
 | `status` | top-level `status` | NOT NULL; `'unknown'` when the document names no outcome, never a value taken from another field |
 | `status_error` | top-level `status_error` | stored **verbatim and separately** from `status_reason` |
 | `status_reason` | `navigation_result.status_reason` | the navigator's vocabulary, distinct from `status_error` |

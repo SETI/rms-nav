@@ -250,13 +250,10 @@ def test_a_techniques_covariance_is_stored_whole() -> None:
 
 
 def test_the_recorded_epoch_is_copied_out_of_the_provenance_block() -> None:
-    """The one field an image's epoch comes from, copied as the document wrote it."""
-    rows = facts_from_document(metadata_document(image_et=170002800.0), SOURCE)
-    assert rows.image['provenance_image_et'] == 170002800.0
+    """The one field an image's epoch comes from, copied as the document wrote it.
 
-
-def test_the_derived_epoch_is_the_recorded_one() -> None:
-    """The column a date filter and a range report compare against."""
+    It is also the column a date filter and a range report compare against.
+    """
     rows = facts_from_document(metadata_document(image_et=170002800.0), SOURCE)
     assert rows.image['image_et'] == 170002800.0
 
@@ -272,16 +269,9 @@ def test_an_image_that_never_loaded_records_no_epoch() -> None:
 
     An epoch is the observation's midtime, so a document written because the
     observation never loaded has none, and a row with no epoch is what the
-    index then holds.
+    index then holds.  The image is placed nowhere in time, so a date bound
+    passes it over.
     """
-    document = metadata_document(status='error', status_error='missing_spice_data', offset=None)
-    document['navigation_result'].pop('provenance')
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['provenance_image_et'] is None
-
-
-def test_an_image_that_never_loaded_is_placed_nowhere_in_time() -> None:
-    """Its derived epoch and date are both NULL, so a date bound passes it over."""
     document = metadata_document(status='error', status_error='missing_spice_data', offset=None)
     document['navigation_result'].pop('provenance')
     rows = facts_from_document(document, SOURCE)

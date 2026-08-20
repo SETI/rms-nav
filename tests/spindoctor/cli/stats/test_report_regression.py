@@ -229,7 +229,6 @@ _CSV_HEADER = (
     'camera',
     'shutter_mode',
     'image_path',
-    'provenance_image_et',
     'image_et',
     'image_date',
     'status',
