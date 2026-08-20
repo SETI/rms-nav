@@ -432,11 +432,14 @@ and its holder empties it and ingests the tree again.
    the store is a second reader of the record, and the two drift.
 4. Sort it into one of the three groups in
    :mod:`spindoctor.results_index.rebuild`. A column copied out of one field of
-   one document is an entry in ``RECORD_FIELDS`` naming where in a record that
-   field sits; one that says where the document is belongs to
-   ``IDENTITY_COLUMNS``; one the ingest computes rather than copies --- a date
-   rendered from the recorded epoch, a count of a list --- belongs to
-   ``DERIVED_COLUMNS``, because no field of a record is what it came from. The
+   one document is an entry in
+   :data:`~spindoctor.results_index.rebuild.RECORD_FIELDS` naming where in a
+   record that field sits; one that says where the document is belongs to
+   :data:`~spindoctor.results_index.rebuild.IDENTITY_COLUMNS`; one the ingest
+   computes rather than copies --- a date rendered from the recorded epoch, a
+   count of a list --- belongs to
+   :data:`~spindoctor.results_index.rebuild.DERIVED_COLUMNS`, because no field
+   of a record is what it came from. The
    three are asserted to be a partition of the table, so a column left out of
    all three fails rather than reading as absent from every record.
 5. Read it wherever it is consumed, by adding it to that consumer's column list,

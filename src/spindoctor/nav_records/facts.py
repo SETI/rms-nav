@@ -654,8 +654,9 @@ def facts_from_document(metadata: dict[str, Any], source: DocumentOrigin) -> Ima
         'shutter_mode': _str_or_none(observation.get('shutter_mode')),
         'image_path': _str_or_none(observation.get('image_path')),
         # A copy of the epoch the document recorded as provenance, which is
-        # what a rebuilt record carries it back as and what a filter and a
-        # report compare against, with the calendar date rendered from it.
+        # what a rebuilt record carries it back as and what the report
+        # aggregates into the time span it gives per instrument, with the
+        # calendar date a bound compares rendered from it.
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
         # The document's own top-level field, read by the function every

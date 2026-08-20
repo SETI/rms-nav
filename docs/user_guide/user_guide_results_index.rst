@@ -744,12 +744,13 @@ pair with ``ON DELETE CASCADE``.
    * - ``image_et``
      - DOUBLE
      - Observation midtime as the navigation recorded it, TDB seconds past
-       J2000, from ``navigation_result.provenance.image_et``. This is the
-       column a date filter and a range report ask for the epoch by. NULL for
-       an image that never loaded, which built no observation and so has no
-       provenance block, so an image whose navigation died for want of a SPICE
-       kernel is placed nowhere in time and is passed over by any date bound
-       and by the reported time span.
+       J2000, from ``navigation_result.provenance.image_et``. The report
+       aggregates it into the time span it reports per instrument; a date bound
+       compares ``image_date`` rather than this column. NULL for an image that
+       never loaded, which built no observation and so has no provenance block,
+       so an image whose navigation died for want of a SPICE kernel is placed
+       nowhere in time and is passed over by any date bound and by the reported
+       time span.
    * - ``image_date``
      - TEXT
      - UTC calendar date ``YYYY-MM-DD`` derived from ``image_et``; drives
