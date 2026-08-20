@@ -598,7 +598,7 @@ def write_stacked_value_hist(
             color=[instrument_color(name, index) for index, name in enumerate(instruments)],
             label=instruments,
         )
-        ax.legend(title='instrument')
+        ax.legend(title='instrument', loc='upper right')
     ax.set_xlabel(xlabel)
     ax.set_ylabel('images')
     ax.set_title(title)
