@@ -20,19 +20,21 @@ from pathlib import Path
 import pdslogger
 import pytest
 import sqlalchemy
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    write_metadata,
+    write_refusal,
+)
 
 from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url, open_index
 
 from .conftest import (
     FIRST_STUB,
     REFUSAL_REPORT_LEAD,
-    index_url,
-    ingest_tree,
-    metadata_document,
     recorded_lines,
     refusal_report,
-    write_metadata,
-    write_refusal,
 )
 
 SECOND_STUB = 'VOL/N1454725800_1_CALIB'

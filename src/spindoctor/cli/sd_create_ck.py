@@ -51,7 +51,12 @@ from spindoctor.cli.ck.kernel_file import check_ck_file, check_output_paths, wri
 from spindoctor.cli.ck.metakernel import write_meta_kernel
 from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.cli.ck.pool import furnished
-from spindoctor.cli.ck.report import ImageFacts, ReportRow, read_image_facts, write_report
+from spindoctor.cli.ck.report import (
+    ImageReportFacts,
+    ReportRow,
+    read_image_report_facts,
+    write_report,
+)
 from spindoctor.cli.ck.segment import (
     BaselineCoverageGapError,
     CkSegment,
@@ -238,7 +243,7 @@ class BuiltOutputs:
     omissions: Mapping[str, OmissionReason]
 
 
-def image_facts(records: Sequence[NavRecord]) -> dict[str, ImageFacts]:
+def image_report_facts(records: Sequence[NavRecord]) -> dict[str, ImageReportFacts]:
     """Read the facts the report and the comment areas both carry, by image name.
 
     Parameters:
@@ -253,9 +258,9 @@ def image_facts(records: Sequence[NavRecord]) -> dict[str, ImageFacts]:
             and one of which would silently replace the other in whichever
             kernel's comment area carried it.
     """
-    facts_by_name: dict[str, ImageFacts] = {}
+    facts_by_name: dict[str, ImageReportFacts] = {}
     for record in records:
-        facts = read_image_facts(record.metadata)
+        facts = read_image_report_facts(record.metadata)
         if facts.image_name in facts_by_name:
             raise ValueError(
                 f'two records name the image {facts.image_name!r}; their reported facts cannot '
@@ -266,7 +271,7 @@ def image_facts(records: Sequence[NavRecord]) -> dict[str, ImageFacts]:
 
 
 def report_rows(
-    assignments: Sequence[Assignment], facts_by_name: Mapping[str, ImageFacts]
+    assignments: Sequence[Assignment], facts_by_name: Mapping[str, ImageReportFacts]
 ) -> list[ReportRow]:
     """Build the report, one row per image the run considered.
 
@@ -294,7 +299,7 @@ def report_rows(
 
 def build_output_files(
     assignments: Sequence[Assignment],
-    facts_by_name: Mapping[str, ImageFacts],
+    facts_by_name: Mapping[str, ImageReportFacts],
     output_dir: FCPath,
     *,
     sclk_basenames: Mapping[int, str],
@@ -843,7 +848,7 @@ def main() -> None:
         )
 
     assignments = assign_images(entries, index)
-    facts_by_name = image_facts(records)
+    facts_by_name = image_report_facts(records)
 
     # Everything is built before anything is written.  A run that dies part way
     # through the build then leaves the output directory untouched, rather than

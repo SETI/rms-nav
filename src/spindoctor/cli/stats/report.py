@@ -26,7 +26,6 @@ from typing import Any
 import sqlalchemy
 from filecache import FCPath
 
-from spindoctor.cli.stats.classify import datetime_from_image_et, image_number_from_name
 from spindoctor.cli.stats.report_common import (
     IMAGE_JOIN,
     ReportContext,
@@ -54,6 +53,7 @@ from spindoctor.cli.stats.report_sections import (
     write_csv_export,
 )
 from spindoctor.config import DEFAULT_CONFIG, get_results_db_url
+from spindoctor.nav_records.derived import datetime_from_image_et, image_number_from_name
 from spindoctor.results_index import normalize_root_url, open_index, require_ingested_roots
 
 __all__ = ['build_report', 'main_report']
@@ -563,6 +563,13 @@ def _add_exclusions_section(ctx: ReportContext) -> None:
     The exclusion set is a JSON column, and the empty set is filtered out here
     rather than in SQL: comparing a JSON value against a literal is spelled
     differently on every backend, and the rows are already being read.
+
+    The names are sorted before they are joined into the label this section
+    groups on.  The column holds them in whatever order the document recorded
+    them, so two images that excluded the same techniques in two orders would
+    otherwise be counted as two different exclusion sets; what this section
+    counts is the set, and a label built from it has to name the same set the
+    same way.
     """
     excluded_rows = rows(
         ctx.connection,
@@ -572,7 +579,7 @@ def _add_exclusions_section(ctx: ReportContext) -> None:
         ctx.params,
     )
     labelled = [
-        (', '.join(names), str(instrument), str(image_name))
+        (', '.join(sorted(names)), str(instrument), str(image_name))
         for excluded, instrument, image_name in excluded_rows
         for names in [_excluded_techniques(excluded)]
         if len(names) > 0

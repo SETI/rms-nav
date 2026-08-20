@@ -61,10 +61,8 @@ _KNOWN_MODULES = frozenset(
         'schema.py',
         # The statistics programs, where the report's queries live.
         'chunks.py',
-        'classify.py',
         'counts.py',
         'driver.py',
-        'ingest_rows.py',
         'report.py',
         'report_common.py',
         'report_sections.py',

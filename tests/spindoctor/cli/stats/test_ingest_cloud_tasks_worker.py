@@ -16,10 +16,14 @@ The command lines that divide a root up and put it back together are in
 from pathlib import Path
 
 import pytest
+from tests.spindoctor.conftest import (
+    index_url,
+    metadata_document,
+    write_metadata,
+)
 
 from spindoctor.cli import sd_stats_ingest, sd_stats_ingest_cloud_tasks
 
-from .conftest import index_url, metadata_document, write_metadata
 from .ingest_driver_helpers import (
     STUB,
     fanned_out,

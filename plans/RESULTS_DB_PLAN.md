@@ -161,13 +161,14 @@ The `images` table:
 | `image_name`, `instrument` | `observation.*` | NOT NULL; ingest rejects a document lacking either |
 | `camera` | `observation.camera` | present whenever the dataset index supplied it, including for an image that never loaded; NULL only when no camera column exists for the dataset |
 | `image_path` | `observation.image_path` | |
-| `image_et`, `image_date` | `navigation_result.provenance.image_et`, falling back to `observation.image_et` | every image is placed in time even when it never loaded |
+| `provenance_image_et`, `observation_image_et` | `navigation_result.provenance.image_et`, `observation.image_et` | each in a column of its own, because which of the two a document carried is what says whether the image loaded |
+| `image_et`, `image_date` | the provenance epoch, falling back to the observation one | every image is placed in time even when it never loaded |
 | `status` | top-level `status` | NOT NULL; `'unknown'` when the document names no outcome, never a value taken from another field |
 | `status_error` | top-level `status_error` | stored **verbatim and separately** from `status_reason` |
 | `status_reason` | `navigation_result.status_reason` | the navigator's vocabulary, distinct from `status_error` |
 | `offset_dv`, `offset_du` | **top-level `offset`**, unrounded | the authoritative number every consumer applies |
 | `sigma_dv`, `sigma_du` | `navigation_result.sigma_px` | |
-| `covariance_vv`, `covariance_vu`, `covariance_uu` | `navigation_result.covariance_px2` | the 2x2 offset block only; for a twist-fitted result the rotation row/column of the 3x3 matrix is deliberately not indexed, and `sigma_rotation_deg` is the only twist uncertainty the index carries |
+| `covariance_px2` | `navigation_result.covariance_px2` | the matrix whole, square and row-major: a twist-fitted result records 3x3, whose rotation row and column carry the offset-to-rotation cross terms that `sigma_rotation_deg` cannot stand in for. A reader wanting the per-axis sigmas takes the square roots of the diagonal |
 | `sigma_along_unobservable_px` | `navigation_result` | |
 | `rotation_deg`, `sigma_rotation_deg` | `navigation_result` | present only where twist was fitted |
 | `confidence`, `confidence_rank` | top-level `confidence`, `navigation_result.confidence_rank` | |
@@ -191,11 +192,18 @@ that has no navigation result at all -- an image that failed to load -- and
 `cmatrix` is additionally absent where the navigation fitted a camera
 rotation, so both cases ingest as NULL.
 
-Types: every pixel, ET, covariance and sigma column is declared
+Types: every pixel, ET and sigma column is declared
 `sqlalchemy.Double` (not bare `Float`, which a dialect may map to single
-precision); booleans are `sqlalchemy.Boolean`; `excluded_from_consensus` and
-the child tables' `source_names` / `diagnostics` are `sqlalchemy.JSON`
-(SQLite TEXT, PostgreSQL `jsonb`). `mtime_ns`, `size_bytes` and `image_number`
+precision); booleans are `sqlalchemy.Boolean`; the covariance matrices, the two
+C-matrices, `excluded_from_consensus`, `spice_kernels` and the child tables'
+`source_names` / `diagnostics` are `sqlalchemy.JSON`. Which of the two JSON
+declarations a column takes depends on what it holds: one that can hold a number
+takes the plain declaration -- SQLite TEXT, PostgreSQL `json` -- whose value
+travels as the text the driver wrote, so every number in it reads back as the
+number written; one holding text alone takes the PostgreSQL `jsonb` variant,
+whose array and object accessors a direct-SQL query reaches inside without a
+cast and whose `numeric` number type would return a stored `-0.0` as `0.0` and a
+large-magnitude float as an integer. `mtime_ns`, `size_bytes` and `image_number`
 are `sqlalchemy.BigInteger`: a nanosecond epoch is far past the 32-bit range a
 dialect is free to give a plain `Integer`, and an image-numbering scheme is
 free to run past it too.
@@ -205,11 +213,11 @@ free to run past it too.
 is stored as SQL NULL rather than as the JSON value `null`. Without that,
 `WHERE cmatrix IS NOT NULL` matches every row ever written and the CSV export
 carries the literal text `null` in the cell. Which columns are ever absent is
-a property of the mapping rather than of the type: `cmatrix` and
-`cmatrix_original` are, and are NULL. `excluded_from_consensus`, `source_names`
-and `diagnostics` are not -- an empty list or object there is a statement
-(nothing was excluded, the technique named no source, it reported no
-diagnostics), and is stored as the empty container.
+a property of the mapping rather than of the type: `cmatrix`,
+`cmatrix_original` and both `covariance_px2` columns are, and are NULL.
+`excluded_from_consensus`, `source_names` and `diagnostics` are not -- an empty
+list or object there is a statement (nothing was excluded, the technique named
+no source, it reported no diagnostics), and is stored as the empty container.
 
 **Precision.** The top-level `offset` is stored as written, with no
 rounding. (It is written unrounded by `navigate_image_files`; the rounded
@@ -226,11 +234,17 @@ that read the merged column are rewritten in the same phase (section 4,
 Phase 2) as `COALESCE(status_reason, status_error)`, which reproduces
 today's report exactly.
 
-The `techniques` and `feature_sources` child tables keep their current
-column sets, re-keyed on `(root_url, results_path_stub)` and constrained to
-one row per logical key (section 2.2). The feature inventory is aggregated, as
-today, by `(feature_type, source_model, source_name)`; per-feature `feature_id`
-and `gated` detail is not retained.
+The `techniques` table carries one row per technique that reported: its
+`offset_dv` / `offset_du`, its `covariance_px2` whole (a reader wanting the
+per-axis sigmas takes the square roots of the diagonal, and no pair of sigmas
+carries the correlation between the axes), its `confidence`, its `spurious` and
+`at_edge` flags, the `source_names` parsed out of its feature ids, and its
+`diagnostics`. The `feature_sources` table carries `feature_type`,
+`source_model`, `source_name` and the `n_features` / `n_gated` counts. Both are
+keyed on `(root_url, results_path_stub)` and constrained to one row per logical
+key (section 2.2). The feature inventory is aggregated by `(feature_type,
+source_model, source_name)`; per-feature `feature_id` and `gated` detail is not
+retained.
 
 ### 2.4 Schema version, creation, and no migrations
 
@@ -391,10 +405,12 @@ open_index(url: str, *, create: bool = False) -> Engine
 
 There are no migrations. Ingest is cheap relative to navigation and entirely
 reproducible from the tree, so rebuilding is always available and always
-correct. Any change to the column set, or to the constraints over it,
-increments `schema_version`. This replaces the current column-set comparison,
-which detects a changed column set but not a changed meaning of an unchanged
-column.
+correct. The gate replaces a column-set comparison, which detects a changed
+column set but not a changed meaning of an unchanged column.
+
+**Development-stage decision: `SCHEMA_VERSION` and `COLUMN_SET_VERSION` are held at 1 for the duration of the record-source work.** No index is carried from one column set to the next while that work is under way -- there is none in use, and nothing on these branches builds one it then keeps -- so a column change does not raise the number and no one drops and re-ingests anything. The number resumes incrementing on a column-set change once the work reaches `main`, where the index is in real use and the stamp does its normal job.
+
+This pin is recorded here and nowhere else. The user guide and the dev guide describe the finished system: an index carries a schema version, an index whose stamp is not the version the code reads is refused, there are no migrations, rebuilding is the remedy, and a column change raises the number. A guide that narrated the pin would be describing a state its readers will not be in.
 
 ### 2.5 Backend selection
 
@@ -760,21 +776,22 @@ run-length lock.
 child rows happens inside one transaction, so concurrent workers can never
 interleave halves of one image's rows.
 
-**A row the database refuses costs its own file.** A document can read cleanly
-and still not go in -- an identifier too large for a `bigint`, a value a
-backend's type will not hold -- and the failure arrives from the driver at the
-insert rather than from any check the converter makes. Such a document would
-otherwise take its whole chunk down and then the run, leaving the root's ingest
-unfinished and every consumer refusing it. So a chunk whose write fails is
-rolled back and written again one image at a time: every writable document goes
-in, and the one that does not is counted as a failure for its own file. Nothing
-is recorded in `failed_files` for it, exactly as nothing is for a retrieval that
-failed -- the document read, so nothing about it says the next pass will not
-store it, and a recorded refusal would be skipped for as long as the file did
-not change. The one failure that is *not* isolated is a connection the driver
-reports as invalidated: every remaining image would fail the same way, and a run
-that "completed" without them leaves a consumer reading the absence of their
-rows as "never navigated", so that one is allowed out.
+**A row the database refuses ends the pass, naming the file.** A document can
+read cleanly and still not go in -- an identifier too large for a `bigint`, a
+value a backend's type will not hold -- and the failure arrives from the driver
+at the insert rather than from any check the converter makes. A chunk whose
+write fails is rolled back and written again one image at a time, so every
+document of it that will go in is kept and a rerun after the fix reads only what
+is left; the first one that will not go in raises, and the root's ingest run
+keeps its NULL finish time, so every consumer refuses the index rather than
+reading the absence of that image's row as an answer. Charging it to the file
+and going on was the alternative and is worse than the failure it hides: the
+image is then in neither table, which every consumer reads as an image nothing
+navigated, and the run stamps itself finished over it. What has to be fixed is
+the writer or the column set rather than the file -- a value one backend holds
+and another refuses is a property of the schema -- so the message carries the
+file and the driver's own sentence. A connection the driver reports as
+invalidated ends the pass the same way and for the same reason.
 
 **Names inside a document are checked with its shapes.** A `per_technique` entry
 carries a `technique_name` and no two entries carry the same one, because that
@@ -986,9 +1003,10 @@ does consult it, which is why the column exists.
 **Ingest fills those columns through the readers' own functions.** The domain
 of every value a consumer classifies a record from lives in
 `spindoctor/support/nav_record.py` -- `record_status`, `record_status_error`,
-`record_offset`, `record_rotation_matrix` and `finite_float` -- and both the readers and
-`ingest_rows` call it. The invariant is that every value a reader can use is
-stored, in the form the reader reads it as, and nothing else is stored, so a
+`record_offset`, `record_rotation_matrix` and `finite_float` -- and both the
+readers and `facts_from_document` call it. The invariant is that every value a
+reader can use is stored, in the form the reader reads it as, and nothing else
+is stored, so a
 record rebuilt from the columns classifies exactly as its document does. A
 second set of rules in the store, even one that agreed the day it was written,
 is a second reader of the record: that is how a three-element `offset` came to
@@ -1036,19 +1054,11 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 | `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no record row and a refusal row instead, and the lookup fails the image rather than classifying it |
 | `missing_offset_key`, `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | reported as `null_offset`: one column pair holds all five ways an offset can supply no pair, and none of them supplies a pointing |
 
-**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `rows_from_metadata` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is member 2 of the Phase 5 enumeration, and it is the same fact here.
+**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `facts_from_document` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is member 2 of the Phase 5 enumeration, and it is the same fact here.
 
 **The rule the seam is held to: a record the two storages *classify* differently may differ in the reason and in nothing else.** The reason is a name a run-level tally counts under; the mechanism, the matrices, the midtime and the offset are what a product is built from. A difference in any of those is a defect in the reader or in what ingest stores, not an entry for the list. The list itself is derived by measurement rather than by argument: both sources are driven over every shape a record's fields can take -- absent, null, wrong type, over-long, non-finite, boolean, nested, ragged, and an integer too large for a float -- and what survives defines it.
 
-Three classes survive. Each needs a record shape no navigation produces, each is stated in the module docstring, the user guide and here with the same members, and each is pinned by a test.
-
-1. **An `offset` no reader can use** -- absent, null, a boolean pair, a non-finite pair, or anything that is not two values convertible to finite pixels. The document is classified under which of those it was; the row, which holds one NULL pair for all of them, under `null_offset`.
-2. **A `cmatrix` no column can hold** -- one whose recorded value is not one 3x3 matrix of finite real numbers in some nesting an array library reconciles into that shape. Nine values, a 3x3 nesting of them and nine rows of one all denote the same matrix and are all held; a value of any other shape, and one whose nine entries are not finite real numbers, is held by neither storage. The document is `malformed_pointing`; the row is `no_cmatrix_rotation_fitted` when something else of the block survives and `no_pointing_block` when nothing does. The file path also puts one line in the run log for it. (A `cmatrix` that *is* nine finite numbers and is not a rotation is stored, and the validator refuses it in both paths alike, which is why `malformed_pointing` has a row of its own in the table.)
-3. **A `pointing` block none of whose four columned fields survives** -- one holding only `camera_frame`, or frame identities written as floats or booleans, which the integer columns refuse. The document is `no_cmatrix_rotation_fitted`, because the block exists and carries no corrected attitude; the row is `no_pointing_block`, because the block left no trace in it.
-
-What decides class 2's membership is not a rule of its own: the store assembles a recorded matrix through the same function the reader does, so a matrix the reader can evaluate is one the column holds and a matrix the column holds nothing for is one the reader refuses. The class is exactly the recorded values that are not one 3x3 matrix of finite real numbers, in whatever nesting an array library can reconcile into that shape -- nine rows of one among them.
-
-For every record the navigator wrote and ingest stored, and for every hand-built shape outside those three classes, everything a product is built from -- the mechanism, the matrices, the midtime, the offset -- is identical in the two paths, and so is every field the readers report about it. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the same message shapes; where a message names the storage that was searched, it names the one that actually was.
+Nothing survives. The navigator's own types settle it: a `success` record carries an offset of two floats, a recorded attitude is validated as a proper rotation of finite numbers before it is written, and a pointing block always carries its baseline and both frame identities as integers. So for every record the navigator wrote and ingest stored, everything a product is built from -- the mechanism, the matrices, the midtime, the offset -- is identical in the two paths, and so is every field the readers report about it, the reason among them. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the same message shapes; where a message names the storage that was searched, it names the one that actually was.
 
 **`ResultsFilter`.** When a URL is given, the presence, absence, and error
 filters become one query per enumeration instead of a walk per volume plus
@@ -1428,6 +1438,15 @@ are gone. What has *not* moved onto the seam is the enumeration
 parser, its own batching and its own copy of the suffix), the statistics
 report, and the ingest's retrieve-and-parse loop.
 
+The flattening the second paragraph above describes has moved as well.
+**`spindoctor/nav_records/facts.py`** holds `facts_from_document`, which turns
+one document into the `images` row and its two lists of child rows, and
+`spindoctor/nav_records/derived.py` holds the values derived from a document's
+own fields. The ingest, the index rebuild and both halves of the seam call that
+one function, so the per-image shape a consumer reads is built once whichever
+storage answered; `spindoctor/cli/stats/ingest_rows.py` and
+`spindoctor/cli/stats/classify.py` are gone.
+
 ---
 
 ## 4. Implementation phases
@@ -1495,7 +1514,7 @@ its password (`test_masking.py`).
 One PR, because the report reads the table ingest writes and neither is
 usable mid-cutover.
 
-Ingest: rewrite `rows_from_metadata` to the section 2.3 column set and
+Ingest: rewrite the document flattening to the section 2.3 column set and
 `ingest_metadata_files` per section 2.7 (single walk feeding presence, stat
 and file list; batched retrieval replacing `get_local_path()`; incremental
 skip; chunked transactions; per-image atomicity; `ingest_runs`). Root
@@ -1858,7 +1877,7 @@ Details settled during execution:
 - **The store reads a record through the readers' own functions.** Every column
   a consumer classifies a record from is filled by
   `spindoctor/support/nav_record.py`, which is where the readers read the same
-  fields. A second set of coercions in `ingest_rows`, agreeing when written, is
+  fields. A second set of coercions in the store, agreeing when written, is
   a second reader of the record and drifts: it truncated a three-element
   `offset` the classifier refuses whole, refused a numeric-string pair the
   classifier converts and applies, and stored a rotation only in the flat form
@@ -2163,14 +2182,14 @@ Details settled during execution, none of them a change of intent:
      came out of is refused too and is not one of these: the tree excludes such
      a file from every error filter as well.
   2. A file that exists and **has no row at all** reads as absent, which is what
-     the absence filters read as "this image was never navigated". Two passes
-     end that way: a file the pass could not retrieve, and a document the pass
-     read whose rows the database would not store (section 2.7's isolated write
-     failure). Both are deliberate -- a recorded row would be skipped for as
-     long as the file did not change, and the next pass would never retry it. A
-     file under a directory nobody listed is not a third: a walk that cannot
-     list a directory raises where it meets it (section 2.7), so no root a
-     consumer reads has a completed pass that skipped one.
+     the absence filters read as "this image was never navigated". One pass ends
+     that way: a file the pass could not retrieve. That is deliberate -- a
+     recorded row would be skipped for as long as the file did not change, and
+     the next pass would never retry it. Two failures are not a second and a
+     third: a walk that cannot list a directory raises where it meets it, and a
+     document whose rows the database would not store raises where it is written
+     (section 2.7), so no root a consumer reads has a completed pass that skipped
+     either.
   3. A document **rewritten in place, keeping the length and the modification
      time it had before,** is skipped by the incremental comparison
      (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` to go on), so its
@@ -2249,7 +2268,8 @@ the modules the later phases add. Updates: `user_guide_statistics.rst` (per sect
 `user_guide_logging.rst` (program table), `introduction_configuration.rst`
 (`environment.results_db`), and a dev-guide section covering the Core
 layer, the concurrency model, the branch-local import exception, and how to
-add a column (increment the version). No issue numbers in any of it.
+add a column (raise the schema version, rebuild every index). No issue numbers
+in any of it.
 
 Details settled during execution, none of them a change of intent:
 

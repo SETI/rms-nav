@@ -1,4 +1,17 @@
-"""Turn one navigation metadata document into the rows the results index holds.
+"""Turn one navigation metadata document into the per-image facts a consumer reads.
+
+A consumer that summarizes a whole run asks for the same per-image shape
+whichever storage answered it, so that shape is built here, once, rather than by
+each consumer.  :class:`ImageFacts` is that shape: the image's own values, one
+entry per technique that reported, and the aggregated inventory of the features
+the models offered.
+
+Each of the three is keyed by results-index column name, and deliberately so.
+The shape *is* the row shape, so the index side of the seam hands its rows
+straight back with no conversion at all, and there is no second spelling of any
+value for the two sides to drift apart on.  A column the index gains is a key
+here, and a consumer reads it under one name whichever storage built the
+mapping.
 
 The column mapping lives here, apart from the walk and the writer, because it
 is the part that has to be read against the document the navigator writes.
@@ -40,11 +53,10 @@ cannot hold, and finding that out from the database ends the run instead of the
 file.
 """
 
-import math
 from dataclasses import dataclass
 from typing import Any, NoReturn, cast
 
-from spindoctor.cli.stats.classify import date_from_image_et, image_number_from_name
+from spindoctor.nav_records.derived import date_from_image_et, image_number_from_name
 
 # Every column a consumer classifies a rebuilt record from is filled by the
 # reader's own function rather than by a rule written here.  A second rule that
@@ -60,10 +72,12 @@ from spindoctor.support.nav_record import (
 )
 
 __all__ = [
-    'ImageRows',
+    'NOT_A_NAVIGATION_DOCUMENT',
+    'DocumentOrigin',
+    'ImageFacts',
     'MetadataDocumentError',
-    'MetadataSource',
-    'rows_from_metadata',
+    'facts_from_document',
+    'subtree_of',
 ]
 
 NOT_A_NAVIGATION_DOCUMENT = 'not a current-schema navigation document'
@@ -97,7 +111,7 @@ class MetadataDocumentError(ValueError):
 
 
 @dataclass(frozen=True)
-class MetadataSource:
+class DocumentOrigin:
     """Where one metadata document came from and what the walk saw of it.
 
     Parameters:
@@ -119,14 +133,28 @@ class MetadataSource:
 
 
 @dataclass(frozen=True)
-class ImageRows:
-    """The rows one metadata document becomes.
+class ImageFacts:
+    """What one metadata document says about its image, column by column.
+
+    Each of the three is keyed by results-index column name, so a consumer reads
+    the same keys whether the facts were built from a document or read back out
+    of the index.  That correspondence is also the bound on them: what they hold
+    is what the column set holds, and a field of the document no column holds is
+    in neither storage's answer.
+
+    Neither list carries an order a consumer may rely on.  A source reading
+    documents yields the techniques in the order the document wrote them and
+    the feature sources in key order; a source reading rows yields each list in
+    whatever order the server answers a sort on the image key in.  Every entry
+    of both carries its own identity -- a technique its name, a feature source
+    its type, model and name -- so a consumer that needs an order sorts on that.
 
     Parameters:
-        image: The ``images`` row.
-        techniques: The ``techniques`` rows, one per technique that reported.
-        feature_sources: The ``feature_sources`` rows, one per feature type and
-            source.
+        image: The image's own values, keyed by ``images`` column name.
+        techniques: One mapping per technique that reported, keyed by
+            ``techniques`` column name.
+        feature_sources: One mapping per feature type and source, keyed by
+            ``feature_sources`` column name.
     """
 
     image: dict[str, Any]
@@ -139,7 +167,7 @@ class ImageRows:
 # ---------------------------------------------------------------------------
 
 
-def _refuse(detail: str, source: MetadataSource) -> NoReturn:
+def _refuse(detail: str, source: DocumentOrigin) -> NoReturn:
     """Refuse a file that is not a current-schema navigation document.
 
     Parameters:
@@ -154,7 +182,7 @@ def _refuse(detail: str, source: MetadataSource) -> NoReturn:
     )
 
 
-def _object(value: Any, name: str, source: MetadataSource) -> dict[str, Any]:
+def _object(value: Any, name: str, source: DocumentOrigin) -> dict[str, Any]:
     """Read a JSON object the schema declares, or an empty one when it is absent.
 
     Parameters:
@@ -175,7 +203,7 @@ def _object(value: Any, name: str, source: MetadataSource) -> dict[str, Any]:
     return value
 
 
-def _array(value: Any, name: str, source: MetadataSource) -> list[Any]:
+def _array(value: Any, name: str, source: DocumentOrigin) -> list[Any]:
     """Read a JSON array the schema declares, or an empty one when it is absent.
 
     Parameters:
@@ -196,7 +224,7 @@ def _array(value: Any, name: str, source: MetadataSource) -> list[Any]:
     return value
 
 
-def _array_of_objects(value: Any, name: str, source: MetadataSource) -> list[dict[str, Any]]:
+def _array_of_objects(value: Any, name: str, source: DocumentOrigin) -> list[dict[str, Any]]:
     """Read a JSON array of objects the schema declares.
 
     Parameters:
@@ -223,16 +251,17 @@ def _array_of_objects(value: Any, name: str, source: MetadataSource) -> list[dic
 
 
 def _int_or_none(value: Any) -> int | None:
-    """Coerce a JSON value to an integer, or None.
+    """Coerce a JSON value to an integer identifier, or None.
 
     Parameters:
         value: The value as it was parsed.
 
     Returns:
-        The integer, or None when the value is absent or is not an integer.
-        A boolean is refused: it is an ``int`` in Python and an identifier
+        The integer, or None when the value is absent or is not one.  A frame
+        identity is an integer, so a value recorded as a float is not one and is
+        stored as nothing rather than converted into one.  A boolean is refused
+        for the same reason: it is an ``int`` in Python and an identifier
         nowhere.
-
     """
     if value is None or isinstance(value, bool):
         return None
@@ -317,51 +346,38 @@ def _image_shape(value: Any) -> tuple[int | None, int | None]:
         return None, None
 
 
-def _covariance_block(covariance: Any) -> tuple[float | None, float | None, float | None]:
-    """The 2x2 offset block of a recorded covariance matrix.
+def _covariance_or_none(covariance: Any) -> list[list[float]] | None:
+    """Store a recorded covariance matrix whole, or nothing.
 
-    A twist-fitted result records a 3x3 matrix whose third row and column
-    describe the rotation.  Only the offset block is indexed; the rotation's
-    uncertainty is carried by ``sigma_rotation_deg`` alone.
+    The matrix is kept square and row-major as the document wrote it, so a
+    reader gets back every term the fit produced.  A twist-fitted result records
+    3x3, and its rotation row and column hold the offset-to-rotation cross terms
+    that no per-axis sigma states: reduced to the offset block, or to the square
+    roots of its diagonal, those terms are gone and a reader has no way to know
+    they were ever recorded.  So the reduction is left to whoever wants one.
 
     Parameters:
         covariance: The recorded ``covariance_px2``.
 
     Returns:
-        ``(vv, vu, uu)``, each None when the matrix is absent or unusable.
+        The matrix, each entry a finite float, or None when the value is absent
+        or is no square matrix of real numbers.  A ragged matrix, a
+        non-square one, and one holding a NaN, an infinity, a string or a
+        boolean are each refused whole rather than repaired: a covariance
+        missing a term is not the covariance anybody fitted, and half of one is
+        worse than none because it looks like a measurement.
     """
-    if not isinstance(covariance, list) or len(covariance) < 2:
-        return None, None, None
-    try:
-        return (
-            finite_float(covariance[0][0]),
-            finite_float(covariance[0][1]),
-            finite_float(covariance[1][1]),
-        )
-    except (TypeError, IndexError, KeyError):
-        return None, None, None
-
-
-def _sigma_from_covariance(covariance: Any) -> tuple[float | None, float | None]:
-    """Per-axis 1-sigma pair from a curated covariance matrix (or None pair).
-
-    Parameters:
-        covariance: The recorded ``covariance_px2`` of one technique.
-
-    Returns:
-        ``(sigma_dv, sigma_du)``, each None when the variance is absent or
-        negative.
-    """
-    if not isinstance(covariance, list) or len(covariance) < 2:
-        return None, None
-    try:
-        var_dv = float(covariance[0][0])
-        var_du = float(covariance[1][1])
-    except (TypeError, ValueError, IndexError, KeyError):
-        return None, None
-    sigma_dv = math.sqrt(var_dv) if var_dv >= 0.0 else None
-    sigma_du = math.sqrt(var_du) if var_du >= 0.0 else None
-    return sigma_dv, sigma_du
+    if not isinstance(covariance, list) or len(covariance) == 0:
+        return None
+    rows: list[list[float]] = []
+    for row in covariance:
+        if not isinstance(row, list) or len(row) != len(covariance):
+            return None
+        values = [finite_float(entry) for entry in row]
+        if any(value is None for value in values):
+            return None
+        rows.append(cast(list[float], values))
+    return rows
 
 
 def _cmatrix_or_none(value: Any) -> list[float] | None:
@@ -413,8 +429,11 @@ def _source_names_from_feature_ids(feature_ids: Any) -> list[str]:
     return sorted(names)
 
 
-def _subtree_of(results_path_stub: str) -> str | None:
+def subtree_of(results_path_stub: str) -> str | None:
     """The subtree a stub names, or None when it names none.
+
+    Every table recording a file fills its subtree column from here, so no two
+    of them can disagree about which directory a stub is under.
 
     Parameters:
         results_path_stub: The stub.
@@ -428,7 +447,7 @@ def _subtree_of(results_path_stub: str) -> str | None:
 
 
 def _technique_rows(
-    source: MetadataSource, per_technique: list[dict[str, Any]]
+    source: DocumentOrigin, per_technique: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Build the ``techniques`` rows of one document.
 
@@ -461,7 +480,6 @@ def _technique_rows(
             _refuse('navigation_result.per_technique[] names one technique twice', source)
         named.add(name)
         offset_dv, offset_du = _pair(entry.get('offset_px'))
-        sigma_dv, sigma_du = _sigma_from_covariance(entry.get('covariance_px2'))
         rows.append(
             {
                 'root_url': source.root_url,
@@ -469,8 +487,10 @@ def _technique_rows(
                 'technique_name': name,
                 'offset_dv': offset_dv,
                 'offset_du': offset_du,
-                'sigma_dv': sigma_dv,
-                'sigma_du': sigma_du,
+                # Whole, as on the image: a reader that wants the per-axis
+                # sigmas takes the square roots of the diagonal, and one that
+                # wants the correlation between the axes can still have it.
+                'covariance_px2': _covariance_or_none(entry.get('covariance_px2')),
                 'confidence': finite_float(entry.get('confidence')),
                 'spurious': bool(entry.get('spurious')),
                 'at_edge': bool(entry.get('at_edge')),
@@ -488,7 +508,7 @@ def _technique_rows(
 
 
 def _feature_source_rows(
-    source: MetadataSource, inventory: list[dict[str, Any]]
+    source: DocumentOrigin, inventory: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Build the ``feature_sources`` rows of one document.
 
@@ -529,8 +549,22 @@ def _feature_source_rows(
     ]
 
 
-def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> ImageRows:
-    """Flatten one metadata document into the rows the index holds.
+def facts_from_document(metadata: dict[str, Any], source: DocumentOrigin) -> ImageFacts:
+    """Flatten one metadata document into the facts its consumers read.
+
+    Refuses a file that is not a navigation document, by raising
+    :class:`MetadataDocumentError`, and answers for one that is.  The refusals
+    are the shapes the document schema declares and nothing else.
+
+    A fault in this code is not turned into a refusal.  A refusal is recorded
+    against the file with its modification time and size, so the next pass skips
+    it: a defect here written down that way would outlive its own fix, still
+    saying the file was never a navigation document, while every run after it
+    reported itself clean over a tree an image is missing from.  It is a
+    property of this code rather than of the file, and it ends the pass instead
+    -- which is the same answer
+    :func:`~spindoctor.nav_records.document.document_or_refusal` gives for a
+    fault in reading the file at all.
 
     The offset comes from the document's top-level ``offset`` and is stored as
     written.  ``navigation_result.offset_px`` is the same offset rounded for
@@ -553,7 +587,7 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         source: Where the document came from and what the walk saw of it.
 
     Returns:
-        The image row and its child rows.
+        The image's own values and the two lists of child mappings.
 
     Raises:
         MetadataDocumentError: If the document lacks the observation image name
@@ -577,10 +611,12 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
     # A navigated image's epoch comes from its observation (provenance); an
     # image that never loaded has no provenance, so the navigator records the
     # epoch it read from the index under ``observation.image_et``.  Either way
-    # every image is placed in time.
-    image_et = finite_float(provenance.get('image_et'))
-    if image_et is None:
-        image_et = finite_float(observation.get('image_et'))
+    # every image is placed in time.  Each field is stored in a column of its
+    # own as well, because which of the two a document carried says whether the
+    # image loaded and no column holding whichever was there could answer that.
+    provenance_image_et = finite_float(provenance.get('image_et'))
+    observation_image_et = finite_float(observation.get('image_et'))
+    image_et = provenance_image_et if provenance_image_et is not None else observation_image_et
     per_technique = _array_of_objects(
         nav.get('per_technique'), 'navigation_result.per_technique', source
     )
@@ -609,12 +645,11 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
     recorded_error = record_status_error(metadata)
     status_error = None if recorded_error == UNKNOWN_STATUS else recorded_error
     sigma_dv, sigma_du = _pair(nav.get('sigma_px'))
-    covariance_vv, covariance_vu, covariance_uu = _covariance_block(nav.get('covariance_px2'))
 
     image_row: dict[str, Any] = {
         'root_url': source.root_url,
         'results_path_stub': source.results_path_stub,
-        'subtree': _subtree_of(source.results_path_stub),
+        'subtree': subtree_of(source.results_path_stub),
         'image_name': image_name,
         'instrument': instrument,
         # Present whenever the dataset index supplied it, including for an
@@ -623,6 +658,8 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'camera': _str_or_none(observation.get('camera')),
         'shutter_mode': _str_or_none(observation.get('shutter_mode')),
         'image_path': _str_or_none(observation.get('image_path')),
+        'provenance_image_et': provenance_image_et,
+        'observation_image_et': observation_image_et,
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
         # The document's own top-level field, read by the function every
@@ -643,17 +680,19 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'offset_du': offset_du,
         'sigma_dv': sigma_dv,
         'sigma_du': sigma_du,
-        'covariance_vv': covariance_vv,
-        'covariance_vu': covariance_vu,
-        'covariance_uu': covariance_uu,
+        'covariance_px2': _covariance_or_none(nav.get('covariance_px2')),
         'sigma_along_unobservable_px': finite_float(nav.get('sigma_along_unobservable_px')),
         'rotation_deg': finite_float(nav.get('rotation_deg')),
         'sigma_rotation_deg': finite_float(nav.get('sigma_rotation_deg')),
         'confidence': finite_float(metadata.get('confidence')),
         'confidence_rank': _str_or_none(nav.get('confidence_rank')),
         'n_techniques': len(per_technique),
-        # An empty list is a statement: the ensemble excluded nothing.
-        'excluded_from_consensus': sorted(excluded),
+        # In the order the document wrote it.  Nothing here re-orders a
+        # recorded list: a consumer comparing this column against the document
+        # it came from finds the list that document holds, and one wanting some
+        # other order applies it.  An empty list is a statement: the ensemble
+        # excluded nothing.
+        'excluded_from_consensus': list(excluded),
         'image_class': _str_or_none(classifier.get('class')),
         'noise_sigma': finite_float(classifier.get('noise_sigma')),
         'image_shape_v': shape_v,
@@ -692,7 +731,7 @@ def rows_from_metadata(metadata: dict[str, Any], source: MetadataSource) -> Imag
         'mtime_ns': source.mtime_ns,
         'size_bytes': source.size_bytes,
     }
-    return ImageRows(
+    return ImageFacts(
         image=image_row,
         techniques=_technique_rows(source, per_technique),
         feature_sources=_feature_source_rows(source, inventory),

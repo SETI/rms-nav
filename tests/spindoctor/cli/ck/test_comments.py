@@ -23,7 +23,7 @@ from spindoctor.cli.ck.comments import (
     reserved_comment_chars,
     write_comment_area,
 )
-from spindoctor.cli.ck.report import ImageFacts
+from spindoctor.cli.ck.report import ImageReportFacts
 
 _VERSION = '0.5.2'
 _CONFIG_HASH = 'c0ffee1234567890'
@@ -31,7 +31,7 @@ _BASELINE = '03236_04002ra.bc'
 _SCLK = 'cas00172.tsc'
 
 
-def _facts(**overrides: object) -> ImageFacts:
+def _facts(**overrides: object) -> ImageReportFacts:
     """Build one image's reported facts, with fields replaced.
 
     Parameters:
@@ -55,7 +55,7 @@ def _facts(**overrides: object) -> ImageFacts:
         'status_reason': 'ensemble_agreement',
     }
     defaults.update(overrides)
-    return ImageFacts(**defaults)  # type: ignore[arg-type]  # a table of literals
+    return ImageReportFacts(**defaults)  # type: ignore[arg-type]  # a table of literals
 
 
 def _area(**overrides: object) -> CommentArea:

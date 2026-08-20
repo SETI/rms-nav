@@ -17,6 +17,12 @@ from typing import Any
 import pdslogger
 import pytest
 from filecache import FCPath
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    write_metadata,
+)
 
 from spindoctor.cli.stats.ingest import TaskResult
 from spindoctor.nav_records import UnlistableDirectoryError
@@ -33,13 +39,9 @@ from .conftest import (
     complete,
     cycle,
     fan_out,
-    index_url,
-    ingest_tree,
-    metadata_document,
     reported,
     run_rows,
     run_shares,
-    write_metadata,
 )
 
 # ---------------------------------------------------------------------------

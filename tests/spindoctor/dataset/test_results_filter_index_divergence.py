@@ -20,9 +20,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import sqlalchemy
 from filecache import FCPath
-from tests.spindoctor.cli.stats.conftest import (
+from tests.spindoctor.conftest import (
     index_url,
     ingest_tree,
     metadata_document,
@@ -36,7 +35,6 @@ from tests.spindoctor.dataset.conftest import (
     select_from,
 )
 
-from spindoctor.cli.stats.ingest import store
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.results_filter import ResultsFilter
 from spindoctor.results_index import SPICE_STATUS_ERROR
@@ -170,31 +168,6 @@ def test_a_file_the_pass_could_not_retrieve_reads_as_absent(
 
     url = index_url(tmp_path / 'index.sqlite3')
     monkeypatch.setattr(FCPath, 'retrieve', refuse)
-    ingest_tree(url, [root], logger=null_logger())
-    monkeypatch.undo()
-    results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-    )
-    assert select_from(results_filter, images) == []
-
-
-def test_a_document_the_database_would_not_store_reads_as_absent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A row the database refuses is counted and recorded nowhere, on the same grounds.
-
-    The document read exactly as the schema says, so nothing about it says the
-    next pass will not store it, and a recorded refusal would stop the next pass
-    from trying.  It therefore reads as absent, exactly as a file nobody could
-    retrieve does.
-    """
-    root, images = one_image_tree(tmp_path)
-
-    def refuse(connection: Any, rows: Any) -> None:
-        raise sqlalchemy.exc.IntegrityError('INSERT', {}, Exception('refused'))
-
-    url = index_url(tmp_path / 'index.sqlite3')
-    monkeypatch.setattr(store, '_write_image', refuse)
     ingest_tree(url, [root], logger=null_logger())
     monkeypatch.undo()
     results_filter = ResultsFilter(

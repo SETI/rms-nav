@@ -46,6 +46,11 @@ spindoctor.results_index
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.results_index.facts_stream
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.results_index.selection
    :members:
    :undoc-members:

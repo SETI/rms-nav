@@ -59,10 +59,12 @@ operator runs rather than an API a consumer calls.
    * - :mod:`spindoctor.nav_records`
      - Not part of this package: the record seam's database-free half. What a
        record is, what a document is named and where one lives, what a
-       selection is, the protocol both storages implement, and the
-       implementation over the documents themselves. Reading a document needs
-       no database, so every reader shares it whether or not its program can
-       read an index.
+       selection is, the protocol both storages implement, the implementation
+       over the documents themselves, and
+       :func:`~spindoctor.nav_records.facts.facts_from_document`, which turns
+       one document into the per-image shape both storages answer in. Reading a
+       document needs no database, so every reader shares it whether or not its
+       program can read an index.
    * - ``spindoctor.cli.stats.ingest``
      - The pass itself: walk, select, read, write, prune, complete --- in one
        process or divided into queue tasks.
@@ -112,8 +114,8 @@ what it builds the index out of: it discovers them through the seam's listing
 and keeps a reading loop of its own, which owns the refusal vocabulary the
 index stores.
 
-Three questions, because the programs ask three things
-------------------------------------------------------
+Four questions, because the programs ask four things
+----------------------------------------------------
 
 :meth:`~spindoctor.nav_records.RecordSource.record` takes one stub and returns
 one record. It is the shape a per-image loop asks in --- the backplane and
@@ -128,6 +130,18 @@ statistics report reading a root. It also takes an explicit list of stubs, which
 is what a queue task carries --- a worker must read exactly the files it was
 given, and read them in batches, so looping the per-image call would cost it a
 round trip apiece on the storage that batching exists for.
+
+:meth:`~spindoctor.nav_records.RecordSource.facts` takes a selection and yields
+what every image it covers says about itself --- the image's own values, one
+entry per technique that reported, and the aggregated inventory of the features
+the models offered. It is what a program reading every field of every image asks
+for, because a record cannot carry that: a record is defined as looking like the
+document it stands for, so the index rebuilds one out of the columns its consumer
+selected and invents no field the document did not have, and no record carries a
+per-technique or per-feature row at all. The facts are the whole row --- what
+the index column set holds about an image, in the shape both storages hold it
+in --- so the columns a consumer named narrow its records and never its facts.
+A field of a document that no column holds is in neither storage's facts.
 
 :meth:`~spindoctor.nav_records.RecordSource.listing` takes a selection and
 yields what is there --- each stub, where it lives, and the size and
@@ -170,8 +184,15 @@ Two backends, and why the package is split
 it walks directory by directory, carrying each entry's metrics out of the
 listing, and retrieves documents in batches underneath a stream that yields them
 one at a time. :class:`~spindoctor.results_index.IndexRecordSource` answers from
-the rows: one query per call, streamed in server-side chunks, with the
-per-technique and per-feature rows merged onto the images stream by key.
+the rows, streamed in server-side chunks. The per-image lookup and the listing
+are one query each; a stream of records is two, the images and the files the
+ingest refused; and :meth:`~spindoctor.nav_records.RecordSource.facts` is four,
+because the per-technique and per-feature rows are merged onto the images stream
+by key. That merge is the one place a statement here sorts --- its three
+streams order on the key, so each image's child rows arrive next to it --- and
+it is safe for the one reason a text sort ever is: the three orders are one
+server's, read from one snapshot, and nothing compares them to an order
+computed anywhere else.
 :func:`~spindoctor.results_index.open_record_source` is what a program calls; it
 returns the first when the run names no index and the second when it names one.
 
@@ -181,10 +202,11 @@ navigation run imports that package and most of them name no index. The
 enumeration is a reader of documents and lives in that package, so the half of
 the seam that reads documents has to be reachable from it without acquiring a
 database. :mod:`spindoctor.nav_records` --- what a record is, what a document is
-named and where one lives, what a selection is, the protocol, and the
-implementation over the documents --- therefore imports no database layer, and a
-subprocess test pins that. The half that reads rows needs SQLAlchemy by
-definition, so it lives in :mod:`spindoctor.results_index` alongside the schema
+named and where one lives, what a selection is, the protocol, the implementation
+over the documents, and the per-image shape built from one document ---
+therefore imports no database layer, and a subprocess test pins that. The half
+that reads rows needs SQLAlchemy by definition, so it lives in
+:mod:`spindoctor.results_index` alongside the schema
 it reads, and so does the factory that chooses between the two. That is why a
 consumer on the navigation path resolves its index half through a branch-local
 import rather than at the top of its module.
@@ -228,7 +250,11 @@ while it carries less, so nobody selects forty columns to read five. The columns
 are declared beside the consumer --- ``_ROW_COLUMNS`` for the reprojection and
 backplane stages, ``RECORD_COLUMNS`` for the kernel writer --- and a test holds
 each list to the fields the rebuild knows a place for, since a column selected
-that no field is rebuilt from is paid for on every read and then dropped.
+that no field is rebuilt from is paid for on every read and then dropped. The
+reprojection list is held to the other direction too: each of its columns is
+dropped in turn and what those readers are then given has to differ, since a
+column whose absence no reader notices is paid for on every read and then
+ignored.
 
 **The rebuild is a table, not a function per consumer.**
 :data:`~spindoctor.results_index.rebuild.RECORD_FIELDS` maps each column to its
@@ -363,9 +389,9 @@ The same rule is what puts the record seam's database-free half in
 through that seam, so a database layer imported anywhere under it would be
 imported by every navigation run --- and an inline import cannot save a package
 whose whole surface is on that path. The split is the arrangement instead: the
-record types, the document rules, the selection, the protocol and the tree
-backend acquire no database, and the index-backed half and the factory live on
-this side, where SQLAlchemy is already a dependency.
+record types, the document rules, the selection, the protocol, the tree backend
+and the per-image shape acquire no database, and the index-backed half and the
+factory live on this side, where SQLAlchemy is already a dependency.
 
 Both halves of that are pinned in a subprocess, and have to be: by the time any
 test in the session runs, something has already imported SQLAlchemy, so the same
@@ -380,19 +406,27 @@ Adding a column
 ===============
 
 There are no migrations. Any change to the column set of any table --- or to
-the constraints over it --- means every existing index is rebuilt, and the
-version gate is what makes that happen rather than being discovered later.
+the constraints over it --- means every existing index is rebuilt, and raising
+:data:`~spindoctor.results_index.schema.SCHEMA_VERSION` is what makes that happen: an
+index stamped with the earlier number is refused at open, naming both versions,
+and its holder empties it and ingests the tree again.
 
 1. Add the column to its table in
    :mod:`spindoctor.results_index.schema`. Use ``Double`` rather than ``Float``
    for anything that must round-trip a document's value, ``Boolean`` rather
-   than an integer flag, and ``JSON`` for a structured value.
-2. **Increment** ``SCHEMA_VERSION`` in the same commit. Increment it again for
-   a second change in the same branch rather than reusing the bump: an index
-   built from the intermediate state would otherwise pass the gate and then
-   fail on a column that is not there.
-3. Fill it in ``spindoctor.cli.stats.ingest_rows``, reading the document
-   through the accessors in ``spindoctor.support.nav_record`` that the
+   than an integer flag, and JSON for a structured value. Which of the two JSON
+   declarations depends on what the value holds: a structure that can hold a
+   number takes the one that is plain ``json`` on PostgreSQL, because ``jsonb``
+   stores numbers as ``numeric`` and returns a stored negative zero as zero and
+   a large-magnitude float as an integer; one holding text alone takes the
+   ``jsonb`` variant, whose array and object accessors a direct-SQL query
+   reaches inside without a cast.
+2. **Increment** :data:`~spindoctor.results_index.schema.SCHEMA_VERSION` in the same
+   commit. Increment it again for a second change in the same branch rather
+   than reusing the bump: an index built from the intermediate state would
+   otherwise pass the gate and then fail on a column that is not there.
+3. Fill it in :mod:`spindoctor.nav_records.facts`, reading the document
+   through the accessors in :mod:`spindoctor.support.nav_record` that the
    consumers read it through. The invariant is that a record rebuilt from the
    columns classifies exactly as its document does; a second set of rules in
    the store is a second reader of the record, and the two drift.
@@ -401,19 +435,23 @@ version gate is what makes that happen rather than being discovered later.
    one document is an entry in ``RECORD_FIELDS`` naming where in a record that
    field sits; one that says where the document is belongs to
    ``IDENTITY_COLUMNS``; one the ingest computes rather than copies --- an epoch
-   read from either of two fields, a count of a list, a value stored sorted ---
+   read from whichever of two fields the document had, a count of a list ---
    belongs to ``DERIVED_COLUMNS``, because no field of a record is what it came
    from. The three are asserted to be a partition of the table, so a column left
    out of all three fails rather than reading as absent from every record.
 5. Read it wherever it is consumed, by adding it to that consumer's column list,
    and extend the reason vocabulary if the consumer classifies on it. A consumer
    that does not select a column reads its field as absent.
-6. Update the column-set test in
-   ``tests/spindoctor/results_index/test_schema.py``, which pins each table's
-   columns, their types, their nullability and their order, and holds the
-   schema version the column set belongs to. A version compared only against
-   itself agrees with every value it could be given, which is why the number
-   is written down beside the columns as well as in the schema.
+6. Update the column-set lists in
+   ``tests/spindoctor/results_index/test_schema.py``: the per-table list, which
+   pins each table's columns, their types, their nullability and their order,
+   and --- for a JSON column --- the list of JSON columns, which pins the type
+   each backend emits for it and that an absent value is stored as SQL NULL. A
+   JSON column missing from the second list fails the test that holds the two
+   against the schema, and ``COLUMN_SET_VERSION`` beside them takes the same
+   number the schema was stamped with: a version compared only against itself
+   agrees with every value it could be given, which is why the number is
+   written down beside the columns as well as in the schema.
 7. Update the schema tables in
    :doc:`/user_guide/user_guide_results_index`, which document the index for
    somebody writing SQL against it.
@@ -435,7 +473,7 @@ The edits, in the order the list gives them:
 
     SCHEMA_VERSION = 9  # incremented by this change
 
-    # spindoctor/cli/stats/ingest_rows.py, inside rows_from_metadata
+    # spindoctor/nav_records/facts.py, inside facts_from_document
     image_row: dict[str, Any] = {
         ...,
         'shutter_mode': _str_or_none(observation.get('shutter_mode')),
@@ -457,6 +495,12 @@ The edits, in the order the list gives them:
     IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
         ...,
         ('shutter_mode', sqlalchemy.Text, True),  # name, type, nullable
+    )
+
+    # And, for a JSON column only, the declaration each backend emits
+    JSON_COLUMNS: tuple[tuple[str, str, str], ...] = (
+        ...,
+        ('images.spice_kernels', 'JSON', 'JSONB'),  # column, SQLite, PostgreSQL
     )
 
     COLUMN_SET_VERSION = 9  # the same number, written down beside the columns

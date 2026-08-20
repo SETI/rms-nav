@@ -17,6 +17,13 @@ import pdslogger
 import pytest
 from filecache import FCPath
 from sqlalchemy import Connection
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    technique,
+    write_metadata,
+)
 
 from spindoctor.cli.stats.report import build_report
 from spindoctor.cli.stats.report_sections import IMAGE_COLUMNS
@@ -24,11 +31,6 @@ from spindoctor.dataset import DataSetPDS3CassiniISS, DataSetPDS3VoyagerISS
 from spindoctor.results_index import open_index
 
 from .conftest import (
-    index_url,
-    ingest_tree,
-    metadata_document,
-    technique,
-    write_metadata,
     write_metadata_in_each,
 )
 
@@ -665,6 +667,31 @@ def test_the_exclusion_section_counts_images(standard: Connection, tmp_path: Pat
     """The exclusion set is a JSON column, and the empty set is not a category."""
     text = build_report(standard, tmp_path / 'report').read_text(encoding='utf-8')
     assert '| BodyBlobNav | 1 (50.0%) | 0 (0.0%) | 1 (33.3%) |' in text
+
+
+def test_two_orders_of_one_exclusion_set_are_one_category(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The column holds whatever order the document recorded the names in.
+
+    Two documents are free to record one exclusion set in two orders, so the
+    section sorts the names before it groups on them; grouping on the stored
+    order would report those two images under two categories of one member
+    each.
+    """
+    documents = {
+        'COISS_2001/N1000000001_1_CALIB': metadata_document(
+            image_name='N1000000001_1_CALIB.IMG',
+            excluded=['StarUniqueMatchNav', 'BodyBlobNav'],
+        ),
+        'COISS_2001/N1000000002_1_CALIB': metadata_document(
+            image_name='N1000000002_1_CALIB.IMG',
+            excluded=['BodyBlobNav', 'StarUniqueMatchNav'],
+        ),
+    }
+    with _indexed(tmp_path, documents, quiet_logger) as connection:
+        text = build_report(connection, tmp_path / 'report').read_text(encoding='utf-8')
+    assert '| BodyBlobNav, StarUniqueMatchNav | 2 (100.0%) | 2 (100.0%) |' in text
 
 
 def test_no_exclusions_means_no_exclusion_section(

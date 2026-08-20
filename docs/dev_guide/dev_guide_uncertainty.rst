@@ -214,6 +214,12 @@ From the fused covariance the result derives:
   confident but too imprecise to earn a tier
   (``final_sigma_above_threshold``).
 
+The fused result is held to the same finiteness rule as its members: its
+offset, its per-axis sigma, and its fitted rotation with that rotation's
+sigma must all be finite, each being arithmetic over inputs already required
+to be finite. ``sigma_along_unobservable_px`` is the one exception, and an
+infinity there is the rank-deficiency report above rather than a defect.
+
 What reaches the metadata
 =========================
 

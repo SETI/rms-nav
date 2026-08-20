@@ -18,11 +18,14 @@ from typing import Any, cast
 
 import pytest
 from cloud_tasks.worker import WorkerData
+from tests.spindoctor.conftest import (
+    index_url,
+    metadata_document,
+    write_metadata,
+)
 
 from spindoctor.cli import sd_stats_ingest, sd_stats_ingest_cloud_tasks
 from spindoctor.config import MAIN_LOGGER
-
-from .conftest import index_url, metadata_document, write_metadata
 
 STUB = 'VOL/N1454725799_1_CALIB'
 """The stub of the document every tree below holds."""

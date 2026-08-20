@@ -1,10 +1,10 @@
-"""Values the statistics system derives from a metadata document.
+"""Values derived from the fields of a navigation metadata document.
 
 Each of these turns a recorded field into something a query can filter on: an
 epoch into the calendar date the date filters compare, and an image name into
-the number the image-range filters compare.  They run at ingest, so the derived
-values are columns and the filters are ordinary column comparisons on any
-backend.
+the number the image-range filters compare.  They run where the per-image facts
+are built, so the derived values are columns of the results index and the
+filters are ordinary column comparisons on any backend.
 """
 
 import re
@@ -45,8 +45,8 @@ def date_from_image_et(image_et: float | None) -> str | None:
     """UTC calendar date (``YYYY-MM-DD``) for a SPICE ET epoch.
 
     Parameters:
-        image_et: TDB seconds past J2000 (the ``provenance.image_et``
-            metadata field), or None.
+        image_et: TDB seconds past J2000 -- the epoch the document recorded for
+            the image -- or None.
 
     Returns:
         The UTC date string, or None when ``image_et`` is None.
@@ -65,8 +65,8 @@ def datetime_from_image_et(image_et: float | None) -> str | None:
     the same day into one indistinguishable bound.
 
     Parameters:
-        image_et: TDB seconds past J2000 (the ``provenance.image_et``
-            metadata field), or None.
+        image_et: TDB seconds past J2000 -- the epoch the document recorded for
+            the image -- or None.
 
     Returns:
         The UTC timestamp string, or None when ``image_et`` is None.

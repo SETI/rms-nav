@@ -29,20 +29,28 @@ Two families of reason
 ----------------------
 
 A reason says which of two things happened, and the two are read apart rather
-than added up.  :data:`UNREADABLE`, :data:`NOT_VALID_JSON` and
-:data:`NOT_A_JSON_OBJECT` are the file yielding no JSON object at all, and the
-tree path excludes such a file from every error filter for the same reason this
-one records no status for it, so the two agree about it.
-:data:`~spindoctor.cli.stats.ingest_rows.NOT_A_NAVIGATION_DOCUMENT` is a JSON
-object this schema will not accept, and the tree path reads a ``status`` out of
-any object it can parse: those are the documents the two answer differently
-about, and counting them is what
-:func:`~spindoctor.cli.stats.ingest.store._report_refusals` reports.  So a parse
-that failed carries a parse reason even when it failed in a way the decoder does
-not call a syntax error, rather than being filed under the schema.
+than added up.  :data:`~spindoctor.nav_records.document.UNREADABLE`,
+:data:`~spindoctor.nav_records.document.NOT_VALID_JSON` and
+:data:`~spindoctor.nav_records.document.NOT_A_JSON_OBJECT` are the file yielding
+no JSON object at all, and the tree path excludes such a file from every error
+filter for the same reason this one records no status for it, so the two agree
+about it.  :data:`~spindoctor.nav_records.facts.NOT_A_NAVIGATION_DOCUMENT` is a
+JSON object this schema will not accept, and the tree path reads a ``status``
+out of any object it can parse: those are the documents the two answer
+differently about, and counting them is what
+:func:`~spindoctor.cli.stats.ingest.store._report_refusals` reports.
+
+Neither family is decided here.  The first is
+:func:`~spindoctor.nav_records.document.document_or_refusal`'s, which is what
+the tree path reads through as well, and the second is
+:func:`~spindoctor.nav_records.facts.facts_from_document`'s, which is what
+builds the rows either storage answers with; so the two never state one file's
+fault two different ways.  Neither turns a fault in this code into a reason: a
+refusal is written with the file's own modification time and size, so the next
+pass skips it, and a defect cached that way would outlive its own fix while
+every run after it reported itself clean.
 """
 
-import json
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, TypeVar, cast
@@ -53,36 +61,18 @@ from pdslogger import PdsLogger
 
 from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.store import _write_chunk
-from spindoctor.cli.stats.ingest_rows import (
-    NOT_A_NAVIGATION_DOCUMENT,
-    ImageRows,
+from spindoctor.nav_records import (
+    COULD_NOT_RETRIEVE,
+    METADATA_SUFFIX,
+    RETRIEVE_BATCH_SIZE,
+    DocumentOrigin,
+    ImageFacts,
+    ListedRecord,
     MetadataDocumentError,
-    MetadataSource,
-    _subtree_of,
-    rows_from_metadata,
+    document_or_refusal,
+    facts_from_document,
+    subtree_of,
 )
-from spindoctor.nav_records import METADATA_SUFFIX, RETRIEVE_BATCH_SIZE, ListedRecord
-
-__all__ = [
-    'NOT_A_JSON_OBJECT',
-    'NOT_VALID_JSON',
-    'UNREADABLE',
-]
-
-UNREADABLE = 'unreadable'
-"""Reason counted against a file whose bytes could not be read as text."""
-
-NOT_VALID_JSON = 'not valid JSON'
-"""Reason counted against a file no JSON value came out of.
-
-Carried by every way the decoder can fail to produce a value, not by malformed
-syntax alone: a document nested deeply enough to exhaust the recursion limit and
-one large enough to exhaust memory both end with nothing parsed, which is the
-fact the reason states.
-"""
-
-NOT_A_JSON_OBJECT = 'not a JSON object'
-"""Reason counted against a file that parses to a JSON value of another kind."""
 
 _Item = TypeVar('_Item')
 """What one slice of a batched sequence holds."""
@@ -102,7 +92,7 @@ def _batched(items: Sequence[_Item], size: int) -> Iterator[Sequence[_Item]]:
         yield items[start : start + size]
 
 
-def _read_document(local_path: Path, source: MetadataSource) -> ImageRows:
+def _read_document(local_path: Path, source: DocumentOrigin) -> ImageFacts:
     """Read one retrieved metadata file into rows.
 
     Parameters:
@@ -115,46 +105,13 @@ def _read_document(local_path: Path, source: MetadataSource) -> ImageRows:
     Raises:
         MetadataDocumentError: If the file cannot be read, does not parse as
             JSON, does not parse to a JSON object, or is not a current-schema
-            navigation document.
+            navigation document.  The reason is the one the tree path states for
+            the same file, because both come from the same reader.
     """
-    try:
-        text = local_path.read_text(encoding='utf-8')
-    except (OSError, UnicodeDecodeError) as exc:
-        raise MetadataDocumentError(UNREADABLE, source_file=source.source_file) from exc
-    try:
-        parsed: Any = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise MetadataDocumentError(NOT_VALID_JSON, source_file=source.source_file) from exc
-    except Exception as exc:
-        # The decoder reports more than malformed syntax.  A decoder that
-        # recurses once per level of nesting exhausts the recursion limit on a
-        # deeply nested document rather than failing to parse it, and one that
-        # runs out of memory says so its own way; how deep is deep enough is the
-        # decoder's business and not this code's.  None of them is a reason to
-        # end the run.  The reason names the parse and not the schema, because
-        # what happened is that no value came out of the file: nothing read a
-        # ``status`` out of it here, and nothing reading the tree reads one out
-        # of it either.
-        raise MetadataDocumentError(
-            f'{NOT_VALID_JSON} ({type(exc).__name__} while parsing it)',
-            source_file=source.source_file,
-        ) from exc
-    if not isinstance(parsed, dict):
-        raise MetadataDocumentError(NOT_A_JSON_OBJECT, source_file=source.source_file)
-    try:
-        return rows_from_metadata(parsed, source)
-    except MetadataDocumentError:
-        raise
-    except Exception as exc:
-        # The converter checks every shape the document schema declares, so
-        # reaching here means a shape nobody enumerated.  One such file costs
-        # itself; letting the exception out would cost every other file in the
-        # tree, and would leave the root's ingest run unfinished, after which
-        # every consumer refuses the root.
-        raise MetadataDocumentError(
-            f'{NOT_A_NAVIGATION_DOCUMENT} ({type(exc).__name__} while reading it)',
-            source_file=source.source_file,
-        ) from exc
+    parsed = document_or_refusal(local_path)
+    if isinstance(parsed, str):
+        raise MetadataDocumentError(parsed, source_file=source.source_file)
+    return facts_from_document(parsed, source)
 
 
 def _ingest_chunk(
@@ -179,7 +136,7 @@ def _ingest_chunk(
         counts: Accumulator this chunk's outcomes are added to.
         logger: Logger for per-file failures.
     """
-    pending: list[ImageRows] = []
+    pending: list[ImageFacts] = []
     refused: list[dict[str, Any]] = []
     for batch in _batched(chunk, RETRIEVE_BATCH_SIZE):
         sub_paths: list[str | Path] = [f'{listed.stub}{METADATA_SUFFIX}' for listed in batch]
@@ -190,7 +147,7 @@ def _ingest_chunk(
             list[Path | Exception], root.retrieve(sub_paths, exception_on_fail=False)
         )
         for listed, local_path in zip(batch, local_paths, strict=True):
-            source = MetadataSource(
+            source = DocumentOrigin(
                 root_url=root_url,
                 results_path_stub=listed.stub,
                 source_file=(root / f'{listed.stub}{METADATA_SUFFIX}').as_posix(),
@@ -201,8 +158,8 @@ def _ingest_chunk(
                 # Nothing was read, so nothing is known about the file beyond
                 # the listing.  A retrieval that failed once is worth trying
                 # again, so no refusal is recorded for it.
-                counts.record_failure('could not be retrieved', source.source_file)
-                logger.debug('Skipping %s: could not be retrieved', source.source_file)
+                counts.record_failure(COULD_NOT_RETRIEVE, source.source_file)
+                logger.debug('Skipping %s: %s', source.source_file, COULD_NOT_RETRIEVE)
                 continue
             try:
                 pending.append(_read_document(local_path, source))
@@ -221,11 +178,11 @@ def _ingest_chunk(
                         # derived by the same function the images row uses, so
                         # the two tables can never disagree about which subtree
                         # a stub is under.
-                        'subtree': _subtree_of(listed.stub),
+                        'subtree': subtree_of(listed.stub),
                         'mtime_ns': listed.mtime_ns,
                         'size_bytes': listed.size_bytes,
                     }
                 )
     if not pending and not refused:
         return
-    counts.files_ingested += _write_chunk(engine, pending, refused, counts=counts, logger=logger)
+    counts.files_ingested += _write_chunk(engine, pending, refused, logger=logger)

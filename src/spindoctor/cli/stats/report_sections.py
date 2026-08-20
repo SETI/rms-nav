@@ -594,15 +594,19 @@ _CHILD_KEY = 'WHERE {alias}root_url = i.root_url AND {alias}results_path_stub = 
 def _csv_value(value: Any) -> Any:
     """Render one column value for the CSV.
 
-    A JSON column arrives as the Python value the driver decoded, and a CSV
-    carrying a Python container's repr is a CSV nothing else can read back.  It
-    goes out as JSON text, which is what the column holds.
+    Whether a JSON column arrives as a Python container is the driver's
+    decision rather than the column's: this export reads through raw SQL, so
+    SQLite hands back the JSON text such a column stores and PostgreSQL decodes
+    one into a list or a dict first.  A CSV carrying a Python container's
+    repr is one nothing else can read back, so a container goes out as the JSON
+    text the column holds and everything else goes out as it came.
 
     Parameters:
         value: The value as the driver returned it.
 
     Returns:
-        The value to write.
+        The value to write: JSON text for a list or a dict, and the value
+        itself for anything else.
     """
     if isinstance(value, (list, dict)):
         return json.dumps(value)

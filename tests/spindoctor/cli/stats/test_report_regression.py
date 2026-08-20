@@ -21,7 +21,12 @@ in it, and each is asserted for rather than waved past:
 - ``images.csv`` gains the columns the schema gained, in schema order, and its
   ``status_reason`` column no longer carries a fatal error -- ``status_error``
   is its own column now, and merging the two vocabularies is what the report
-  stopped doing.
+  stopped doing.  Which columns it has is pinned against a list written out in
+  this file: the field-by-field comparison walks the *frozen* row's columns, so
+  a column the export gains, and an export that writes the same columns in
+  another order, are both invisible to it.  A column the export drops is not:
+  the produced row has no such key and the comparison raises a ``KeyError``
+  where it looks the value up.
 - The two feature-count aggregates come back as integers.  They are counts, and
   the aggregate that produced a floating-point zero for an image with no
   features was a SQLite spelling.
@@ -42,8 +47,15 @@ from typing import Any
 
 import pdslogger
 import pytest
+from tests.spindoctor.conftest import (
+    index_url,
+)
 
-from .conftest import GOLDEN_DIR, RESULTS_TREE, index_url, report_from_tree
+from .conftest import (
+    GOLDEN_DIR,
+    RESULTS_TREE,
+    report_from_tree,
+)
 
 _TREE_PLACEHOLDER = '{results_tree}'
 """What the frozen CSV holds in place of the tree's absolute path."""
@@ -203,15 +215,98 @@ def test_the_count_aggregates_are_the_same_numbers(report_variant: tuple[str, Pa
     assert differences == []
 
 
-def test_the_csv_gained_the_key_columns(report_variant: tuple[str, Path]) -> None:
-    """The export now says which root and which stub each row came from.
+_CSV_HEADER = (
+    'root_url',
+    'results_path_stub',
+    'subtree',
+    'image_name',
+    'instrument',
+    'camera',
+    'shutter_mode',
+    'image_path',
+    'provenance_image_et',
+    'observation_image_et',
+    'image_et',
+    'image_date',
+    'status',
+    'status_error',
+    'status_reason',
+    'offset_dv',
+    'offset_du',
+    'sigma_dv',
+    'sigma_du',
+    'covariance_px2',
+    'sigma_along_unobservable_px',
+    'rotation_deg',
+    'sigma_rotation_deg',
+    'confidence',
+    'confidence_rank',
+    'n_techniques',
+    'excluded_from_consensus',
+    'image_class',
+    'noise_sigma',
+    'image_shape_v',
+    'image_shape_u',
+    'run_start',
+    'run_end',
+    'elapsed_s',
+    'config_hash',
+    'git_sha',
+    'pipeline_run',
+    'spice_kernels',
+    'image_number',
+    'start_et',
+    'stop_et',
+    'midtime_et',
+    'exposure_s',
+    'sclk_start',
+    'sclk_midtime',
+    'sclk_stop',
+    'camera_frame',
+    'camera_frame_id',
+    'ck_frame_id',
+    'cmatrix',
+    'cmatrix_original',
+    'source_file',
+    'mtime_ns',
+    'size_bytes',
+    'n_technique_rows',
+    'n_feature_sources',
+    'n_features',
+    'n_gated',
+)
+"""Every column of ``images.csv``, in the order the export writes them.
+
+Spelled out here rather than read back from the schema or from the export's own
+list, because a test that asks the code what its columns are agrees with every
+answer the code gives.  This one disagrees, which is the point: an added column,
+a dropped one and a reordered pair all fail it, and it is the only thing that
+reports an added or a reordered column at all.  The comparison against the
+frozen export walks the frozen row's columns and looks each one up in the
+produced row, so it sees neither; it does see a dropped column, as the
+``KeyError`` that lookup then raises.
+
+Editing this list is therefore the deliberate act of ratifying a changed export,
+and it is worth the deliberation.  A CSV is read by position as often as by
+name -- by a spreadsheet, by a downstream script, by whoever cut a column out of
+it with ``cut -f`` -- so a column inserted in the middle silently re-points
+every reader that counts.  The first two are the key of the row, naming the root
+and the stub each one came from, and a reader joining the export back to a
+results tree needs them where they are.
+"""
+
+
+def test_the_csv_header_is_exactly_the_ratified_columns(
+    report_variant: tuple[str, Path],
+) -> None:
+    """The export writes these columns, in this order, and no others.
 
     Parameters:
         report_variant: The variant name and the report it wrote.
     """
     _variant, out = report_variant
     header = (out / 'images.csv').read_text(encoding='utf-8').splitlines()[0].split(',')
-    assert header[:2] == ['root_url', 'results_path_stub']
+    assert header == list(_CSV_HEADER)
 
 
 def test_every_filelist_is_unchanged(report_variant: tuple[str, Path]) -> None:

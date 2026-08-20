@@ -29,13 +29,20 @@ What the rebuilt record carries
 
 :data:`_ROW_COLUMNS` is this consumer's declaration of what it reads, and a
 rebuilt record carries those columns and nothing else: the top-level ``status``,
-``status_error`` and ``offset``, and the ``navigation_result`` ``times`` and
-``pointing`` blocks the C-matrix mechanism needs.  It is not the document; it is
-the part of the document that decides a pointing.  The ``pointing`` block's
-``camera_frame`` is not among them although the index carries it for another
-reader: the frame identity a recorded attitude is gated against is taken from the
-observation, never from the record, so nothing here would consult a rebuilt name.
-Selecting no column for it is the whole of how that is arranged.
+``status_error`` and ``offset``, the ``navigation_result`` ``pointing`` block,
+and the one epoch of ``times`` the C-matrix gates are run against.  It is not
+the document; it is the part of the document that decides a pointing.  The rest
+of ``times`` -- the exposure bounds, the duration and the three spacecraft clock
+strings -- is not selected: no reader here consults an epoch other than
+``midtime_et``, and a column selected only to be dropped is paid for on every
+row read.  The ``pointing`` block's ``camera_frame`` is not selected either,
+although the index carries it for another reader: the frame identity a recorded
+attitude is gated against is taken from the observation, never from the record,
+so nothing here would consult a rebuilt name.  The block's two frame identities
+are selected all the same, and for their presence rather than for their values:
+a block is rebuilt exactly when a column of it carries something, and the
+block's presence is what tells a result that fitted a camera rotation from a
+record that recorded no pointing at all.
 
 How an absent column, a NOT NULL status and half a pair are rebuilt is
 :mod:`spindoctor.results_index.rebuild`'s to state, since every consumer depends
@@ -129,47 +136,19 @@ retrieve: nothing is known about it that will still be true next pass, and a
 recorded refusal is skipped for as long as the file does not change.  Such a
 file has no row in either table and reads as an image nothing navigated.
 
-The three classes read differently
-----------------------------------
+Everything else agrees
+----------------------
 
-Three classes of record the index does hold are classified under a different
-reason by the two storages, and that the reason is the whole of the difference
-is asserted rather than observed: a member whose mechanism, matrices, midtime or
-offset differed would be a defect in this module or in what ingest stores, not a
-fourth class.  The membership is measured rather than argued -- both sources are
-driven over every shape a record's fields can take, and what survives defines it
--- and each member is a shape no navigation produces, named here so that a
-record hand-built into a results tree is not read as agreeing when it does not.
+For every record the navigator wrote and the ingest stored, the two paths agree
+in the whole of what they answer: the mechanism, the matrices, the midtime, the
+offset, the outcome and the error.  The navigator's own types are what settle
+that.  A record whose status is ``success`` carries an offset of two floats, so
+the ladder's offset arm is never reached on a shape one storage can hold and the
+other cannot; a recorded attitude is validated as a proper rotation of finite
+numbers before it is written, so no document carries a matrix the column has
+nothing for; and a pointing block always carries its baseline and both frame
+identities as integers, so no block reaches a row leaving no trace in it.
 
-1. **An ``offset`` no reader can use.**  Absent, null, a boolean pair, a
-   non-finite pair, or anything else that is not two values convertible to
-   finite pixels.  The document is classified under which of those it was;
-   the row, which holds one NULL pair for all of them, under ``null_offset``.
-2. **A ``cmatrix`` no column can hold** -- one whose recorded value is not one
-   3x3 matrix of finite real numbers in some nesting an array library
-   reconciles into that shape.  Nine values, a 3x3 nesting of them and nine
-   rows of one all denote the same matrix and are all held; a value of any
-   other shape, and one whose nine entries are not finite real numbers, is
-   held by neither storage.
-   The document is ``malformed_pointing``; the row is
-   ``no_cmatrix_rotation_fitted`` when something else of the block survives
-   (which is what a fitted-rotation result looks like) and ``no_pointing_block``
-   when nothing does.  The file path also puts one line in the run log for it
-   and the index path does not.  A ``cmatrix`` that *is* nine finite numbers and
-   is not a rotation is stored, and the validator then refuses it in both paths
-   alike, which is why ``malformed_pointing`` has a row of its own above.
-3. **A ``pointing`` block none of whose four columned fields survives** -- one
-   holding only ``camera_frame``, or frame identities written as floats or
-   booleans, which the integer columns refuse.  The document is
-   ``no_cmatrix_rotation_fitted``, because the block exists and carries no
-   corrected attitude; the row is ``no_pointing_block``, because the block left
-   no trace in it.  The block a navigation writes always carries the baseline
-   and both frame identities as integers.
-
-Everything else agrees.  For every record the navigator wrote and ingest stored,
-and for every hand-built shape outside those three classes, the mechanism, the
-matrices, the midtime, the offset, the outcome and the error are identical in
-the two paths.
 """
 
 from typing import Any, Protocol
@@ -209,13 +188,7 @@ _ROW_COLUMNS = (
     IMAGES.c.status_error,
     IMAGES.c.offset_dv,
     IMAGES.c.offset_du,
-    IMAGES.c.start_et,
-    IMAGES.c.stop_et,
     IMAGES.c.midtime_et,
-    IMAGES.c.exposure_s,
-    IMAGES.c.sclk_start,
-    IMAGES.c.sclk_midtime,
-    IMAGES.c.sclk_stop,
     IMAGES.c.camera_frame_id,
     IMAGES.c.ck_frame_id,
     IMAGES.c.cmatrix,
@@ -225,9 +198,18 @@ _ROW_COLUMNS = (
 
 A row is only cheaper than a document while it carries less, so this is a
 declaration rather than a convenience: what is not here is not read, and what is
-read is here.  A test holds the list to the fields
-:mod:`spindoctor.results_index.rebuild` knows a place for, since a column
-selected that no field is rebuilt from would be paid for and dropped.
+read is here.  Both directions are held by a test.  One holds every column here
+to the fields :mod:`spindoctor.results_index.rebuild` knows a place for, since a
+column selected that no field is rebuilt from would be paid for and dropped.
+The other drops each column in turn and holds what the readers then get back to
+being different, since a column whose absence changes nothing is a column
+nothing reads.
+
+All but two are read for their values: the outcome and the error beside it, the
+two halves of the recorded offset, the two matrices, and the midtime the
+C-matrix gates are run against.  The two frame identities are read for their
+presence, which is what keeps a pointing block recording no usable attitude
+visible as the block it was.
 """
 
 

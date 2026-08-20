@@ -5,12 +5,22 @@ row per image built from those documents.  The programs downstream want the
 record and do not care which of the two answered, so they ask through this
 protocol and each storage implements it.
 
-Three questions, because the programs ask three things.  One image, by its stub,
+Four questions, because the programs ask four things.  One image, by its stub,
 asked inside a per-image loop.  A stream of records, asked once per run by a
 program that summarizes or sweeps, and asked with an explicit list of stubs by a
-queue worker that must read exactly the files it was handed.  And a listing,
-which answers what is there without opening a single document, for the two
-consumers that need no more than that.
+queue worker that must read exactly the files it was handed.  A listing, which
+answers what is there without opening a single document, for the two consumers
+that need no more than that.  And a stream of per-image facts, for a program that
+reads every field of every image rather than the few a record carries.
+
+A record and a per-image fact set are different shapes because the two storages
+can supply different things.  A record looks like the document it stands for, so
+the index rebuilds one out of the columns its consumer selected and refuses to
+invent a field the document did not have; that is what makes a record cheap.
+The facts are the whole row -- everything the index column set holds about one
+image, in the shape both storages hold it in -- so a consumer that reads
+everything reads one shape rather than one storage.  What that column set leaves
+out of a document it leaves out of the facts as well.
 
 What every implementation owes a caller
 ---------------------------------------
@@ -58,6 +68,7 @@ from itertools import islice
 from types import TracebackType
 from typing import Protocol, TypeVar
 
+from spindoctor.nav_records.facts import ImageFacts
 from spindoctor.nav_records.record import ListedRecord, NavRecord, UnreadableFile
 from spindoctor.nav_records.roots import distinct_roots
 from spindoctor.nav_records.selection import Selection
@@ -120,6 +131,47 @@ class RecordSource(Protocol):
 
         Yields:
             One record, or one unreadable file, per file the selection covers.
+
+        Raises:
+            ValueError: If the selection cannot be honoured by this source --
+                naming a root it does not hold, or naming stubs without
+                resolving to the single root a stub is a key under.
+        """
+        ...
+
+    def facts(self, selection: Selection) -> Iterator[ImageFacts | UnreadableFile]:
+        """Yield what every image the selection covers says about itself.
+
+        The question :meth:`records` cannot answer.  A record is defined as
+        looking like the document it stands for, so a source reading rows hands
+        back the fields its consumer's columns hold and nothing else; a consumer
+        that reads every field of every image would have to name every column
+        and would still get no per-technique or per-feature detail, since
+        neither lives in a record.  So a program that summarizes a whole run
+        asks for the facts instead, and gets the same shape from either storage.
+
+        Every file the selection covers is accounted for: one that yielded no
+        facts is yielded as an
+        :class:`~spindoctor.nav_records.record.UnreadableFile` saying why,
+        rather than raised on or passed over.  Which files those are is not the
+        set :meth:`records` refuses.  A record is what a document says, so
+        anything that parses to a JSON object is one; the facts are the fields
+        an image is summarized by, so a document naming no image, or holding a
+        field of the schema in some other shape, yields none.  Such a file is a
+        record from :meth:`records` and an unreadable file here, and the reason
+        given here is the one an ingest of the same tree records for it.
+
+        The order is whatever order the implementation finds images in, and it
+        promises no more than that.
+
+        Parameters:
+            selection: Which images to yield.  A selection naming stubs names
+                the images outright, and they are answered in the order it names
+                them.
+
+        Yields:
+            One set of facts per image the selection covers, or one unreadable
+            file per file no facts could be read out of.
 
         Raises:
             ValueError: If the selection cannot be honoured by this source --

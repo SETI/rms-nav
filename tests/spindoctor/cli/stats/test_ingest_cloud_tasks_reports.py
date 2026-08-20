@@ -24,6 +24,9 @@ from typing import Any
 
 import pdslogger
 from filecache import FCPath
+from tests.spindoctor.conftest import (
+    index_url,
+)
 
 from spindoctor.cli.stats.ingest import task_results_from_event_log
 
@@ -31,7 +34,6 @@ from .conftest import (
     build_tree,
     complete,
     fan_out,
-    index_url,
     reported,
     run_rows,
     run_shares,

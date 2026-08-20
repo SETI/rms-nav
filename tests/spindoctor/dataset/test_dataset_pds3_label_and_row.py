@@ -17,13 +17,13 @@ from typing import Any
 import pytest
 from filecache import FCPath
 
-from spindoctor.cli.stats.classify import datetime_from_image_et
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.dataset_pds3 import DataSetPDS3
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
 from spindoctor.dataset.dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
 from spindoctor.dataset.dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
+from spindoctor.nav_records.derived import datetime_from_image_et
 
 # --- ^IMAGE pointer parsing (issue #12) ---
 
@@ -242,6 +242,49 @@ def test_image_et_from_index_row_unparsable_value() -> None:
 def test_image_et_from_index_row_without_index() -> None:
     """An image not enumerated from an index has no epoch."""
     assert DataSetPDS3CassiniISS.image_et_from_index_row({}) is None
+
+
+def _image_file_with_epoch(image_et: float | None) -> ImageFile:
+    """Build an ``ImageFile`` carrying one enumerated epoch.
+
+    Parameters:
+        image_et: The epoch the enumeration read out of the index row.
+
+    Returns:
+        The image file, with its epoch settled as construction settles it.
+    """
+    return ImageFile(
+        image_file_url=FCPath('/holdings/N1454725799_1.IMG'),
+        label_file_url=FCPath('/holdings/N1454725799_1.LBL'),
+        results_path_stub='stub',
+        image_et=image_et,
+    )
+
+
+@pytest.mark.parametrize(
+    'recorded',
+    [float('nan'), float('inf'), float('-inf')],
+    ids=['nan', 'inf', 'negative-inf'],
+)
+def test_an_epoch_no_reader_could_place_reads_as_no_epoch(recorded: float) -> None:
+    """An index value that is not a finite number places the image nowhere.
+
+    The index file is not this project's to fix, so such a value is a fact
+    about someone else's data rather than a defect here, and refusing it
+    would fail a whole enumeration over one row.  Every comparison against a
+    NaN is False, so a NaN epoch would fall inside every time range at once
+    and an infinite one inside a half-bounded range it can have no business
+    in.  None is already what this field says when no epoch is known.
+
+    Parameters:
+        recorded: The non-finite epoch the enumeration supplied.
+    """
+    assert _image_file_with_epoch(recorded).image_et is None
+
+
+def test_a_readable_epoch_survives_untouched() -> None:
+    """The control: a finite epoch is carried through exactly as enumerated."""
+    assert _image_file_with_epoch(221309426.8040615).image_et == 221309426.8040615
 
 
 # --- camera from the index row ---

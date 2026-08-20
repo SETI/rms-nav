@@ -12,11 +12,15 @@ from pathlib import Path
 
 import pdslogger
 import pytest
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    write_metadata,
+)
 
 from spindoctor.cli.stats.report import main_report
 from spindoctor.results_index import INGEST_RUNS, SCHEMA_VERSION, open_index
-
-from .conftest import index_url, ingest_tree, metadata_document, write_metadata
 
 # ---------------------------------------------------------------------------
 # The command line

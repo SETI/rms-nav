@@ -53,9 +53,18 @@ Documents are retrieved in groups and yielded one at a time.  Batched because on
 a cloud root each file is a separate round trip and a backend downloads a batch
 in parallel; lazy because the caller should not have to hold a mission in memory
 to read the first record of one.
+
+Read once, answered twice
+-------------------------
+
+The records and the per-image facts come off one pass over one batch: a document
+is retrieved once, parsed once, and either handed back as the record it is or
+flattened into the facts it holds.  The two file metrics the facts carry are the
+listing's own, threaded through from the walk that found the document, so
+nothing here stats a file and nothing walks a root a second time to answer the
+second question about it.
 """
 
-import json
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import TracebackType
@@ -67,12 +76,16 @@ from pdslogger import NullLogger, PdsLogger
 from spindoctor.nav_records.document import (
     COULD_NOT_RETRIEVE,
     METADATA_SUFFIX,
-    NOT_A_JSON_OBJECT,
-    NOT_VALID_JSON,
-    UNREADABLE,
+    document_or_refusal,
     document_path,
     read_document,
     stub_refusal,
+)
+from spindoctor.nav_records.facts import (
+    DocumentOrigin,
+    ImageFacts,
+    MetadataDocumentError,
+    facts_from_document,
 )
 from spindoctor.nav_records.record import ListedRecord, NavRecord, UnreadableFile
 from spindoctor.nav_records.roots import distinct_roots
@@ -515,11 +528,97 @@ class TreeRecordSource:
                 caller reads, and not at all when the selection names its own
                 stubs, which lists nothing.
         """
+        return (found for _origin, found in self._found(selection))
+
+    def facts(self, selection: Selection) -> Iterator[ImageFacts | UnreadableFile]:
+        """Return what every document the selection covers says about its image.
+
+        One pass over the same batched retrieval :meth:`records` makes, so a
+        document is read once whichever of the two a caller asked for.  The two
+        file metrics the facts carry come from the walk's own listing entries,
+        which is where the walk already had them: asking the storage layer for
+        them again would be one round trip per image on a cloud root, against
+        one per directory for the listing that reported them in the first place.
+        A selection naming its own stubs did no walk, so those images carry
+        neither metric.
+
+        Parameters:
+            selection: Which images to yield.  A selection naming stubs reads
+                exactly those, in the order it names them; one naming none takes
+                its stubs from the listing of the selected roots.
+
+        Returns:
+            One set of facts per document that yielded one, and one
+            :class:`~spindoctor.nav_records.record.UnreadableFile` per file that
+            did not.  A file that is no navigation document is one of those,
+            carrying the reason the document reader refuses it by, which is the
+            reason an ingest of the same tree records for it.
+
+        Raises:
+            ValueError: If the selection names stubs without resolving to
+                exactly one root, or names a root this source does not hold.
+            UnlistableDirectoryError: If a directory under a selected root could
+                not be listed, or :class:`UnlistableRootError` if a selected
+                root could not be listed at all.
+        """
+        return (self._facts_of(origin, found) for origin, found in self._found(selection))
+
+    def _found(
+        self, selection: Selection
+    ) -> Iterator[tuple[DocumentOrigin, NavRecord | UnreadableFile]]:
+        """Read the documents the selection covers, each with where it came from.
+
+        The one stream both public reads are built on.  What the selection asks
+        for is checked here rather than inside the generator, so a selection
+        this source cannot honour is refused where a caller asked rather than
+        partway through its loop.
+
+        Parameters:
+            selection: Which documents to read.
+
+        Returns:
+            One pair per document the selection covers: where it came from, and
+            the record or the unreadable file it produced.
+
+        Raises:
+            ValueError: If the selection names stubs without resolving to
+                exactly one root, or names a root this source does not hold.
+        """
         roots = selected_roots(self._roots, selection.roots)
         if not selection.stubs:
-            return self._records_of(roots, selection)
-        root = root_for_stubs(roots, selection.stubs)
-        return self._records_of_root(FCPath(root), iter(selection.stubs), selection)
+            return self._found_of(roots, selection)
+        root_url = root_for_stubs(roots, selection.stubs)
+        root = FCPath(root_url)
+        listed = (
+            ListedRecord(stub=stub, path=document_path(root, stub), mtime_ns=None, size_bytes=None)
+            for stub in selection.stubs
+        )
+        return self._found_of_root(root, root_url, listed, selection)
+
+    @staticmethod
+    def _facts_of(
+        origin: DocumentOrigin, found: NavRecord | UnreadableFile
+    ) -> ImageFacts | UnreadableFile:
+        """Flatten one document that was read, or pass on the file that was not.
+
+        Parameters:
+            origin: Where the document came from and what the walk saw of it.
+            found: The record read out of it, or the unreadable file it was
+                instead.
+
+        Returns:
+            The facts, or the unreadable file.  A document that is no
+            current-schema navigation document becomes one of those, carrying
+            the reason the document reader states for it, so this source and an
+            index ingested from the same tree refuse the same files for the same
+            reason.
+        """
+        if isinstance(found, UnreadableFile):
+            return found
+        try:
+            return facts_from_document(found.metadata, origin)
+        except MetadataDocumentError as exc:
+            return UnreadableFile(path=found.path, stub=found.stub, reason=exc.reason)
 
     def _listing_of(self, roots: Sequence[str], subtrees: Sequence[str]) -> Iterator[ListedRecord]:
         """Walk each root in turn, yielding its documents as they are found.
@@ -535,10 +634,14 @@ class TreeRecordSource:
         for root_url in roots:
             yield from self._listing_of_root(FCPath(root_url), subtrees)
 
-    def _records_of(
+    def _found_of(
         self, roots: Sequence[str], selection: Selection
-    ) -> Iterator[NavRecord | UnreadableFile]:
-        """Read each root's documents in turn, taking its stubs from its listing.
+    ) -> Iterator[tuple[DocumentOrigin, NavRecord | UnreadableFile]]:
+        """Read each root's documents in turn, taking its listing as it goes.
+
+        The listing entries are carried through rather than reduced to their
+        stubs, because they hold the two file metrics the facts record and the
+        walk is the only thing that knows them.
 
         Parameters:
             roots: The normalized roots to read, in the order to read them.
@@ -546,12 +649,12 @@ class TreeRecordSource:
                 restrictions a document has to be opened to answer.
 
         Yields:
-            One record or one unreadable file per document the selection covers.
+            One pair per document the selection covers.
         """
         for root_url in roots:
             root = FCPath(root_url)
-            stubs = (listed.stub for listed in self._listing_of_root(root, selection.subtrees))
-            yield from self._records_of_root(root, stubs, selection)
+            listed = self._listing_of_root(root, selection.subtrees)
+            yield from self._found_of_root(root, root_url, listed, selection)
 
     def describe(self) -> str:
         """Return where these records came from, for the run log.
@@ -603,34 +706,65 @@ class TreeRecordSource:
                 logger=self._logger,
             )
 
-    def _records_of_root(
-        self, root: FCPath, stubs: Iterator[str], selection: Selection
-    ) -> Iterator[NavRecord | UnreadableFile]:
+    def _found_of_root(
+        self,
+        root: FCPath,
+        root_url: str,
+        listed: Iterator[ListedRecord],
+        selection: Selection,
+    ) -> Iterator[tuple[DocumentOrigin, NavRecord | UnreadableFile]]:
         """Retrieve one root's documents in batches and yield them one at a time.
 
         Parameters:
             root: The results root the stubs are keys under.
-            stubs: The stubs to read, which arrive lazily when they come from a
-                listing.
+            root_url: The same root normalized, which is how a document records
+                where it came from.
+            listed: The documents to read, which arrive lazily when they come
+                from a listing.
             selection: The selection, for the restrictions a document has to be
                 opened to answer.
 
         Yields:
-            One record or one unreadable file per stub that survives the
-            selection's restrictions.
+            One pair per listed document that survives the selection's
+            restrictions.
         """
-        for batch in in_batches(stubs, RETRIEVE_BATCH_SIZE):
-            sub_paths: list[str | Path] = [f'{stub}{METADATA_SUFFIX}' for stub in batch]
+        for batch in in_batches(listed, RETRIEVE_BATCH_SIZE):
+            sub_paths: list[str | Path] = [f'{entry.stub}{METADATA_SUFFIX}' for entry in batch]
             # retrieve() rather than get_local_path(): on a cloud root the
             # latter names a file it never downloads.  exception_on_fail=False
             # keeps one file that never arrived from ending the pass.
             local_paths = cast(
                 list[Path | Exception], root.retrieve(sub_paths, exception_on_fail=False)
             )
-            for stub, local_path in zip(batch, local_paths, strict=True):
-                found = self._record_of(root, stub, local_path, selection)
+            for entry, local_path in zip(batch, local_paths, strict=True):
+                found = self._record_of(root, entry.stub, local_path, selection)
                 if found is not None:
-                    yield found
+                    yield self._origin_of(root_url, entry, found), found
+
+    @staticmethod
+    def _origin_of(
+        root_url: str, listed: ListedRecord, found: NavRecord | UnreadableFile
+    ) -> DocumentOrigin:
+        """Return where one document came from and what the walk saw of it.
+
+        Parameters:
+            root_url: The normalized results root the document is under.
+            listed: The listing entry the document came from, which carries the
+                two metrics.
+            found: What was read out of it, for the path it names.
+
+        Returns:
+            The origin.  The file it names is the one the record or the
+            unreadable file names, so a message about an image and the
+            provenance recorded for it name one file.
+        """
+        return DocumentOrigin(
+            root_url=root_url,
+            results_path_stub=listed.stub,
+            source_file=found.path.as_posix(),
+            mtime_ns=listed.mtime_ns,
+            size_bytes=listed.size_bytes,
+        )
 
     def _record_of(
         self, root: FCPath, stub: str, local_path: Path | Exception, selection: Selection
@@ -658,7 +792,7 @@ class TreeRecordSource:
         path = document_path(root, stub)
         if isinstance(local_path, BaseException):
             return UnreadableFile(path=path, stub=stub, reason=COULD_NOT_RETRIEVE)
-        metadata = self._read(FCPath(local_path))
+        metadata = document_or_refusal(FCPath(local_path))
         if isinstance(metadata, str):
             return UnreadableFile(path=path, stub=stub, reason=metadata)
         if selection.instrument is not None:
@@ -675,41 +809,6 @@ class TreeRecordSource:
             if not self._within(midtime, selection):
                 return None
         return NavRecord(path=path, stub=stub, metadata=metadata)
-
-    @staticmethod
-    def _read(path: FCPath) -> dict[str, Any] | str:
-        """Read one document, or return the reason no document came out of it.
-
-        Parameters:
-            path: The retrieved file.
-
-        Returns:
-            The document, or one of the reason constants in
-            :mod:`spindoctor.nav_records.document`.
-        """
-        try:
-            return read_document(path)
-        except (OSError, UnicodeDecodeError):
-            return UNREADABLE
-        except json.JSONDecodeError:
-            return NOT_VALID_JSON
-        except ValueError:
-            # What is left of ValueError once the decoder's own failure is taken
-            # out is the document rule itself: valid JSON that is not an object.
-            return NOT_A_JSON_OBJECT
-        except (RecursionError, MemoryError):
-            # The decoder reports more than malformed syntax.  A decoder that
-            # recurses once per level of nesting exhausts the recursion limit on
-            # a deeply nested document rather than failing to parse it, and one
-            # that runs out of memory says so its own way.  How deep is deep
-            # enough is the decoder's business and not this code's.
-            # Neither is a reason to end a pass, and what happened in both is
-            # that no value came out of the file.  Named rather than caught as
-            # every remaining exception, because a fault in the reader itself is
-            # a property of this code and not of the file: reported as a bad
-            # document it would say the whole tree was malformed, which is a
-            # worse answer than stopping.
-            return NOT_VALID_JSON
 
     @staticmethod
     def _within(midtime: float, selection: Selection) -> bool:

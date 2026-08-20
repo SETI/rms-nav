@@ -643,7 +643,7 @@ def test_two_records_naming_one_image_are_refused(tmp_path: Path) -> None:
         for stub in ('vol/first', 'vol/second')
     ]
     with pytest.raises(ValueError, match='two records name the image'):
-        sd_create_ck.image_facts(records)
+        sd_create_ck.image_report_facts(records)
 
 
 def test_an_image_with_no_pointing_has_no_segment_to_build() -> None:

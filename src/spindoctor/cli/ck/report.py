@@ -63,7 +63,7 @@ _UTC_DECIMALS = 3
 
 
 @dataclass(frozen=True)
-class ImageFacts:
+class ImageReportFacts:
     """What one image's navigation metadata says about the image itself.
 
     These are the facts a report row and a segment comment line both carry, so
@@ -136,7 +136,7 @@ def utc_for_et(et: float) -> str:
     return str(cspyce.et2utc(et, _UTC_FORMAT, _UTC_DECIMALS))
 
 
-def read_image_facts(metadata: dict[str, Any]) -> ImageFacts:
+def read_image_report_facts(metadata: dict[str, Any]) -> ImageReportFacts:
     """Read one image's reported facts out of its navigation metadata.
 
     The sources are exactly these, and deliberately not any equivalent-looking
@@ -175,7 +175,7 @@ def read_image_facts(metadata: dict[str, Any]) -> ImageFacts:
     et = read_optional_number(times, 'midtime_et', 'times')
     offset = read_optional_pair(metadata, 'offset', 'metadata')
     sigma = read_optional_pair(result, 'sigma_px', 'navigation_result')
-    return ImageFacts(
+    return ImageReportFacts(
         image_name=read_text(observation, 'image_name', 'observation'),
         utc=None if et is None else utc_for_et(et),
         et=et,
@@ -206,7 +206,7 @@ class ReportRow:
             if neither is present.
     """
 
-    facts: ImageFacts
+    facts: ImageReportFacts
     source_bc: str | None
     omission_reason: OmissionReason | None
 

@@ -18,13 +18,21 @@ from typing import Any
 import pdslogger
 import pytest
 import sqlalchemy
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    write_metadata,
+)
 
 from spindoctor.cli.stats.drop import _because
 from spindoctor.cli.stats.report import main_report
 from spindoctor.results_index import IMAGES, SCHEMA_VERSION, index_table_names, read_result_stubs
 from spindoctor.results_index import engine as engine_module
 
-from .conftest import index_url, ingest_tree, metadata_document, rows_of, write_metadata
+from .conftest import (
+    rows_of,
+)
 from .ingest_driver_helpers import process, run_driver
 
 STUB = 'VOL/N1454725799_1_CALIB'

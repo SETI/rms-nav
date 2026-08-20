@@ -23,6 +23,20 @@ two readers hold different versions of it:
   have produced.
 * **What makes a file a document.**  Valid JSON holding an object, which is what
   every reader needs before it can read a field off one.
+
+The reasons a file is not a document are named here once, and
+:func:`document_or_refusal` is the one place that decides which of them a file
+earns.  A vocabulary spelled out twice is not a vocabulary: two readers of one
+tree would give one file two different reasons for the same fault, and a
+consumer comparing what the two storages hold would read that as a disagreement
+about the file.
+
+The same function fixes the policy on an escape nobody enumerated: it ends the
+pass rather than becoming a reason.  A parse that recursed too deeply or ran out
+of memory is a property of the file -- nothing came out of it -- and is named.
+Anything else out of a reader is a property of this code, and reporting it
+against the file would say that a tree of perfectly good documents was
+malformed, which is a worse answer than stopping.
 """
 
 import json
@@ -41,6 +55,7 @@ __all__ = [
     'NULL_BYTE_IN_PATH',
     'PARENT_SEGMENT_IN_PATH',
     'UNREADABLE',
+    'document_or_refusal',
     'document_path',
     'read_document',
     'stub_for_document',
@@ -214,7 +229,7 @@ def stub_for_document(root: FCPath, path: FCPath) -> str:
     return relative.removesuffix(METADATA_SUFFIX)
 
 
-def read_document(path: FCPath) -> dict[str, Any]:
+def read_document(path: FCPath | Path) -> dict[str, Any]:
     """Read one navigation document.
 
     The bytes are decoded as UTF-8 because that is what JSON is, so a document
@@ -225,7 +240,8 @@ def read_document(path: FCPath) -> dict[str, Any]:
     agree on it.
 
     Parameters:
-        path: The file to read.
+        path: The file to read.  A local path is read where a retrieval has
+            already produced one, so that reading it costs nothing further.
 
     Returns:
         The document.
@@ -244,3 +260,46 @@ def read_document(path: FCPath) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise ValueError(f'holds a {type(document).__name__}, not a JSON object')
     return cast(dict[str, Any], document)
+
+
+def document_or_refusal(path: FCPath | Path) -> dict[str, Any] | str:
+    """Read one file as a navigation document, or say why it is not one.
+
+    The one classification of a file that yielded no document, shared by every
+    reader of a results tree, so one file earns one reason whichever reader met
+    it.
+
+    Parameters:
+        path: The file to read.  A local path is read where a retrieval has
+            already produced one, so that reading it costs nothing further.
+
+    Returns:
+        The document, or one of :data:`UNREADABLE`, :data:`NOT_VALID_JSON` and
+        :data:`NOT_A_JSON_OBJECT`.
+
+    Raises:
+        Exception: Whatever the reader raises that is not one of the enumerated
+            faults of a file.  A fault in this code is a property of the code
+            rather than of the file, and reporting it as a refusal would say the
+            file was malformed and record that answer for as long as the file
+            does not change.
+    """
+    try:
+        return read_document(path)
+    except (OSError, UnicodeDecodeError):
+        return UNREADABLE
+    except json.JSONDecodeError:
+        return NOT_VALID_JSON
+    except ValueError:
+        # What is left of ValueError once the decoder's own failure is taken
+        # out is the document rule itself: valid JSON that is not an object.
+        return NOT_A_JSON_OBJECT
+    except (RecursionError, MemoryError):
+        # The decoder reports more than malformed syntax.  A decoder that
+        # recurses once per level of nesting exhausts the recursion limit on a
+        # deeply nested document rather than failing to parse it, and one that
+        # runs out of memory says so its own way.  How deep is deep enough is
+        # the decoder's business and not this code's.  Neither is a reason to
+        # end a pass, and what happened in both is that no value came out of the
+        # file, which is the fact the reason states.
+        return NOT_VALID_JSON

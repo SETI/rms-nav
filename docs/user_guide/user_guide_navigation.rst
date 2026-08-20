@@ -277,13 +277,14 @@ names one file per reason.
 
 **A file the index has no row at all for reads as absent**, and
 ``--has-no-offset-file`` reads absence as "this image was never navigated", so
-it selects that image again. Two passes end that way: one that could not
-retrieve the file, and one whose rows the database would not store. Both are
-deliberate -- a recorded refusal would be skipped for as long as the file did
-not change, and the next pass would never retry it. A file under a directory
-nobody listed is not a third: an ingest that cannot list a directory stops
-there rather than completing, so a root the index holds a completed pass over
-is a root every directory of which was listed.
+it selects that image again. One pass ends that way: one that could not retrieve
+the file. That is deliberate -- a recorded refusal would be skipped for as long
+as the file did not change, and the next pass would never retry it. Two other
+ways a file could go unrecorded are not this, because neither leaves a completed
+pass behind it: an ingest that cannot list a directory stops there, and one
+whose document the index would not store stops there. A root the index holds a
+completed pass over is a root every directory of which was listed and every
+document of which was stored.
 
 **A document rewritten in place that kept the length and the modification time
 it had before** is one the ingest skips, because those two metrics are

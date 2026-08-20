@@ -19,6 +19,13 @@ import pdslogger
 import pytest
 import sqlalchemy
 from filecache import FCPath
+from tests.spindoctor.conftest import (
+    index_url,
+    metadata_document,
+    technique,
+    write_metadata,
+    write_summary_png,
+)
 
 from spindoctor.cli.stats.ingest import (
     TaskResult,
@@ -42,16 +49,11 @@ from .conftest import (
     complete,
     cycle,
     fan_out,
-    index_url,
-    metadata_document,
     rows_of,
     run_rows,
     run_shares,
-    technique,
-    write_metadata,
     write_metadata_in_each,
     write_refusal_matching,
-    write_summary_png,
 )
 
 # ---------------------------------------------------------------------------

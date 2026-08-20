@@ -572,34 +572,10 @@ reads as one nothing navigated.
 What a column cannot always keep is *why* a record supplies no pointing. One
 column pair holds every way an offset can fail to be a pair, and a matrix
 column holds a matrix or nothing, so several document shapes reach one row and
-the run summary counts them under the reason that row supports. Three classes
-of record are counted under a different reason depending on which storage they
-were read from. In each of them both storages build the same product from the
-same values; only the tally differs. None can be produced by navigating an
-image; each requires a record written into the results tree by something else.
-
-* An ``offset`` field that supplies no usable pair -- absent, null, a pair of
-  booleans, a pair holding NaN or an infinity, a sequence that is not two
-  values, or a pair holding something that is not a number a reader can convert.
-  Read as a document each is counted under its own name
-  (``missing_offset_key``, ``null_offset``, ``invalid_offset_type``,
-  ``non_finite_offset``, ``malformed_offset``); read as a row all of them are
-  counted under ``null_offset``.
-* A ``pointing.cmatrix`` that is not one 3x3 matrix of finite real numbers in
-  some nesting an array library reconciles into that shape. Nine values, a 3x3
-  nesting of them and nine rows of one all denote the same matrix and are all
-  held; a value of any other shape, and one whose nine entries are not finite
-  real numbers, is held by neither storage. Read as a document such a value
-  counts under ``malformed_pointing``; read as a row it counts under
-  ``no_cmatrix_rotation_fitted``, or under ``no_pointing_block`` when nothing
-  else of the block could be stored either. A ``cmatrix`` that *is* nine finite
-  numbers and is not a rotation is stored, and both storages then count it
-  under ``malformed_pointing``.
-* A ``pointing`` block carrying none of ``cmatrix``, ``cmatrix_original``,
-  ``camera_frame_id`` or ``ck_frame_id`` in a form a column can hold -- one
-  holding only ``camera_frame``, or frame identities written as floats or
-  booleans. Read as a document it counts under ``no_cmatrix_rotation_fitted``;
-  read as a row it counts under ``no_pointing_block``.
+the run summary counts them under the reason that row supports. For every
+record a navigation wrote and an ingest stored, the two storages agree on all of
+it: the same pointing, built from the same values, counted under the same
+reason.
 
 Output format
 ^^^^^^^^^^^^^

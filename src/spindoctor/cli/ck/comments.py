@@ -35,7 +35,7 @@ from pathlib import Path
 
 import cspyce
 
-from spindoctor.cli.ck.report import ImageFacts
+from spindoctor.cli.ck.report import ImageReportFacts
 
 # The longest comment line ``dafec`` can read back.  A longer line is stored
 # without complaint and then makes the entire comment area unreadable.
@@ -108,7 +108,7 @@ class CommentArea:
     configuration_hash: str
     baseline_basenames: tuple[str, ...]
     sclk_basename: str
-    images: tuple[ImageFacts, ...]
+    images: tuple[ImageReportFacts, ...]
 
     def __post_init__(self) -> None:
         """Refuse a description that describes nothing."""
@@ -238,7 +238,7 @@ def _image_header() -> str:
     ).rstrip()
 
 
-def _image_line(facts: ImageFacts) -> str:
+def _image_line(facts: ImageReportFacts) -> str:
     """Return one image's line of the comment area.
 
     Parameters:

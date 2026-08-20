@@ -27,13 +27,15 @@ from tests.spindoctor.cli.stats.conftest import (
     build_tree,
     complete,
     fan_out,
-    ingest_tree,
-    metadata_document,
     recorded_lines,
     refusal_report,
     report_from_tree,
     reported,
     run_rows,
+)
+from tests.spindoctor.conftest import (
+    ingest_tree,
+    metadata_document,
     technique,
     write_metadata,
     write_refusal,
@@ -41,6 +43,7 @@ from tests.spindoctor.cli.stats.conftest import (
 
 from spindoctor.cli.stats.ingest import (
     TaskResult,
+    UnwritableRowError,
     complete_ingest_tasks,
     fan_out_ingest_tasks,
     ingest_task_share,
@@ -60,6 +63,13 @@ pytestmark = pytest.mark.postgres
 
 _FULL_VARIANT: dict[str, Any] = {'top_n': 5, 'filelists': True, 'csv_export': True}
 """The unfiltered report invocation the frozen output was produced by."""
+
+_TWIST_COVARIANCE = [
+    [0.0961, 0.0100, 0.0025],
+    [0.0100, 0.0784, -0.0050],
+    [0.0025, -0.0050, 0.0009],
+]
+"""A 3x3 covariance of the kind a twist-fitted result records."""
 
 
 def test_the_report_is_byte_identical_on_postgresql(
@@ -100,6 +110,56 @@ def test_the_json_columns_round_trip_on_postgresql(
         for row in csv.DictReader((out / 'images.csv').read_text(encoding='utf-8').splitlines())
     }
     assert produced == frozen
+
+
+def test_a_covariance_matrix_round_trips_through_jsonb(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A nested array of numbers is the shape most at risk from a backend.
+
+    JSONB stores a number as an arbitrary-precision numeric and hands it back
+    through the driver's own decoder, so a matrix that survives SQLite's text
+    column proves nothing about the server the index is shared on.
+    """
+    root = tmp_path / 'results'
+    document = metadata_document()
+    document['navigation_result']['covariance_px2'] = _TWIST_COVARIANCE
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', document)
+    ingest_tree(postgres_url, [root], logger=quiet_logger)
+    engine = open_index(postgres_url)
+    try:
+        with engine.connect() as connection:
+            stored = connection.execute(sqlalchemy.select(IMAGES.c.covariance_px2)).scalar()
+    finally:
+        engine.dispose()
+    assert stored == _TWIST_COVARIANCE
+
+
+def test_the_exclusion_order_round_trips_through_jsonb(
+    postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """JSONB reorders the keys of an object; an array keeps its order.
+
+    The column holds the list in the order the document recorded it, so a
+    backend that sorted or re-ordered it would answer with a list no document
+    holds.
+    """
+    root = tmp_path / 'results'
+    write_metadata(
+        root,
+        'VOL/N1454725799_1_CALIB',
+        metadata_document(excluded=['StarRefineNav', 'BodyBlobNav', 'RingEdgeNav']),
+    )
+    ingest_tree(postgres_url, [root], logger=quiet_logger)
+    engine = open_index(postgres_url)
+    try:
+        with engine.connect() as connection:
+            stored = connection.execute(
+                sqlalchemy.select(IMAGES.c.excluded_from_consensus)
+            ).scalar()
+    finally:
+        engine.dispose()
+    assert stored == ['StarRefineNav', 'BodyBlobNav', 'RingEdgeNav']
 
 
 def test_the_unrounded_offset_survives_postgresql(
@@ -315,13 +375,21 @@ def test_the_report_cli_does_not_print_the_server_password(
     assert f'{parsed.username}:***@' in error_text
 
 
-def test_a_document_the_server_refuses_costs_only_itself(
+def test_a_document_the_server_refuses_ends_the_pass(
     postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """A server enforces its column types, so this is where the refusal is real.
 
     An identifier larger than a ``bigint`` is rejected by the insert rather than
-    by any check ingest makes, and one such document must not end the pass.
+    by any check the ingest makes.  Charged to the file it would be counted and
+    left out of both tables under a run stamped finished, after which absence of
+    an ``images`` row -- which every consumer reads as "this image was never
+    navigated" -- is an answer nobody can tell from the truth.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+        tmp_path: Directory the tree lives under.
+        quiet_logger: Logger the ingest reports through.
     """
     root = tmp_path / 'results'
     write_metadata(
@@ -330,8 +398,8 @@ def test_a_document_the_server_refuses_costs_only_itself(
         metadata_document(image_name=f'N{"9" * 25}_1_CALIB.IMG'),
     )
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    counts = ingest_tree(postgres_url, [root], logger=quiet_logger)
-    assert (counts.files_ingested, counts.files_failed) == (1, 1)
+    with pytest.raises(UnwritableRowError, match='would not accept its rows'):
+        ingest_tree(postgres_url, [root], logger=quiet_logger)
 
 
 def test_the_shares_write_the_rows_and_the_run_a_single_pass_writes_on_postgresql(

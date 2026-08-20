@@ -43,12 +43,36 @@ is one the tree still holds.
 Types
 -----
 
-Every pixel, ET, covariance and sigma column is ``Double`` rather than ``Float``,
-because a dialect is free to map ``Float`` to single precision and the stored
-offset must round-trip the document's value bit for bit.  Booleans are
-``Boolean``, never an integer flag, so that a PostgreSQL backend rejects integer
-arithmetic on them.  Structured values are ``JSON``, which is TEXT on SQLite and
-``jsonb`` on PostgreSQL.
+Every pixel, ET and sigma column is ``Double`` rather than ``Float``, because a
+dialect is free to map ``Float`` to single precision and the stored offset would
+then lose digits the document recorded.  Booleans are ``Boolean``, never an
+integer flag, so that a PostgreSQL backend rejects integer arithmetic on them.
+Structured values -- a covariance matrix, a rotation, a list of names -- are
+``JSON``.
+
+What a stored number reads back as
+----------------------------------
+
+A ``Double`` column returns every finite double exactly, on both backends, with
+one exception: SQLite does not distinguish negative zero from positive zero, so
+a ``-0.0`` written there reads back ``0.0``.  PostgreSQL returns it as it was
+written.  No other value of any magnitude changes on either backend.
+
+A JSON column returns exactly what was written -- sign of zero, magnitude and
+all -- only where it is declared :data:`_EXACT_JSON`, whose value travels as the
+JSON text the driver wrote and is parsed back by the same rules that wrote it.
+The :data:`_QUERYABLE_JSON` declaration is ``jsonb`` on PostgreSQL, whose number
+type is ``numeric``: a ``-0.0`` reads back ``0.0``, and a float of large
+magnitude reads back as a Python ``int`` of the same value rather than as a
+float.  So a JSON column that can hold a number is :data:`_EXACT_JSON` and a
+column holding text alone is :data:`_QUERYABLE_JSON`, and the choice is pinned
+per column by the schema tests.
+
+Negative zero is not a curiosity in these columns.  The navigator rounds a
+covariance to four decimals, so any term of smaller magnitude than that and
+negative sign is written as ``-0.0``; and a C-kernel is built from ``cmatrix``
+and ``cmatrix_original``, so one written from an index has to hold what one
+written from the same documents holds.
 
 A JSON column distinguishes *absent* from *empty*.  An absent value is SQL NULL,
 so ``WHERE cmatrix IS NOT NULL`` finds the rows that carry a matrix; without
@@ -63,8 +87,8 @@ Versioning
 
 ``schema_meta`` holds a single row carrying :data:`SCHEMA_VERSION`.  There are no
 migrations: ingest is cheap relative to navigation and entirely reproducible from
-the tree, so any change to the column set increments the version and the operator
-deletes the database and re-ingests.
+the tree, so the remedy for a column set an index does not hold is to delete the
+database and re-ingest.
 """
 
 from typing import Any
@@ -91,21 +115,30 @@ __all__ = [
     'UNKNOWN_STATUS',
 ]
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 1
 """Column-set version of the index.
 
-Incremented by any change to the column set of any table, and by any change to
-the constraints over it.  A database stamped with a different version is refused
-rather than migrated.
+Stamped into every index at creation and compared on every later open: a
+database stamped with a different version is refused rather than migrated,
+naming both versions, and the remedy it prescribes is to empty the database and
+ingest the tree again.
 """
 
 
+# TEXT on SQLite, json on PostgreSQL.  The value is stored as the JSON text the
+# driver wrote and parsed back by the same rules, so every number in it reads
+# back as the number that was written.  This is the declaration a column holding
+# a float takes, whatever else it holds beside it.  none_as_null makes an absent
+# value SQL NULL rather than the JSON value null, which is what any IS NULL test
+# over these columns reads, and what an exported CSV leaves as an empty cell.
+_EXACT_JSON = sqlalchemy.JSON(none_as_null=True)
+
 # TEXT on SQLite, jsonb on PostgreSQL.  jsonb is the type PostgreSQL's array and
 # object accessors operate on, so a direct-SQL query against the index can reach
-# inside these values without a cast.  none_as_null makes an absent value SQL
-# NULL rather than the JSON value null, which is what any IS NULL test over
-# these columns reads, and what an exported CSV leaves as an empty cell.
-_JSON = sqlalchemy.JSON(none_as_null=True).with_variant(
+# inside these values without a cast.  Its number type is numeric rather than a
+# double, so this declaration is for a column holding text and nothing else: it
+# would return a stored -0.0 as 0.0 and a large-magnitude float as an integer.
+_QUERYABLE_JSON = sqlalchemy.JSON(none_as_null=True).with_variant(
     postgresql.JSONB(none_as_null=True), 'postgresql'
 )
 
@@ -164,6 +197,18 @@ IMAGES = sqlalchemy.Table(
     # different corrections, and this is what says an exposure was one of them.
     sqlalchemy.Column('shutter_mode', sqlalchemy.Text),
     sqlalchemy.Column('image_path', sqlalchemy.Text),
+    # The two epochs a document can carry, each copied from the field it is
+    # named for and neither standing in for the other.  A navigated image's
+    # epoch comes from its observation and is recorded as provenance; an image
+    # that never loaded has no provenance, so the navigator records the epoch it
+    # read from the dataset index under the observation instead.  Which of the
+    # two a document carried is a fact about the run, and one column holding
+    # whichever was there could not say.
+    sqlalchemy.Column('provenance_image_et', sqlalchemy.Double),
+    sqlalchemy.Column('observation_image_et', sqlalchemy.Double),
+    # Whichever of the pair above the document had, provenance preferred, so
+    # that a filter on the epoch and a report of its range compare against one
+    # column and every image is placed in time by it.
     sqlalchemy.Column('image_et', sqlalchemy.Double),
     sqlalchemy.Column('image_date', sqlalchemy.Text),
     # Outcome.  status_error and status_reason are different vocabularies:
@@ -177,12 +222,12 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('offset_du', sqlalchemy.Double),
     sqlalchemy.Column('sigma_dv', sqlalchemy.Double),
     sqlalchemy.Column('sigma_du', sqlalchemy.Double),
-    # The 2x2 offset block only.  For a twist-fitted result the rotation row and
-    # column of the 3x3 matrix are deliberately not indexed; sigma_rotation_deg
-    # is the only twist uncertainty the index carries.
-    sqlalchemy.Column('covariance_vv', sqlalchemy.Double),
-    sqlalchemy.Column('covariance_vu', sqlalchemy.Double),
-    sqlalchemy.Column('covariance_uu', sqlalchemy.Double),
+    # The fused covariance as the document wrote it, square and row-major.  A
+    # twist-fitted result records 3x3, whose rotation row and column carry the
+    # offset-to-rotation cross terms; sigma_rotation_deg is one number and
+    # cannot stand in for them, so the matrix is stored whole rather than
+    # reduced to the offset block.
+    sqlalchemy.Column('covariance_px2', _EXACT_JSON),
     sqlalchemy.Column('sigma_along_unobservable_px', sqlalchemy.Double),
     sqlalchemy.Column('rotation_deg', sqlalchemy.Double),
     sqlalchemy.Column('sigma_rotation_deg', sqlalchemy.Double),
@@ -190,7 +235,11 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('confidence', sqlalchemy.Double),
     sqlalchemy.Column('confidence_rank', sqlalchemy.Text),
     sqlalchemy.Column('n_techniques', sqlalchemy.Integer, nullable=False),
-    sqlalchemy.Column('excluded_from_consensus', _JSON),
+    # In the order the document wrote them, whatever order that is.  A recorded
+    # list is stored as recorded, so a consumer comparing this column against
+    # the document it came from finds the same list; one wanting some other
+    # order applies it.
+    sqlalchemy.Column('excluded_from_consensus', _QUERYABLE_JSON),
     sqlalchemy.Column('image_class', sqlalchemy.Text),
     sqlalchemy.Column('noise_sigma', sqlalchemy.Double),
     sqlalchemy.Column('image_shape_v', sqlalchemy.Integer),
@@ -207,7 +256,7 @@ IMAGES = sqlalchemy.Table(
     # which originals the attitude it corrects was measured against.  An empty
     # list is a statement -- the run named none -- and NULL is a document with
     # no provenance block at all.
-    sqlalchemy.Column('spice_kernels', _JSON),
+    sqlalchemy.Column('spice_kernels', _QUERYABLE_JSON),
     # The numeric portion of the image name, so a range filter compares against a
     # column instead of calling a function.  BigInteger because an instrument
     # naming scheme is free to run past the 32-bit range a dialect may impose.
@@ -236,8 +285,8 @@ IMAGES = sqlalchemy.Table(
     sqlalchemy.Column('camera_frame', sqlalchemy.Text),
     sqlalchemy.Column('camera_frame_id', sqlalchemy.Integer),
     sqlalchemy.Column('ck_frame_id', sqlalchemy.Integer),
-    sqlalchemy.Column('cmatrix', _JSON),
-    sqlalchemy.Column('cmatrix_original', _JSON),
+    sqlalchemy.Column('cmatrix', _EXACT_JSON),
+    sqlalchemy.Column('cmatrix_original', _EXACT_JSON),
     # File provenance.  mtime_ns and size_bytes drive the incremental skip, and
     # both need 64 bits: a nanosecond epoch alone is far past the 32-bit range.
     sqlalchemy.Column('source_file', sqlalchemy.Text),
@@ -262,13 +311,17 @@ TECHNIQUES = sqlalchemy.Table(
     sqlalchemy.Column('technique_name', sqlalchemy.Text, nullable=False),
     sqlalchemy.Column('offset_dv', sqlalchemy.Double),
     sqlalchemy.Column('offset_du', sqlalchemy.Double),
-    sqlalchemy.Column('sigma_dv', sqlalchemy.Double),
-    sqlalchemy.Column('sigma_du', sqlalchemy.Double),
+    # As on images, and for the same reason: the technique's own covariance as
+    # it was written, square and row-major.  Storing the per-axis sigmas instead
+    # would lose the correlation between the axes, which is what the off-diagonal
+    # terms state and which no pair of sigmas can carry; a reader that wants the
+    # sigmas takes the square roots of the diagonal.
+    sqlalchemy.Column('covariance_px2', _EXACT_JSON),
     sqlalchemy.Column('confidence', sqlalchemy.Double),
     sqlalchemy.Column('spurious', sqlalchemy.Boolean, nullable=False),
     sqlalchemy.Column('at_edge', sqlalchemy.Boolean, nullable=False),
-    sqlalchemy.Column('source_names', _JSON),
-    sqlalchemy.Column('diagnostics', _JSON),
+    sqlalchemy.Column('source_names', _QUERYABLE_JSON),
+    sqlalchemy.Column('diagnostics', _EXACT_JSON),
     _image_foreign_key(),
     # One row per technique per image, enforced rather than assumed: a technique
     # reports once for an image, and a retried or duplicated ingest that inserted

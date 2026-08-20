@@ -47,6 +47,7 @@ stage a name lives in:
 
 from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.driver import INGEST_COMMIT_CHUNK_SIZE, ingest_metadata_files
+from spindoctor.cli.stats.ingest.store import UnwritableRowError
 from spindoctor.cli.stats.ingest.tasks import (
     INGEST_TASK_SHARE_SIZE,
     FanOut,
@@ -67,6 +68,7 @@ __all__ = [
     'TaskCompletion',
     'TaskResult',
     'TaskResults',
+    'UnwritableRowError',
     'complete_ingest_tasks',
     'fan_out_ingest_tasks',
     'ingest_metadata_files',
