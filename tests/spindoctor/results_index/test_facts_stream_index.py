@@ -28,6 +28,7 @@ from tests.spindoctor.results_index.conftest import (
     facts_from_index,
     facts_from_tree,
     facts_of,
+    named_facts_from_index,
     stub_of,
     technique_key,
 )
@@ -131,10 +132,7 @@ def test_a_selection_naming_stubs_is_answered_in_the_order_it_names_them(
         two_roots: The two ingested roots and their index.
     """
     named = Selection(stubs=(ERROR_STUB, SUCCESS_STUB, REFUSED_STUB))
-    with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = list(source.facts(named))
+    found = named_facts_from_index(two_roots, 'first', named)
     assert [stub_of(one) for one in found] == [ERROR_STUB, SUCCESS_STUB, REFUSED_STUB]
 
 
@@ -151,10 +149,7 @@ def test_a_selection_naming_stubs_reads_the_selected_roots_values(two_roots: Two
         two_roots: The two ingested roots and their index.
     """
     named = Selection(stubs=(SUCCESS_STUB,))
-    with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = list(source.facts(named))
+    found = named_facts_from_index(two_roots, 'first', named)
     assert facts_of(found, SUCCESS_STUB).image['covariance_px2'] == FIRST_VALUES.twist_covariance
 
 
@@ -176,10 +171,7 @@ def test_a_selection_naming_stubs_carries_the_child_rows(two_roots: TwoRoots) ->
         two_roots: The two ingested roots and their index.
     """
     named = Selection(stubs=(SUCCESS_STUB,))
-    with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = list(source.facts(named))
+    found = named_facts_from_index(two_roots, 'first', named)
     rows = sorted(facts_of(found, SUCCESS_STUB).techniques, key=technique_key)
     assert [technique_key(row) for row in rows] == ['BodyLimbNav', 'StarFieldFromCatalogNav']
 
@@ -196,11 +188,8 @@ def test_a_selection_naming_more_stubs_than_one_batch_answers_every_one(
         two_roots: The two ingested roots and their index.
     """
     named = tuple([ERROR_STUB, SUCCESS_STUB] * 40)
-    with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = [stub_of(one) for one in source.facts(Selection(stubs=named))]
-    assert found == list(named)
+    found = named_facts_from_index(two_roots, 'first', Selection(stubs=named))
+    assert [stub_of(one) for one in found] == list(named)
 
 
 def test_the_named_stubs_really_do_cross_a_batch_boundary() -> None:
@@ -215,11 +204,8 @@ def test_named_stubs_still_honour_the_mission(two_roots: TwoRoots) -> None:
         two_roots: The two ingested roots and their index.
     """
     named = Selection(stubs=(SUCCESS_STUB, OTHER_MISSION_STUB), instrument=MISSION)
-    with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = [stub_of(one) for one in source.facts(named)]
-    assert found == [SUCCESS_STUB]
+    found = named_facts_from_index(two_roots, 'first', named)
+    assert [stub_of(one) for one in found] == [SUCCESS_STUB]
 
 
 def test_named_stubs_still_honour_a_time_bound(two_roots: TwoRoots) -> None:
@@ -229,11 +215,8 @@ def test_named_stubs_still_honour_a_time_bound(two_roots: TwoRoots) -> None:
         two_roots: The two ingested roots and their index.
     """
     named = Selection(stubs=(SUCCESS_STUB, ERROR_STUB), start_et=FIRST_VALUES.midtime + 5.0)
-    with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = [stub_of(one) for one in source.facts(named)]
-    assert found == [ERROR_STUB]
+    found = named_facts_from_index(two_roots, 'first', named)
+    assert [stub_of(one) for one in found] == [ERROR_STUB]
 
 
 def test_a_named_stub_only_the_other_root_holds_yields_nothing(two_roots: TwoRoots) -> None:
@@ -247,10 +230,7 @@ def test_a_named_stub_only_the_other_root_holds_yields_nothing(two_roots: TwoRoo
     Parameters:
         two_roots: The two ingested roots and their index.
     """
-    with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = list(source.facts(Selection(stubs=(EXTRA_STUB,))))
+    found = named_facts_from_index(two_roots, 'first', Selection(stubs=(EXTRA_STUB,)))
     assert found == []
 
 
@@ -264,10 +244,8 @@ def test_a_named_stub_only_the_other_root_refused_yields_nothing(two_roots: TwoR
     Parameters:
         two_roots: The two ingested roots and their index.
     """
-    with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = list(source.facts(Selection(stubs=(OTHER_ROOT_REFUSED_STUB,))))
+    named = Selection(stubs=(OTHER_ROOT_REFUSED_STUB,))
+    found = named_facts_from_index(two_roots, 'first', named)
     assert found == []
 
 
@@ -277,10 +255,8 @@ def test_the_other_roots_refused_file_really_is_refused_there(two_roots: TwoRoot
     Parameters:
         two_roots: The two ingested roots and their index.
     """
-    with open_record_source(
-        [two_roots.second], results_db_url=two_roots.url, columns=COLUMNS
-    ) as source:
-        found = list(source.facts(Selection(stubs=(OTHER_ROOT_REFUSED_STUB,))))
+    named = Selection(stubs=(OTHER_ROOT_REFUSED_STUB,))
+    found = named_facts_from_index(two_roots, 'second', named)
     assert [type(one) for one in found] == [UnreadableFile]
 
 

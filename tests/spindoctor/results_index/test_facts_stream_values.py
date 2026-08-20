@@ -16,7 +16,6 @@ from tests.spindoctor.results_index.conftest import (
     BOTH_ROOTS,
     ERROR_STUB,
     FIRST_VALUES,
-    SECOND_VALUES,
     SUCCESS_STUB,
     UNLOADED_STUB,
     TwoRoots,
@@ -35,7 +34,7 @@ def test_a_twist_covariance_survives_whole(two_roots: TwoRoots, which: str) -> N
         two_roots: The two ingested roots and their index.
         which: The root to read.
     """
-    values = FIRST_VALUES if which == 'first' else SECOND_VALUES
+    values = two_roots.values(which)
     found = facts_of(facts_from_index(two_roots, which, Selection()), SUCCESS_STUB)
     assert found.image['covariance_px2'] == values.twist_covariance
 
@@ -48,7 +47,7 @@ def test_a_per_technique_covariance_survives_whole(two_roots: TwoRoots, which: s
         two_roots: The two ingested roots and their index.
         which: The root to read.
     """
-    values = FIRST_VALUES if which == 'first' else SECOND_VALUES
+    values = two_roots.values(which)
     found = facts_of(facts_from_index(two_roots, which, Selection()), SUCCESS_STUB)
     assert [row['covariance_px2'] for row in found.techniques] == [
         values.technique_covariance,
@@ -66,7 +65,7 @@ def test_an_exclusion_list_keeps_the_order_it_was_written_in(
         two_roots: The two ingested roots and their index.
         which: The root to read.
     """
-    values = FIRST_VALUES if which == 'first' else SECOND_VALUES
+    values = two_roots.values(which)
     found = facts_of(facts_from_index(two_roots, which, Selection()), SUCCESS_STUB)
     assert found.image['excluded_from_consensus'] == values.excluded
 
@@ -84,7 +83,7 @@ def test_each_roots_frame_id_comes_back_from_that_root(two_roots: TwoRoots, whic
         two_roots: The two ingested roots and their index.
         which: The root to read.
     """
-    values = FIRST_VALUES if which == 'first' else SECOND_VALUES
+    values = two_roots.values(which)
     found = facts_of(facts_from_index(two_roots, which, Selection()), SUCCESS_STUB)
     assert found.image['camera_frame_id'] == values.camera_frame_id
 
@@ -99,7 +98,7 @@ def test_an_image_that_never_loaded_records_its_epoch_under_the_observation(
         two_roots: The two ingested roots and their index.
         which: The root to read.
     """
-    values = FIRST_VALUES if which == 'first' else SECOND_VALUES
+    values = two_roots.values(which)
     found = facts_of(facts_from_index(two_roots, which, Selection()), UNLOADED_STUB)
     assert found.image['observation_image_et'] == values.observation_et
 

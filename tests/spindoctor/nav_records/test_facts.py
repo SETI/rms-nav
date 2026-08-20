@@ -113,14 +113,6 @@ def test_a_missing_top_level_offset_is_null() -> None:
     assert rows.image['offset_dv'] is None
 
 
-def test_a_non_finite_offset_is_null() -> None:
-    """A malformed offset is stored as no offset rather than as a NaN."""
-    document = metadata_document()
-    document['offset'] = [float('nan'), 1.0]
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['offset_dv'] is None
-
-
 def test_a_document_naming_a_status_keeps_it() -> None:
     """The control: the field the ladder reads survives into the column verbatim."""
     rows = facts_from_document(metadata_document(status='conflicted'), SOURCE)
@@ -305,23 +297,6 @@ def test_a_document_recording_no_observation_epoch_stores_none_for_it() -> None:
     assert rows.image['observation_image_et'] is None
 
 
-@pytest.mark.parametrize(
-    'recorded',
-    [float('nan'), float('inf')],
-    ids=['nan', 'infinity'],
-)
-def test_an_epoch_no_reader_could_use_is_stored_as_nothing(recorded: Any) -> None:
-    """Each epoch column is read the way every other recorded number is.
-
-    Parameters:
-        recorded: The recorded ``observation.image_et``.
-    """
-    document = metadata_document(image_et=None)
-    document['observation']['image_et'] = recorded
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['observation_image_et'] is None
-
-
 def test_the_rotation_columns_are_read() -> None:
     """A twist-fitted result records a rotation, and the index carries it."""
     document = metadata_document()
@@ -468,27 +443,12 @@ def test_a_corrected_pointing_matrix_is_stored_as_nine_floats() -> None:
     assert rows.image['cmatrix'] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 
 
-@pytest.mark.parametrize(
-    ('offset', 'expected'),
-    [
-        ([1.5, -2.5], (1.5, -2.5)),
-        ([float('nan'), 1.0], (None, None)),
-    ],
-    ids=['pair', 'non-finite'],
-)
-def test_the_offset_column_holds_what_a_reader_would_apply(
-    offset: Any, expected: tuple[float | None, float | None]
-) -> None:
-    """Exactly the pair a consumer applies, and nothing where it applies none.
-
-    Parameters:
-        offset: The recorded top-level offset.
-        expected: The ``(offset_dv, offset_du)`` the columns must hold.
-    """
+def test_the_offset_column_holds_what_a_reader_would_apply() -> None:
+    """Exactly the pair a consumer applies, in the order it applies it."""
     document = metadata_document()
-    document['offset'] = offset
+    document['offset'] = [1.5, -2.5]
     rows = facts_from_document(document, SOURCE)
-    assert (rows.image['offset_dv'], rows.image['offset_du']) == expected
+    assert (rows.image['offset_dv'], rows.image['offset_du']) == (1.5, -2.5)
 
 
 def test_a_document_with_no_pointing_stores_nulls() -> None:

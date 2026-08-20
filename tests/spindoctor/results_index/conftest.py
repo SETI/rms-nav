@@ -668,6 +668,19 @@ class TwoRoots:
         """
         return self.first if which == 'first' else self.second
 
+    def values(self, which: str) -> RootValues:
+        """Return the values one of the two roots was written to record.
+
+        Parameters:
+            which: ``'first'`` or ``'second'``.
+
+        Returns:
+            What every document under that root records, so a read parametrized
+            over both roots names the values it expects rather than repeating
+            the pairing at each call.
+        """
+        return FIRST_VALUES if which == 'first' else SECOND_VALUES
+
 
 @pytest.fixture
 def quiet_logger() -> pdslogger.PdsLogger:
@@ -804,6 +817,27 @@ def facts_from_index(
     """
     with open_record_source([held.root(which)], results_db_url=held.url, columns=COLUMNS) as source:
         return _in_order(source.facts(selection))
+
+
+def named_facts_from_index(
+    held: TwoRoots, which: str, selection: Selection
+) -> list[ImageFacts | UnreadableFile]:
+    """Read one root's facts out of the index for a selection naming its stubs.
+
+    Sorted by nothing, unlike :func:`facts_from_index`: a read naming its own
+    stubs is answered in the order it named them, and a sort of what came back
+    is the one thing that could hide a read that was not.
+
+    Parameters:
+        held: The two roots and their index.
+        which: Which root to read.
+        selection: What to read, naming the stubs to read.
+
+    Returns:
+        What the stream yielded, in the order it yielded it.
+    """
+    with open_record_source([held.root(which)], results_db_url=held.url, columns=COLUMNS) as source:
+        return list(source.facts(selection))
 
 
 def facts_of(found: list[ImageFacts | UnreadableFile], stub: str) -> ImageFacts:

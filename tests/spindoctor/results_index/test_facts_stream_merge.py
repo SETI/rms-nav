@@ -15,7 +15,6 @@ gives every image after it an empty list indistinguishable from an image with no
 rows of its own.
 """
 
-import importlib
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -26,9 +25,12 @@ import sqlalchemy
 from tests.spindoctor.conftest import index_url
 from tests.spindoctor.results_index.conftest import (
     COLUMNS,
+    ERROR_STUB,
+    FAILURE_STUB,
     FIRST_VALUES,
     MISSION,
     SUCCESS_STUB,
+    UNLOADED_STUB,
     TwoRoots,
     child_name,
     facts_from_index,
@@ -38,6 +40,12 @@ from tests.spindoctor.results_index.conftest import (
     technique_row,
 )
 
+# The submodule is imported under its own qualified name, and the one test that
+# replaces a statement inside it patches through that name.  Reading it off the
+# package instead would bind whatever attribute the package holds, and a package
+# free to re-export a function of the same name would hand the patch a function
+# object rather than the module whose attribute the merge reads.
+import spindoctor.results_index.facts_stream
 from spindoctor.nav_records import ImageFacts, Selection, normalize_root_url
 from spindoctor.results_index import (
     FEATURE_SOURCES,
@@ -47,15 +55,6 @@ from spindoctor.results_index import (
     open_index,
     open_record_source,
 )
-
-facts_stream_module = importlib.import_module('spindoctor.results_index.facts_stream')
-"""The module the merge lives in, which one test replaces a statement inside.
-
-Bound by importing the submodule rather than by reading the name off the
-package: the package is free to re-export the function of the same name, and a
-patch aimed at the name would then be aimed at a function object instead of at
-the module whose attribute the merge reads.
-"""
 
 REVERSED_STUBS = ('VOL/B_CALIB', 'VOL/A_CALIB')
 """Two images, written in the order a sorted read does not return them in."""
@@ -331,7 +330,11 @@ def test_a_child_row_belonging_to_no_yielded_image_fails_the_read(
         two_roots: The two ingested roots and their index.
         monkeypatch: Fixture the unrestricted child read is installed through.
     """
-    monkeypatch.setattr(facts_stream_module, '_child_statement', _child_statement_reading_every_row)
+    monkeypatch.setattr(
+        spindoctor.results_index.facts_stream,
+        '_child_statement',
+        _child_statement_reading_every_row,
+    )
     with (
         open_record_source(
             [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
@@ -344,11 +347,19 @@ def test_a_child_row_belonging_to_no_yielded_image_fails_the_read(
 def test_a_read_whose_child_rows_are_all_claimed_does_not_fail(two_roots: TwoRoots) -> None:
     """Without which the guard above would be free to refuse every pass.
 
+    Named rather than counted: a pass that raised nothing while yielding the
+    wrong images would satisfy a check that the stream was not empty.
+
     Parameters:
         two_roots: The two ingested roots and their index.
     """
     found = facts_from_index(two_roots, 'first', Selection(instrument=MISSION))
-    assert [stub_of(one) for one in found if isinstance(one, ImageFacts)] != []
+    assert [stub_of(one) for one in found if isinstance(one, ImageFacts)] == [
+        SUCCESS_STUB,
+        FAILURE_STUB,
+        ERROR_STUB,
+        UNLOADED_STUB,
+    ]
 
 
 def test_the_fixture_documents_are_what_the_ingest_read(two_roots: TwoRoots) -> None:

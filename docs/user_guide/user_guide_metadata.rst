@@ -43,6 +43,15 @@ zero-variance certainty, the opposite of the truth). A value equal to the
 sentinel therefore means "unbounded / no information", never a measured
 billion of anything.
 
+Two numbers reach the file without passing through the curator, and each is
+settled where it enters instead. The top-level ``offset`` is written straight
+off :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`, whose
+construction refuses a non-finite offset outright -- an offset is a position,
+and the value would be this code's arithmetic gone wrong rather than something
+to record. ``observation.image_et`` is read out of a dataset index this project
+did not write, so a value that is not a finite number is read as no epoch at all
+and the field is simply absent.
+
 The offset convention
 ---------------------
 
@@ -215,9 +224,11 @@ The observation block
      - The image epoch in TDB seconds past J2000, as the dataset index
        recorded it, unrounded. Present only on load-error documents whose
        index supplied it, so an image that failed for want of a SPICE
-       kernel is still placed in time. On a navigated document the epoch
-       lives in ``navigation_result.provenance.image_et`` (and, exactly,
-       in ``navigation_result.times``) instead.
+       kernel is still placed in time. Absent when the index value is not
+       a finite number, since such a value places the image nowhere. On a
+       navigated document the epoch lives in
+       ``navigation_result.provenance.image_et`` (and, exactly, in
+       ``navigation_result.times``) instead.
    * - ``image_shape``
      - array
      - ``[v, u]`` pixel dimensions of the loaded image data, as two

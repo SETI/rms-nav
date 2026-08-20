@@ -44,7 +44,8 @@ def _feature_key(row: dict[str, Any]) -> tuple[str, str, str]:
         row: The row.
 
     Returns:
-        The feature type and the source that offered it.
+        The feature type, the model that offered it, and the name that model
+        offered it under.
     """
     return str(row['feature_type']), str(row['source_model']), str(row['source_name'])
 

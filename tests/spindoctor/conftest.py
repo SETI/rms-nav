@@ -162,16 +162,17 @@ def metadata_document(
         observation['camera'] = camera
     if image_shape is not None:
         observation['image_shape'] = image_shape
+    entries = [] if per_technique is None else per_technique
     navigation_result: dict[str, Any] = {
         'status': status,
         'offset_px': offset,
-        'sigma_px': [0.1, 0.2] if offset else None,
+        'sigma_px': [0.1, 0.2] if offset is not None else None,
         'confidence': confidence,
         'confidence_rank': confidence_rank,
-        'covariance_px2': [[0.01, 0.0], [0.0, 0.04]] if offset else None,
-        'techniques_used': sorted({t['technique_name'] for t in per_technique or []}),
-        'excluded_from_consensus': excluded or [],
-        'per_technique': per_technique or [],
+        'covariance_px2': [[0.01, 0.0], [0.0, 0.04]] if offset is not None else None,
+        'techniques_used': sorted({t['technique_name'] for t in entries}),
+        'excluded_from_consensus': [] if excluded is None else excluded,
+        'per_technique': entries,
         'feature_inventory': [
             {
                 'feature_id': 'body_disc:IAPETUS',

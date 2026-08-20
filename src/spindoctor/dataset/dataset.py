@@ -9,6 +9,7 @@ from filecache import FCPath
 
 from spindoctor.config import MAIN_LOGGER, Config, LogRole
 from spindoctor.support.nav_base import NavBase
+from spindoctor.support.nav_record import finite_float
 
 
 @dataclass
@@ -24,8 +25,8 @@ class ImageFile:
             from the index row when the file was enumerated.  Known without
             SPICE and without opening the image, so it is still available
             for an image whose load fails.  None when the image was not
-            enumerated from an index, or its index row carries no readable
-            time.
+            enumerated from an index, its index row carries no readable
+            time, or the time it carries is not a finite number.
         camera: Optional name of the camera that took the image, read from
             the index row when the file was enumerated.  Available on the
             same terms as ``image_et``, and uses the same names as
@@ -51,6 +52,22 @@ class ImageFile:
     image_url_resolver: Callable[[FCPath, Path], FCPath | None] | None = None
     _image_file_path: Path | None = None
     _label_file_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        """Settle the enumerated epoch to one that can place the image in time.
+
+        The epoch comes out of an index file this project did not write, so a
+        value no reader could use is a fact about someone else's data rather
+        than a defect here, and refusing it would fail a whole enumeration
+        over one row.  ``None`` is already what this field says when no epoch
+        is known, so a non-finite value reads as that: every comparison
+        against a NaN is False, so a NaN epoch would fall inside every time
+        range at once, and an infinite one inside a half-bounded range it can
+        have no business in.  Settling it here means the epoch is finite for
+        everything that reads it -- the time filters, the metadata document a
+        load error writes, and the index built from that document.
+        """
+        self.image_et = finite_float(self.image_et)
 
     @property
     def image_file_name(self) -> str:

@@ -425,9 +425,9 @@ and its holder empties it and ingests the tree again.
    commit. Increment it again for a second change in the same branch rather
    than reusing the bump: an index built from the intermediate state would
    otherwise pass the gate and then fail on a column that is not there.
-3. Fill it in ``spindoctor.nav_records.facts``, reading the document through
-   the accessors in ``spindoctor.support.nav_record`` that the consumers read
-   it through. The invariant is that a record rebuilt from the
+3. Fill it in :mod:`spindoctor.nav_records.facts`, reading the document
+   through the accessors in :mod:`spindoctor.support.nav_record` that the
+   consumers read it through. The invariant is that a record rebuilt from the
    columns classifies exactly as its document does; a second set of rules in
    the store is a second reader of the record, and the two drift.
 4. Sort it into one of the three groups in
