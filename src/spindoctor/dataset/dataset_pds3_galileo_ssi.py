@@ -21,6 +21,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
     _MAX_VOL = 23
     _ALL_VOLUME_NAMES = tuple(f'GO_{x:04d}' for x in range(_MIN_VOL, _MAX_VOL + 1))
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
+    _INDEX_TIME_COLUMNS = ('IMAGE_TIME',)
     _INDEX_CAMERA_COLUMNS = ('INSTRUMENT_ID',)
     _INDEX_CAMERA_MAP: ClassVar[dict[str, str]] = {'SSI': 'SSI'}
     _VOLUMES_DIR_NAME = 'volumes'

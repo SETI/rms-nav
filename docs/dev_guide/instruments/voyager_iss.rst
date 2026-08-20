@@ -93,7 +93,8 @@ LID encodes the camera and a malformed LID must never reach a PDS4 label. The
 ``spacecraft_digit`` property re-reads ``LAB02`` rather than caching it, so any
 consumer that needs the spacecraft gets the same validation.
 
-**Index columns.** ``_INDEX_COLUMNS`` is ``FILE_SPECIFICATION_NAME``.
+**Index columns.** ``_INDEX_COLUMNS`` is ``FILE_SPECIFICATION_NAME`` and
+``_INDEX_TIME_COLUMNS`` is ``('IMAGE_TIME',)``.
 
 ``_INDEX_CAMERA_COLUMNS`` is ``('INSTRUMENT_NAME',)``, and this is the one
 instrument that does not read ``INSTRUMENT_ID``: the Voyager indexes carry no

@@ -254,6 +254,7 @@ def navigate_image_files(
                     exc,
                     logger=logger,
                     instrument=instrument,
+                    image_et=image_file.image_et,
                     camera=image_file.camera,
                     timing=build_timing_section(run_start, datetime.now(UTC)),
                 )
@@ -301,16 +302,16 @@ def _metadata_for_load_error(
     *,
     logger: Any,
     instrument: str,
+    image_et: float | None,
     camera: str | None,
     timing: dict[str, Any],
 ) -> dict[str, Any]:
     """Build a metadata dict for an image-load or kernel-coverage failure.
 
-    No image shape is recorded because the load never produced pixel data,
-    and no epoch because that comes from the observation the load never
-    built.  The camera is recorded when the caller could read it from the
-    index, so an image that failed for want of a SPICE kernel is still
-    attributed to its camera.
+    No image shape is recorded because the load never produced pixel data.
+    The epoch and camera are recorded when the caller could read them from
+    the index, so an image that failed for want of a SPICE kernel is still
+    placed in time and attributed to its camera.
     """
     message = str(exc)
     if any(hint in message for hint in _SPICE_DATA_HINTS):
@@ -324,6 +325,8 @@ def _metadata_for_load_error(
         'image_name': image_name,
         'instrument': instrument,
     }
+    if image_et is not None:
+        observation['image_et'] = image_et
     if camera is not None:
         observation['camera'] = camera
     return {

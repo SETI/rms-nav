@@ -745,15 +745,19 @@ pair with ``ON DELETE CASCADE``.
      - DOUBLE
      - Observation midtime as the navigation recorded it, TDB seconds past
        J2000, from ``navigation_result.provenance.image_et``. NULL for an
-       image that never loaded, which built no observation and so has no
-       provenance block.
+       image that never loaded, which has no provenance block.
+   * - ``observation_image_et``
+     - DOUBLE
+     - Observation midtime as the navigator read it out of the PDS3 index,
+       from ``observation.image_et``. NULL where the document records none.
+       Which of these two columns holds a value therefore says whether the
+       image loaded.
    * - ``image_et``
      - DOUBLE
-     - The same epoch under the name a date filter and a range report ask
-       for it by, alongside the date rendered from it. NULL wherever
-       ``provenance_image_et`` is, so an image whose navigation died for
-       want of a SPICE kernel is placed nowhere in time and is passed over
-       by any date bound and by the reported time span.
+     - Whichever of the two above the document carried, ``provenance``
+       preferred: the one column a date filter and a range report compare
+       against. An image whose navigation died for want of a SPICE kernel is
+       still placed in time by it.
    * - ``image_date``
      - TEXT
      - UTC calendar date ``YYYY-MM-DD`` derived from ``image_et``; drives

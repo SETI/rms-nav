@@ -342,8 +342,9 @@ ERROR_STUB = 'VOL2/N1454725801_1_CALIB'
 UNLOADED_STUB = 'VOL2/N1454725802_1_CALIB'
 """An image that never loaded: no navigation result, and no outcome named.
 
-It records no epoch either, because an epoch is the midtime of the observation
-the load never built, so it is the shape that leaves the epoch columns NULL.
+Its epoch is under ``observation`` rather than under the provenance a run that
+loaded the image would have written, which is the pair of columns that says
+which of the two a document carried.
 """
 
 REFUSED_STUB = 'VOL1/junk'
@@ -405,6 +406,8 @@ class RootValues:
             is not their sorted order, so a storage that sorted them is caught.
         camera_frame_id: The frame identifier the navigated image records, which
             the two roots record differently.
+        observation_et: The epoch the image that never loaded records under its
+            observation.
         midtime: The exposure midtime the navigated image records.
     """
 
@@ -413,6 +416,7 @@ class RootValues:
     technique_covariance: list[list[float]]
     excluded: list[str]
     camera_frame_id: int
+    observation_et: float
     midtime: float
 
 
@@ -426,6 +430,7 @@ FIRST_VALUES = RootValues(
     technique_covariance=[[0.11, 0.012], [0.012, 0.13]],
     excluded=['StarRefineNav', 'BodyLimbNav', 'RingEdgeNav'],
     camera_frame_id=-82360,
+    observation_et=5000.0,
     midtime=100.0,
 )
 """What the first root's documents record."""
@@ -440,6 +445,7 @@ SECOND_VALUES = RootValues(
     technique_covariance=[[0.21, 0.022], [0.022, 0.23]],
     excluded=['RingEdgeNav', 'StarRefineNav', 'BodyLimbNav'],
     camera_frame_id=-84001,
+    observation_et=6000.0,
     midtime=300.0,
 )
 """What the second root's record instead, so the two are told apart by value."""
@@ -552,17 +558,22 @@ def _error_document(values: RootValues) -> dict[str, Any]:
     )
 
 
-def _unloaded_document() -> dict[str, Any]:
+def _unloaded_document(values: RootValues) -> dict[str, Any]:
     """Build the document of an image that never loaded.
 
+    Parameters:
+        values: The root's differing values, for the observation epoch.
+
     Returns:
-        The document, which names no outcome and carries no navigation result,
-        so it records neither an epoch nor anything a technique produced.
+        The document, which names no outcome and carries no navigation result:
+        its epoch is the one the navigator read out of the dataset index, and
+        that is recorded under the observation rather than as provenance.
     """
     return {
         'observation': {
             'image_name': 'N1454725802_1.IMG',
             'instrument': MISSION,
+            'image_et': values.observation_et,
             'image_path': '/holdings/N1454725802_1.IMG',
         }
     }
@@ -618,7 +629,7 @@ def _write_root(tmp_path: Path, name: str, values: RootValues, *, extra: bool) -
     write_metadata(root, SUCCESS_STUB, _success_document(values))
     write_metadata(root, FAILURE_STUB, _failure_document(values))
     write_metadata(root, ERROR_STUB, _error_document(values))
-    write_metadata(root, UNLOADED_STUB, _unloaded_document())
+    write_metadata(root, UNLOADED_STUB, _unloaded_document(values))
     _write_text(root, TORN_STUB, TORN_DOCUMENT)
     _write_text(root, NESTED_STUB, NESTED_DOCUMENT)
     if extra:

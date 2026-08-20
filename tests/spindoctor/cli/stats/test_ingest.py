@@ -176,35 +176,37 @@ def test_each_roots_covariance_matrix_survives_the_database(
     assert stored == [TWO_ROOT_COVARIANCE, [[0.25, 0.0], [0.0, 0.25]]]
 
 
-def test_each_roots_epoch_survives_the_database(
+def test_each_roots_provenance_epoch_survives_the_database(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """One root navigated the image; the other never loaded it.
 
-    Whether a document carried an epoch at all is the difference between the
-    two roots, so a read that answered from the wrong one reports an image that
-    never loaded as one that did.
+    Which of the two epoch fields a document carried is the difference between
+    the two roots, so a read that answered from the wrong one reports an image
+    that never loaded as one that did.
     """
     navigated = metadata_document(image_et=170002800.0)
     unloaded = metadata_document(status='error', status_error='missing_spice_data', offset=None)
     unloaded['navigation_result'].pop('provenance')
+    unloaded['observation']['image_et'] = 170009999.0
     stored = _two_roots_holding_one_stub(
         tmp_path, (navigated, unloaded), IMAGES.c.provenance_image_et, logger=quiet_logger
     )
     assert stored == [170002800.0, None]
 
 
-def test_each_roots_derived_epoch_survives_the_database(
+def test_each_roots_observation_epoch_survives_the_database(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The column a date filter compares against, told apart the same way."""
+    """The other half of the pair, which the same two documents disagree on."""
     navigated = metadata_document(image_et=170002800.0)
     unloaded = metadata_document(status='error', status_error='missing_spice_data', offset=None)
     unloaded['navigation_result'].pop('provenance')
+    unloaded['observation']['image_et'] = 170009999.0
     stored = _two_roots_holding_one_stub(
-        tmp_path, (navigated, unloaded), IMAGES.c.image_et, logger=quiet_logger
+        tmp_path, (navigated, unloaded), IMAGES.c.observation_image_et, logger=quiet_logger
     )
-    assert stored == [170002800.0, None]
+    assert stored == [None, 170009999.0]
 
 
 def test_each_roots_exclusion_order_survives_the_database(

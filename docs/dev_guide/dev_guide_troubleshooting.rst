@@ -51,12 +51,12 @@ classification is the top-level ``status_error`` and the evidence is
 
 ``missing_spice_data``
     The load raised a SPICE coverage error (``CKINSUFFDATA``,
-    ``SPKINSUFFDATA``, or ``NOFRAMECONNECT``). The document records no epoch
-    of its own, since an epoch is the midtime of the observation the load
-    never built, but the exception text names both the frame and the epoch.
-    Check that the kernel set covers that epoch: attitude gaps in
-    reconstructed C-kernels are the common case, and an epoch outside every
-    loaded CK's coverage bounds cannot be navigated at all.
+    ``SPKINSUFFDATA``, or ``NOFRAMECONNECT``). The exception text names the
+    frame and the epoch; ``observation.image_et`` places the image in time
+    even though it never opened. Check that the kernel set covers that
+    epoch: attitude gaps in reconstructed C-kernels are the common case, and
+    an epoch outside every loaded CK's coverage bounds cannot be navigated
+    at all.
 
 ``image_read_error``
     Any other load failure -- a truncated, corrupt, or absent file. The

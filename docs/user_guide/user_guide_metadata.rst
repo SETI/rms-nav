@@ -43,12 +43,14 @@ zero-variance certainty, the opposite of the truth). A value equal to the
 sentinel therefore means "unbounded / no information", never a measured
 billion of anything.
 
-One number reaches the file without passing through the curator, and is
+Two numbers reach the file without passing through the curator, and each is
 settled where it enters instead. The top-level ``offset`` is written straight
 off :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`, whose
 construction refuses a non-finite offset outright -- an offset is a position,
 and the value would be this code's arithmetic gone wrong rather than something
-to record.
+to record. ``observation.image_et`` is read out of a dataset index this project
+did not write, so a value that is not a finite number is read as no epoch at all
+and the field is simply absent.
 
 The offset convention
 ---------------------
@@ -217,6 +219,16 @@ The observation block
        attitude). Omitted for instruments whose labels carry no such field
        (Voyager ISS, Galileo SSI, New Horizons LORRI) and on load-error
        documents.
+   * - ``image_et``
+     - number
+     - The image epoch in TDB seconds past J2000, as the dataset index
+       recorded it, unrounded. Present only on load-error documents whose
+       index supplied it, so an image that failed for want of a SPICE
+       kernel is still placed in time. Absent when the index value is not
+       a finite number, since such a value places the image nowhere. On a
+       navigated document the epoch lives in
+       ``navigation_result.provenance.image_et`` (and, exactly, in
+       ``navigation_result.times``) instead.
    * - ``image_shape``
      - array
      - ``[v, u]`` pixel dimensions of the loaded image data, as two
@@ -754,7 +766,7 @@ Rounding summary
    * - ``provenance.image_et``
      - 6 decimals
    * - Top-level ``offset`` and ``confidence``; everything in ``pointing``
-       and ``times``; the ``timing`` block
+       and ``times``; ``observation.image_et``; the ``timing`` block
      - Exact (full float precision, unrounded)
 
 The rounding constants are chosen tighter than the per-image tolerance
@@ -1139,10 +1151,10 @@ Load error
 ----------
 
 A Cassini frame whose epoch falls in a C-kernel coverage gap. The image was
-never opened, so there is no ``navigation_result``, no ``image_shape`` and no
-epoch anywhere -- an epoch is the observation's midtime, and no observation was
-built. ``camera`` comes from the dataset index, which needs no SPICE. The
-exception text is shortened here; the real file carries the full SPICE message.
+never opened, so there is no ``navigation_result`` and no ``image_shape``;
+``camera`` and ``image_et`` come from the dataset index, which needs no SPICE.
+The exception text is shortened here; the real file carries the full SPICE
+message.
 
 .. code-block:: json
 
@@ -1154,6 +1166,7 @@ exception text is shortened here; the real file carries the full SPICE message.
         "image_path": "/holdings/calibrated/COISS_2xxx/COISS_2028/data/1546716727_1546797712/N1546730528_4_CALIB.IMG",
         "image_name": "N1546730528_4_CALIB.IMG",
         "instrument": "coiss",
+        "image_et": 221309426.8040615,
         "camera": "NAC"
       },
       "timing": {

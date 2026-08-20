@@ -81,6 +81,8 @@ Label and index dependencies
 ``isswa`` and a malformed LID must never reach a PDS4 label.
 
 **Index columns.** ``_INDEX_COLUMNS`` is ``FILE_SPECIFICATION_NAME``.
+``_INDEX_TIME_COLUMNS`` is ``('IMAGE_MID_TIME', 'IMAGE_TIME', 'START_TIME')``,
+tried in that order -- the only instrument with more than one candidate.
 ``_INDEX_CAMERA_COLUMNS`` is ``('INSTRUMENT_ID',)`` and ``_INDEX_CAMERA_MAP``
 is ``{'ISSNA': 'NAC', 'ISSWA': 'WAC'}``, whose values are exactly what
 ``ObsCassiniISS.camera`` returns. The BOTSIM grouping asks for four more
