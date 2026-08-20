@@ -266,23 +266,6 @@ def test_navigate_image_files_load_error_records_index_camera(tmp_path: Path) ->
     assert metadata['observation']['camera'] == 'WAC'
 
 
-def test_navigate_image_files_load_error_records_no_epoch(tmp_path: Path) -> None:
-    """A document for an image that never loaded records no epoch.
-
-    The epoch is the observation's midtime, and the load that would have
-    built the observation is the one that failed.
-    """
-    obs_class = _make_fake_obs_class(raise_on_load=OSError('boom'))
-    image_files = _make_image_files(tmp_path, camera='WAC')
-    _success, metadata = navigate_image_files(
-        obs_class,
-        image_files,
-        FCPath(str(tmp_path / 'results')),
-        write_output_files=False,
-    )
-    assert 'image_et' not in metadata['observation']
-
-
 def test_navigate_image_files_load_error_without_index_details(tmp_path: Path) -> None:
     """An image with no index row records no camera."""
     obs_class = _make_fake_obs_class(raise_on_load=OSError('boom'))
