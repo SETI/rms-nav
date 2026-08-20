@@ -96,9 +96,9 @@
       "stop_et": -659998999.28,
       "midtime_et": -659999000.0,
       "exposure_s": 1.44,
-      "sclk_start": "1/13854:60:001",
-      "sclk_midtime": "1/13854:60:001",
-      "sclk_stop": "1/13854:60:002"
+      "sclk_start": "1/13854:59:777",
+      "sclk_midtime": "1/13854:59:789",
+      "sclk_stop": "1/13855:00:001"
     }
   },
   "timing": {
