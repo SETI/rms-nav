@@ -197,18 +197,11 @@ IMAGES = sqlalchemy.Table(
     # different corrections, and this is what says an exposure was one of them.
     sqlalchemy.Column('shutter_mode', sqlalchemy.Text),
     sqlalchemy.Column('image_path', sqlalchemy.Text),
-    # The two epochs a document can carry, each copied from the field it is
-    # named for and neither standing in for the other.  A navigated image's
-    # epoch comes from its observation and is recorded as provenance; an image
-    # that never loaded has no provenance, so the navigator records the epoch it
-    # read from the dataset index under the observation instead.  Which of the
-    # two a document carried is a fact about the run, and one column holding
-    # whichever was there could not say.
-    sqlalchemy.Column('provenance_image_et', sqlalchemy.Double),
-    sqlalchemy.Column('observation_image_et', sqlalchemy.Double),
-    # Whichever of the pair above the document had, provenance preferred, so
-    # that a filter on the epoch and a report of its range compare against one
-    # column and every image is placed in time by it.
+    # A copy of the epoch the document recorded as provenance, which is the
+    # observation's midtime.  The report aggregates it into the time span it
+    # gives per instrument; a date bound compares the calendar date beside it
+    # rather than this column.  NULL for an image that never loaded, since the
+    # epoch comes from the observation the load never built.
     sqlalchemy.Column('image_et', sqlalchemy.Double),
     sqlalchemy.Column('image_date', sqlalchemy.Text),
     # Outcome.  status_error and status_reason are different vocabularies:

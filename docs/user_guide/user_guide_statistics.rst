@@ -40,11 +40,13 @@ environment variable.
 [--suspect-fraction F] [--csv]`` writes ``report.md`` and its charts into the
 output directory. All filters combine and apply to every section; dates are
 inclusive UTC image dates, so a single day's run is ``--start-date D
---end-date D``. ``--min-image`` / ``--max-image`` bound the numeric portion of
-the image name (the first digit run in the basename, so ``--min-image
-N1454725799`` and ``--min-image 1454725799`` are equivalent); both bounds are
-inclusive and either may be given alone. The same inputs always produce the same
-numbers and the same charts.
+--end-date D``. An image records its epoch as the midtime of the observation
+that was loaded for it, so an image whose load failed has no date and either
+bound passes it over. ``--min-image`` / ``--max-image`` bound the numeric
+portion of the image name (the first digit run in the basename, so
+``--min-image N1454725799`` and ``--min-image 1454725799`` are equivalent);
+both bounds are inclusive and either may be given alone. The same inputs
+always produce the same numbers and the same charts.
 
 ``--root`` restricts the report to one ingested navigation-results root and may
 be given more than once; with none given the report covers every root the index

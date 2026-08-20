@@ -62,9 +62,9 @@ schema is deliberately sorted into one of the three rather than quietly missed:
 
 * :data:`IDENTITY_COLUMNS` say where the document is, not what it said.
 * :data:`DERIVED_COLUMNS` are computed by the ingest from a document rather than
-  copied out of one field of it -- an epoch read from whichever of two fields
-  the document had, a date rendered from that epoch, a count of a list -- so no
-  field of a record is what they came from.
+  copied out of one field of it -- a date rendered from the recorded epoch, a
+  number read out of an image name, a count of a list -- so no field of a record
+  is what they came from.
 
 The forward direction, document to row, is
 :func:`~spindoctor.nav_records.facts.facts_from_document`, which reads each
@@ -126,7 +126,6 @@ RECORD_FIELDS: tuple[RecordField, ...] = (
     RecordField(('camera',), _OBSERVATION, 'camera'),
     RecordField(('shutter_mode',), _OBSERVATION, 'shutter_mode'),
     RecordField(('image_path',), _OBSERVATION, 'image_path'),
-    RecordField(('observation_image_et',), _OBSERVATION, 'image_et'),
     RecordField(('image_shape_v', 'image_shape_u'), _OBSERVATION, 'image_shape'),
     RecordField(('status',), (), 'status', sentinel=UNKNOWN_STATUS),
     RecordField(('status_error',), (), 'status_error'),
@@ -142,7 +141,7 @@ RECORD_FIELDS: tuple[RecordField, ...] = (
     RecordField(('excluded_from_consensus',), _RESULT, 'excluded_from_consensus'),
     RecordField(('image_class',), _CLASSIFIER, 'class'),
     RecordField(('noise_sigma',), _CLASSIFIER, 'noise_sigma'),
-    RecordField(('provenance_image_et',), _PROVENANCE, 'image_et'),
+    RecordField(('image_et',), _PROVENANCE, 'image_et'),
     RecordField(('config_hash',), _PROVENANCE, 'config_hash'),
     RecordField(('git_sha',), _PROVENANCE, 'spindoctor_git_sha'),
     RecordField(('pipeline_run',), _PROVENANCE, 'pipeline_run_iso8601'),
@@ -188,7 +187,6 @@ a later pass skip a document it has already read.
 DERIVED_COLUMNS = frozenset(
     {
         'subtree',
-        'image_et',
         'image_date',
         'image_number',
         'n_techniques',
@@ -197,9 +195,7 @@ DERIVED_COLUMNS = frozenset(
 """Columns the ingest computes from a document rather than copying out of it.
 
 ``subtree`` is the first path segment of the stub, which the walk knows and no
-document states; ``image_et`` holds whichever of the two recorded epochs the
-document had, so no one field is what it came from and the two fields have
-columns of their own; ``image_date`` is rendered from that epoch and
+document states; ``image_date`` is rendered from the recorded epoch and
 ``image_number`` from the image name; and ``n_techniques`` counts a list.  A
 rebuild that put any of them back would be inventing a field the document did
 not have, so each is read as a column by whatever wants it and none is a record

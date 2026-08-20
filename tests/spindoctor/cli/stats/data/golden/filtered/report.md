@@ -6,7 +6,7 @@ Filters: instrument = coiss, image number >= 1294561202, image number <= 1294563
 
 | instrument | images | first image | last image | first avail. date | last avail. date |
 |---|---|---|---|---|---|
-| coiss | 4 (100.0%) | N1294561202 | N1294563000 | 2005-05-22T02:12:16 | 2005-05-22T02:42:16 |
+| coiss | 4 (100.0%) | N1294561202 | N1294563000 | 2005-05-22T02:12:16 | 2005-05-22T02:25:36 |
 
 Total images: 4
 

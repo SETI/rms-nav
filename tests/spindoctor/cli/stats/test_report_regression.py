@@ -15,6 +15,11 @@ suspect offset, an ensemble exclusion, a spurious technique, gated features, and
 an image whose search limit cannot be resolved.  A diff here is a defect, not
 drift.
 
+The fatal error is the one image of the tree that records no epoch: an epoch is
+the midtime of an observation, and that image's load failed before one existed.
+So its ``image_et`` and ``image_date`` cells are empty, and the ``filtered``
+variant's coiss time span ends at the image before it rather than at it.
+
 Two documented differences are the point of the change rather than a regression
 in it, and each is asserted for rather than waved past:
 
@@ -224,8 +229,6 @@ _CSV_HEADER = (
     'camera',
     'shutter_mode',
     'image_path',
-    'provenance_image_et',
-    'observation_image_et',
     'image_et',
     'image_date',
     'status',

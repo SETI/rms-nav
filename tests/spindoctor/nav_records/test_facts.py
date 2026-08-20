@@ -249,52 +249,41 @@ def test_a_techniques_covariance_is_stored_whole() -> None:
     assert rows.techniques[0]['covariance_px2'] == TWIST_COVARIANCE
 
 
-def test_the_provenance_epoch_is_stored_in_a_column_of_its_own() -> None:
-    """Which of the two fields an epoch came from is a fact about the run."""
-    document = metadata_document(image_et=170002800.0)
-    document['observation']['image_et'] = 170009999.0
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['provenance_image_et'] == 170002800.0
+def test_the_recorded_epoch_is_copied_out_of_the_provenance_block() -> None:
+    """The one field an image's epoch comes from, copied as the document wrote it.
 
-
-def test_the_observation_epoch_is_stored_in_a_column_of_its_own() -> None:
-    """Recorded even when the provenance epoch is there to be preferred."""
-    document = metadata_document(image_et=170002800.0)
-    document['observation']['image_et'] = 170009999.0
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['observation_image_et'] == 170009999.0
-
-
-def test_the_derived_epoch_prefers_the_provenance_one() -> None:
-    """The column a date filter and a range report compare against, unchanged."""
-    document = metadata_document(image_et=170002800.0)
-    document['observation']['image_et'] = 170009999.0
-    rows = facts_from_document(document, SOURCE)
+    It is also the column a date filter and a range report compare against.
+    """
+    rows = facts_from_document(metadata_document(image_et=170002800.0), SOURCE)
     assert rows.image['image_et'] == 170002800.0
 
 
-def test_an_image_that_never_loaded_records_only_the_observation_epoch() -> None:
-    """No provenance block at all, which is what a fatal load error writes."""
-    document = metadata_document(status='error', status_error='missing_spice_data', offset=None)
-    document['navigation_result'].pop('provenance')
-    document['observation']['image_et'] = 170009999.0
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['provenance_image_et'] is None
-
-
-def test_an_image_that_never_loaded_is_still_placed_in_time() -> None:
-    """The derived column falls through to the observation epoch, as before."""
-    document = metadata_document(status='error', status_error='missing_spice_data', offset=None)
-    document['navigation_result'].pop('provenance')
-    document['observation']['image_et'] = 170009999.0
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['image_et'] == 170009999.0
-
-
-def test_a_document_recording_no_observation_epoch_stores_none_for_it() -> None:
-    """The other half: a navigated image records the epoch only as provenance."""
+def test_the_derived_date_is_rendered_from_the_recorded_epoch() -> None:
+    """The date a ``--start-date`` bound compares against, to the day."""
     rows = facts_from_document(metadata_document(image_et=170002800.0), SOURCE)
-    assert rows.image['observation_image_et'] is None
+    assert rows.image['image_date'] == '2005-05-22'
+
+
+def test_an_image_that_never_loaded_records_no_epoch() -> None:
+    """No provenance block at all, which is what a fatal load error writes.
+
+    An epoch is the observation's midtime, so a document written because the
+    observation never loaded has none, and a row with no epoch is what the
+    index then holds.  The image is placed nowhere in time, so a date bound
+    passes it over.
+    """
+    document = metadata_document(status='error', status_error='missing_spice_data', offset=None)
+    document['navigation_result'].pop('provenance')
+    rows = facts_from_document(document, SOURCE)
+    assert rows.image['image_et'] is None
+
+
+def test_an_image_that_never_loaded_has_no_derived_date() -> None:
+    """The date column that a ``--start-date`` bound compares against is NULL."""
+    document = metadata_document(status='error', status_error='missing_spice_data', offset=None)
+    document['navigation_result'].pop('provenance')
+    rows = facts_from_document(document, SOURCE)
+    assert rows.image['image_date'] is None
 
 
 def test_the_rotation_columns_are_read() -> None:
