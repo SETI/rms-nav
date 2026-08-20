@@ -188,8 +188,11 @@ def test_navresult_refuses_a_non_finite_offset(axis: int, bad: float) -> None:
         _success(offset_px=(offset[0], offset[1]))
 
 
+@pytest.mark.parametrize(
+    'bad', [float('nan'), float('inf'), float('-inf')], ids=['nan', 'inf', 'negative-inf']
+)
 @pytest.mark.parametrize('axis', [0, 1], ids=['dv', 'du'])
-def test_navresult_refuses_a_non_finite_sigma(axis: int) -> None:
+def test_navresult_refuses_a_non_finite_sigma(axis: int, bad: float) -> None:
     """The per-axis sigmas are kept finite on purpose, so one that is not is wrong.
 
     An unobservable translation axis is reported through
@@ -197,24 +200,39 @@ def test_navresult_refuses_a_non_finite_sigma(axis: int) -> None:
     measurement rather than an inflated stand-in for one.
 
     Parameters:
-        axis: Which component of the ``(dv, du)`` sigma pair is infinite.
+        axis: Which component of the ``(dv, du)`` sigma pair carries the value.
+        bad: The non-finite value that component carries.
     """
     sigma = [0.2, 0.4]
-    sigma[axis] = float('inf')
+    sigma[axis] = bad
     with pytest.raises(ValueError, match='sigma_px must be finite'):
         _success(sigma_px=(sigma[0], sigma[1]))
 
 
-def test_navresult_refuses_a_non_finite_rotation() -> None:
-    """The fitted rotation is held to the rule its per-technique inputs already are."""
+@pytest.mark.parametrize(
+    'bad', [float('nan'), float('inf'), float('-inf')], ids=['nan', 'inf', 'negative-inf']
+)
+def test_navresult_refuses_a_non_finite_rotation(bad: float) -> None:
+    """The fitted rotation is held to the rule its per-technique inputs already are.
+
+    Parameters:
+        bad: The non-finite value the rotation carries.
+    """
     with pytest.raises(ValueError, match='rotation_rad must be finite'):
-        _success(rotation_rad=float('nan'))
+        _success(rotation_rad=bad)
 
 
-def test_navresult_refuses_a_non_finite_rotation_sigma() -> None:
-    """The uncertainty on the fitted rotation is held to that same rule."""
+@pytest.mark.parametrize(
+    'bad', [float('nan'), float('inf'), float('-inf')], ids=['nan', 'inf', 'negative-inf']
+)
+def test_navresult_refuses_a_non_finite_rotation_sigma(bad: float) -> None:
+    """The uncertainty on the fitted rotation is held to that same rule.
+
+    Parameters:
+        bad: The non-finite value the rotation sigma carries.
+    """
     with pytest.raises(ValueError, match='sigma_rotation_rad must be finite'):
-        _success(sigma_rotation_rad=float('inf'))
+        _success(sigma_rotation_rad=bad)
 
 
 def test_navresult_keeps_an_infinite_unobservable_sigma() -> None:
