@@ -39,6 +39,10 @@ def _success(**overrides: Any) -> NavResult:
 
     Returns:
         The constructed result, when construction accepts the overrides.
+
+    Raises:
+        ValueError: If an override fails ``NavResult`` validation, which is
+            what every refusal test here asserts on.
     """
     fields: dict[str, Any] = {
         'status': 'success',
