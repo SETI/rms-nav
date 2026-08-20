@@ -296,6 +296,33 @@ def test_an_image_that_never_loaded_has_no_derived_date() -> None:
     assert rows.image['image_date'] is None
 
 
+def test_an_earlier_pipelines_observation_epoch_is_not_read_as_the_epoch() -> None:
+    """A document written before the observation epoch was dropped is placed nowhere in time.
+
+    Every results tree navigated before that field went away holds documents
+    carrying it, and nothing refuses them: a document declares no schema
+    version, and a field the reader does not know is ignored rather than
+    rejected.  The epoch a navigation records is the one taken off the opened
+    observation, so a document that never opened one has no epoch at all, and
+    the value an earlier pipeline copied out of a dataset index does not stand
+    in for it.
+    """
+    document = metadata_document(status='error', status_error='missing_spice_data', offset=None)
+    document['navigation_result'].pop('provenance')
+    document['observation']['image_et'] = 170001800.0
+    rows = facts_from_document(document, SOURCE)
+    assert rows.image['image_et'] is None
+
+
+def test_an_earlier_pipelines_observation_epoch_yields_no_derived_date() -> None:
+    """The date a ``--start-date`` bound compares against stays NULL for such a document."""
+    document = metadata_document(status='error', status_error='missing_spice_data', offset=None)
+    document['navigation_result'].pop('provenance')
+    document['observation']['image_et'] = 170001800.0
+    rows = facts_from_document(document, SOURCE)
+    assert rows.image['image_date'] is None
+
+
 def test_the_rotation_columns_are_read() -> None:
     """A twist-fitted result records a rotation, and the index carries it."""
     document = metadata_document()

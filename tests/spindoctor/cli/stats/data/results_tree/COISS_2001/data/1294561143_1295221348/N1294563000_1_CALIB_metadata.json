@@ -1,6 +1,7 @@
 {
   "observation": {
     "camera": "NAC",
+    "image_et": 170001800.0,
     "image_name": "N1294563000_1_CALIB.IMG",
     "image_path": "/holdings/N1294563000_1_CALIB.IMG",
     "instrument": "coiss"
