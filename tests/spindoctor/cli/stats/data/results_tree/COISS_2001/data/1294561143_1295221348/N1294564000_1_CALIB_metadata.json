@@ -1,103 +1,58 @@
 {
-  "confidence": 0.42,
+  "status": "success",
+  "observation": {
+    "image_path": "/holdings/N1294564000_1_CALIB.IMG",
+    "image_name": "N1294564000_1_CALIB.IMG",
+    "instrument": "coiss",
+    "camera": "NAC",
+    "shutter_mode": "NACONLY",
+    "image_shape": [
+      1024,
+      1024
+    ]
+  },
   "navigation_result": {
-    "confidence": 0.42,
-    "confidence_rank": "low",
-    "covariance_px2": [
-      [
-        0.0961,
-        0.0
-      ],
-      [
-        0.0,
-        0.0784
-      ]
-    ],
-    "excluded_from_consensus": [
-      "StarUniqueMatchNav"
-    ],
-    "feature_inventory": [
-      {
-        "feature_id": "body_disc:IAPETUS",
-        "feature_type": "BODY_DISC",
-        "gated": false,
-        "source_model": "body:IAPETUS"
-      },
-      {
-        "feature_id": "body_limb:IAPETUS",
-        "feature_type": "BODY_LIMB",
-        "gated": false,
-        "source_model": "body:IAPETUS"
-      },
-      {
-        "feature_id": "star:UCAC4:100000",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100001",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100002",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100003",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100004",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100005",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100099",
-        "feature_type": "STAR",
-        "gated": true,
-        "source_model": "stars:UCAC4"
-      }
-    ],
-    "image_classifier": {
-      "class": "clean",
-      "noise_sigma": 0.75
-    },
+    "status": "success",
+    "status_reason": "ok",
     "offset_px": [
       59.5,
       -12.0
     ],
+    "sigma_px": [
+      2.6104,
+      2.2807
+    ],
+    "sigma_along_unobservable_px": null,
+    "confidence": 0.42,
+    "confidence_provisional": true,
+    "confidence_rank": "low",
+    "covariance_px2": [
+      [
+        6.8142,
+        0.0
+      ],
+      [
+        0.0,
+        5.2015
+      ]
+    ],
+    "techniques_used": [
+      "BodyBlobNav",
+      "BodyDiscCorrelateNav",
+      "StarUniqueMatchNav"
+    ],
+    "excluded_from_consensus": [
+      "BodyBlobNav"
+    ],
+    "feature_count_by_type": {
+      "BODY_DISC": 1,
+      "BODY_BLOB": 1,
+      "LIMB_ARC": 1,
+      "STAR": 6
+    },
     "per_technique": [
       {
-        "at_edge": false,
-        "confidence": 0.42,
-        "covariance_px2": [
-          [
-            0.25,
-            0.0
-          ],
-          [
-            0.0,
-            0.25
-          ]
-        ],
-        "diagnostics": {
-          "converged": true,
-          "n_iterations": 4
-        },
+        "technique_name": "BodyDiscCorrelateNav",
         "feature_ids": [
           "body_disc:IAPETUS"
         ],
@@ -105,70 +60,382 @@
           59.5,
           -12.0
         ],
-        "spurious": false,
-        "technique_name": "BodyDiscCorrelateNav"
-      },
-      {
-        "at_edge": true,
-        "confidence": 0.12,
         "covariance_px2": [
           [
-            0.25,
+            6.8142,
             0.0
           ],
           [
             0.0,
-            0.25
+            5.2015
           ]
         ],
+        "confidence": 0.42,
+        "spurious": false,
+        "at_edge": false,
         "diagnostics": {
-          "converged": true,
-          "n_iterations": 4
-        },
+          "ncc_peak": 0.412,
+          "peak_to_runner_up_ratio": 1.18,
+          "consistency_px": 2.85,
+          "consistency_ratio": 0.94,
+          "used_gradient": true,
+          "body_count": 1
+        }
+      },
+      {
+        "technique_name": "BodyBlobNav",
         "feature_ids": [
-          "star:UCAC4:100001"
+          "body_blob:IAPETUS"
+        ],
+        "offset_px": [
+          34.5,
+          -3.2
+        ],
+        "covariance_px2": [
+          [
+            182.25,
+            0.0
+          ],
+          [
+            0.0,
+            156.25
+          ]
+        ],
+        "confidence": 0.24,
+        "spurious": false,
+        "at_edge": false,
+        "diagnostics": {
+          "body_snr_inside_predicted_bbox": 41.9,
+          "body_extent_px": 108.037,
+          "blob_count": 1,
+          "residual_px": 26.503,
+          "max_phase_angle_deg": 78.412,
+          "max_phase_irregularity_factor": 0.114
+        }
+      },
+      {
+        "technique_name": "StarUniqueMatchNav",
+        "feature_ids": [
+          "star:UCAC4:200001"
         ],
         "offset_px": [
           -8.0,
           44.0
         ],
+        "covariance_px2": [
+          [
+            0.64,
+            0.0
+          ],
+          [
+            0.0,
+            0.64
+          ]
+        ],
+        "confidence": 0.12,
         "spurious": true,
-        "technique_name": "StarUniqueMatchNav"
+        "at_edge": true,
+        "diagnostics": {
+          "mode": "one_star",
+          "predicted_snr": 6.4,
+          "brightness_margin_mag": 0.35,
+          "residual_px": 3.9,
+          "detection_peak_ratio": 1.05
+        }
       }
     ],
-    "provenance": {
-      "config_hash": "0f1e2d3c4b5a6978",
-      "image_et": 170002800.0,
-      "pipeline_run_iso8601": "2026-05-04T11:22:33",
-      "spindoctor_git_sha": "abc1234",
-      "spindoctor_version": "1.0.0"
+    "feature_inventory": [
+      {
+        "feature_id": "body_disc:IAPETUS",
+        "feature_type": "BODY_DISC",
+        "source_model": "body:IAPETUS",
+        "reliability": 0.55,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          322,
+          448,
+          430,
+          556
+        ],
+        "reliability_reasons": {
+          "visible_lit_fraction": 0.55,
+          "overflow_fraction": 0.0
+        }
+      },
+      {
+        "feature_id": "body_blob:IAPETUS",
+        "feature_type": "BODY_BLOB",
+        "source_model": "body:IAPETUS",
+        "reliability": 0.38,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          322,
+          448,
+          430,
+          556
+        ],
+        "reliability_reasons": {
+          "blob_snr": 0.61,
+          "blob_extent_px": 108.0
+        }
+      },
+      {
+        "feature_id": "limb_arc:IAPETUS",
+        "feature_type": "LIMB_ARC",
+        "source_model": "body:IAPETUS",
+        "reliability": 0.68,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          322,
+          448,
+          430,
+          556
+        ],
+        "reliability_reasons": {
+          "visible_arc_fraction": 0.74,
+          "incidence_factor": 0.88
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:200000",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.58,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          96,
+          233,
+          107,
+          244
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.58,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:200001",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.52,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          214,
+          655,
+          225,
+          666
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.52,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:200002",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.47,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          377,
+          91,
+          388,
+          102
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.47,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:200003",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.39,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          512,
+          744,
+          523,
+          755
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.39,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:200004",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.31,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          690,
+          318,
+          701,
+          329
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.31,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:200005",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.24,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          842,
+          587,
+          853,
+          598
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.24,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:200099",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.12,
+        "gated": true,
+        "gate_reason": "reliability_0.120_below_threshold_0.200",
+        "bbox_extfov_vu": [
+          908,
+          122,
+          919,
+          133
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.12,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      }
+    ],
+    "image_classifier": {
+      "class": "clean",
+      "saturation_frac": 0.0,
+      "missing_frac": 0.0,
+      "noise_sigma": 0.75,
+      "max_dn": 1.06,
+      "background_gradient_score": 3.298,
+      "flags": []
     },
-    "sigma_along_unobservable_px": null,
-    "sigma_px": [
-      0.31,
-      0.28
-    ],
-    "status": "success",
-    "status_reason": "ok"
+    "provenance": {
+      "spindoctor_version": "0.0.0",
+      "spindoctor_git_sha": "719cde5",
+      "spice_kernels": [
+        "05138_05159ra.bc",
+        "cas00172.tsc",
+        "cpck15Dec2017.tpc",
+        "naif0012.tls",
+        "sat428.bsp"
+      ],
+      "spice_kernel_count": 5,
+      "static_data_hashes": {
+        "config_220_body_shape.yaml": "ac10e82c9c141c0e449dcfc92d8c4f341400ffa51976f53c94c98eaabac7a52a",
+        "config_310_saturn_rings.yaml": "5f5f0b8f9a3b4d8c6e2a1c7d9b0e4f3a2d6c8b1e7f0a9d3c5b2e8f1a4d7c0b63",
+        "config_400_inst_coiss.yaml": "8c20d352ed0b5b690f7fc573f505f062551966c3305a01ae0e6fba63a8400f17"
+      },
+      "technique_names": [
+        "BodyBlobNav",
+        "BodyDiscCorrelateNav",
+        "BodyLimbNav",
+        "BodyTerminatorNav",
+        "RingAnnulusNav",
+        "RingEdgeNav",
+        "StarFieldFromCatalogNav",
+        "StarRefineNav",
+        "StarUniqueMatchNav",
+        "TitanHazeNav"
+      ],
+      "extractor_names": [
+        "body:IAPETUS",
+        "stars"
+      ],
+      "config_hash": "3ca76ec39b1fb875a86bed2793adc4430785242e07d705f2d65581963040a6b6",
+      "config_overrides": [],
+      "star_catalogs": {
+        "tycho2": "/resources/SPICE/Stars",
+        "ucac4": "/star-catalogs/UCAC4",
+        "ybsc": "/star-catalogs/YBSC"
+      },
+      "image_et": 170002800.0,
+      "pipeline_run_iso8601": "2026-08-08T16:46:29Z"
+    },
+    "pointing": {
+      "cmatrix": [
+        0.6728754083575018,
+        -0.1428816489290356,
+        0.7258260943415061,
+        0.718597704947464,
+        -0.10673708900829947,
+        -0.6871859517439743,
+        0.17565882634232344,
+        0.983967493482053,
+        0.030853662646163727
+      ],
+      "cmatrix_original": [
+        0.673165977816563,
+        -0.14286941066469439,
+        0.7255590243437081,
+        0.7183800990799585,
+        -0.10642581435024213,
+        -0.6874616929587837,
+        0.1754354569525208,
+        0.9840029865484203,
+        0.030992304006793696
+      ],
+      "camera_frame": "CASSINI_ISS_NAC",
+      "camera_frame_id": -82360,
+      "ck_frame_id": -82000
+    },
+    "times": {
+      "start_et": 170002799.77,
+      "stop_et": 170002800.23,
+      "midtime_et": 170002800.0,
+      "exposure_s": 0.46,
+      "sclk_start": "1/1294564000.011",
+      "sclk_midtime": "1/1294564000.030",
+      "sclk_stop": "1/1294564000.049"
+    }
   },
-  "observation": {
-    "camera": "NAC",
-    "image_name": "N1294564000_1_CALIB.IMG",
-    "image_path": "/holdings/N1294564000_1_CALIB.IMG",
-    "image_shape": [
-      1024,
-      1024
-    ],
-    "instrument": "coiss"
+  "timing": {
+    "start_iso8601": "2026-08-08T16:46:48.921574Z",
+    "end_iso8601": "2026-08-08T16:47:20.671574Z",
+    "elapsed_s": 31.75
   },
   "offset": [
     59.5,
     -12.0
   ],
-  "status": "success",
-  "timing": {
-    "elapsed_s": 31.75,
-    "end_iso8601": "2026-05-04T11:22:45",
-    "start_iso8601": "2026-05-04T11:22:33"
-  }
+  "confidence": 0.42
 }

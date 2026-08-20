@@ -1,41 +1,110 @@
 {
-  "confidence": 0.0,
-  "navigation_result": {
-    "confidence": 0.0,
-    "confidence_rank": "failed",
-    "excluded_from_consensus": [],
-    "feature_inventory": [],
-    "image_classifier": {
-      "class": "clean",
-      "noise_sigma": 0.75
-    },
-    "offset_px": null,
-    "per_technique": [],
-    "provenance": {
-      "config_hash": "0f1e2d3c4b5a6978",
-      "image_et": -659999000.0,
-      "pipeline_run_iso8601": "2026-05-04T11:22:33",
-      "spindoctor_git_sha": "abc1234",
-      "spindoctor_version": "1.0.0"
-    },
-    "sigma_px": null,
-    "status": "failed",
-    "status_reason": "techniques_disagree"
-  },
+  "status": "failed",
   "observation": {
-    "camera": "WAC",
-    "image_name": "C1385460_GEOMED.IMG",
     "image_path": "/holdings/C1385460_GEOMED.IMG",
+    "image_name": "C1385460_GEOMED.IMG",
+    "instrument": "vgiss",
+    "camera": "WAC",
     "image_shape": [
       1024,
       1024
-    ],
-    "instrument": "vgiss"
+    ]
   },
-  "status": "failed",
+  "navigation_result": {
+    "status": "failed",
+    "status_reason": "no_features_extracted",
+    "offset_px": null,
+    "sigma_px": null,
+    "sigma_along_unobservable_px": null,
+    "confidence": 0.0,
+    "confidence_provisional": true,
+    "confidence_rank": "failed",
+    "covariance_px2": null,
+    "techniques_used": [],
+    "excluded_from_consensus": [],
+    "feature_count_by_type": {},
+    "per_technique": [],
+    "feature_inventory": [],
+    "image_classifier": {
+      "class": "clean",
+      "saturation_frac": 0.0,
+      "missing_frac": 0.0,
+      "noise_sigma": 0.75,
+      "max_dn": 96.0,
+      "background_gradient_score": 0.622,
+      "flags": []
+    },
+    "provenance": {
+      "spindoctor_version": "0.0.0",
+      "spindoctor_git_sha": "719cde5",
+      "spice_kernels": [
+        "naif0012.tls",
+        "vg100019.tsc",
+        "vg1_saturn.bsp",
+        "vg1_super.bc"
+      ],
+      "spice_kernel_count": 4,
+      "static_data_hashes": {
+        "config_220_body_shape.yaml": "ac10e82c9c141c0e449dcfc92d8c4f341400ffa51976f53c94c98eaabac7a52a",
+        "config_310_saturn_rings.yaml": "5f5f0b8f9a3b4d8c6e2a1c7d9b0e4f3a2d6c8b1e7f0a9d3c5b2e8f1a4d7c0b63",
+        "config_400_inst_coiss.yaml": "8c20d352ed0b5b690f7fc573f505f062551966c3305a01ae0e6fba63a8400f17"
+      },
+      "technique_names": [
+        "BodyBlobNav",
+        "BodyDiscCorrelateNav",
+        "BodyLimbNav",
+        "BodyTerminatorNav",
+        "RingAnnulusNav",
+        "RingEdgeNav",
+        "StarFieldFromCatalogNav",
+        "StarRefineNav",
+        "StarUniqueMatchNav",
+        "TitanHazeNav"
+      ],
+      "extractor_names": [
+        "rings:SATURN",
+        "stars"
+      ],
+      "config_hash": "3ca76ec39b1fb875a86bed2793adc4430785242e07d705f2d65581963040a6b6",
+      "config_overrides": [],
+      "star_catalogs": {
+        "tycho2": "/resources/SPICE/Stars",
+        "ucac4": "/star-catalogs/UCAC4",
+        "ybsc": "/star-catalogs/YBSC"
+      },
+      "image_et": -659999000.0,
+      "pipeline_run_iso8601": "2026-08-08T16:46:29Z"
+    },
+    "pointing": {
+      "cmatrix_original": [
+        -0.38975591994273734,
+        -0.3794085374896427,
+        -0.8391301952316821,
+        0.9179846678456474,
+        -0.2327349056926564,
+        -0.3211520096037809,
+        -0.0734470725754757,
+        -0.8954795504935893,
+        0.43900102753625997
+      ],
+      "camera_frame": "VG1_ISSWA",
+      "camera_frame_id": -31102,
+      "ck_frame_id": -31100
+    },
+    "times": {
+      "start_et": -659999000.72,
+      "stop_et": -659998999.28,
+      "midtime_et": -659999000.0,
+      "exposure_s": 1.44,
+      "sclk_start": "1/13854:60:001",
+      "sclk_midtime": "1/13854:60:001",
+      "sclk_stop": "1/13854:60:002"
+    }
+  },
   "timing": {
-    "elapsed_s": 8.25,
-    "end_iso8601": "2026-05-04T11:23:08",
-    "start_iso8601": "2026-05-04T11:23:00"
-  }
+    "start_iso8601": "2026-08-08T16:47:46.612907Z",
+    "end_iso8601": "2026-08-08T16:47:54.862907Z",
+    "elapsed_s": 8.25
+  },
+  "confidence": 0.0
 }

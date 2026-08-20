@@ -27,16 +27,16 @@ Total images: 8
 | status | reason | coiss | sim | vgiss | total |
 |---|---|---|---|---|---|
 | error | missing_spice_data | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
-| failed | no_features_extracted | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
-| failed | techniques_disagree | 0 (0.0%) | 0 (0.0%) | 1 (50.0%) | 1 (12.5%) |
+| failed | all_features_gated | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
+| failed | no_features_extracted | 0 (0.0%) | 0 (0.0%) | 1 (50.0%) | 1 (12.5%) |
 
 Examples (up to 5 per reason and instrument):
 
 - missing_spice_data / coiss: N1294563000
-- no_features_extracted / coiss: N1294562000
-- techniques_disagree / vgiss: C1385460
+- all_features_gated / coiss: N1294562000
+- no_features_extracted / vgiss: C1385460
 
-Full lists: filelists/failure_reason_missing_spice_data_coiss.txt, filelists/failure_reason_no_features_extracted_coiss.txt, filelists/failure_reason_techniques_disagree_vgiss.txt
+Full lists: filelists/failure_reason_missing_spice_data_coiss.txt, filelists/failure_reason_all_features_gated_coiss.txt, filelists/failure_reason_no_features_extracted_vgiss.txt
 
 ![failure reasons](failure_reasons.png)
 
@@ -52,9 +52,9 @@ the scene.
 
 | content | reason | coiss | sim | vgiss | total |
 |---|---|---|---|---|---|
-| single-body | no_features_extracted | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
+| single-body | all_features_gated | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
 | no-features | missing_spice_data | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
-| no-features | techniques_disagree | 0 (0.0%) | 0 (0.0%) | 1 (50.0%) | 1 (12.5%) |
+| no-features | no_features_extracted | 0 (0.0%) | 0 (0.0%) | 1 (50.0%) | 1 (12.5%) |
 
 Examples (up to 5 per content category and instrument):
 
@@ -88,6 +88,7 @@ Images on which each technique ran.
 |---|---|---|---|---|
 | BodyLimbNav | 1 (20.0%) | 1 (100.0%) | 0 (0.0%) | 2 (25.0%) |
 | RingEdgeNav | 1 (20.0%) | 0 (0.0%) | 1 (50.0%) | 2 (25.0%) |
+| BodyBlobNav | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
 | BodyDiscCorrelateNav | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
 | StarFieldFromCatalogNav | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
 | StarUniqueMatchNav | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
@@ -100,6 +101,7 @@ Images on which each technique ran.
 | BodyLimbNav | sim | 1 (100.0%) | 1 (100.0%) | 0.880 |
 | RingEdgeNav | coiss | 1 (20.0%) | 1 (100.0%) | 0.740 |
 | RingEdgeNav | vgiss | 1 (50.0%) | 1 (100.0%) | 0.660 |
+| BodyBlobNav | coiss | 1 (20.0%) | 1 (100.0%) | 0.240 |
 | BodyDiscCorrelateNav | coiss | 1 (20.0%) | 1 (100.0%) | 0.420 |
 | StarFieldFromCatalogNav | coiss | 1 (20.0%) | 1 (100.0%) | 0.930 |
 | StarUniqueMatchNav | coiss | 1 (20.0%) | 0 (0.0%) | 0.120 |
@@ -115,17 +117,17 @@ Images in which each source appears.
 | body:IAPETUS | IAPETUS | 3 (60.0%) | 0 (0.0%) | 0 (0.0%) | 3 (37.5%) |
 | body:MIMAS | MIMAS | 0 (0.0%) | 1 (100.0%) | 0 (0.0%) | 1 (12.5%) |
 | rings:SATURN | SATURN | 1 (20.0%) | 0 (0.0%) | 1 (50.0%) | 2 (25.0%) |
-| stars:UCAC4 | UCAC4 | 2 (40.0%) | 0 (0.0%) | 0 (0.0%) | 2 (25.0%) |
+| stars | UCAC4 | 2 (40.0%) | 0 (0.0%) | 0 (0.0%) | 2 (25.0%) |
 
 ### Per-source feature counts
 
 | model | source | instrument | features | gated |
 |---|---|---|---|---|
-| body:IAPETUS | IAPETUS | coiss | 6 | 0 |
+| body:IAPETUS | IAPETUS | coiss | 7 | 2 |
 | body:MIMAS | MIMAS | sim | 1 | 0 |
 | rings:SATURN | SATURN | coiss | 2 | 1 |
 | rings:SATURN | SATURN | vgiss | 2 | 1 |
-| stars:UCAC4 | UCAC4 | coiss | 14 | 2 |
+| stars | UCAC4 | coiss | 14 | 2 |
 
 ## Offset statistics (successful images)
 
@@ -211,6 +213,7 @@ techniques produced non-spurious results.
 
 | instrument | technique pair | images | median (px) | p95 (px) |
 |---|---|---|---|---|
+| coiss | BodyBlobNav vs BodyDiscCorrelateNav | 1 (20.0%) | 26.504 | 26.504 |
 | coiss | BodyLimbNav vs StarFieldFromCatalogNav | 1 (20.0%) | 0.262 | 0.262 |
 
 ## Confidence calibration (agreement as accuracy proxy)
@@ -236,7 +239,7 @@ meaningful (the calibrated anchor is the simulated-scene campaign).
 | medium | coiss | 1 (20.0%) | 0 (0.0%) | - | - |
 | medium | sim | 0 (0.0%) | 0 (0.0%) | - | - |
 | medium | vgiss | 1 (50.0%) | 0 (0.0%) | - | - |
-| low | coiss | 1 (20.0%) | 0 (0.0%) | - | - |
+| low | coiss | 1 (20.0%) | 1 (100.0%) | 26.504 | 26.504 |
 | low | sim | 0 (0.0%) | 0 (0.0%) | - | - |
 | low | vgiss | 0 (0.0%) | 0 (0.0%) | - | - |
 | failed | coiss | 1 (20.0%) | 0 (0.0%) | - | - |
@@ -252,13 +255,13 @@ meaningful (the calibrated anchor is the simulated-scene campaign).
 
 | excluded techniques | coiss | sim | vgiss | total |
 |---|---|---|---|---|
-| StarUniqueMatchNav | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
+| BodyBlobNav | 1 (20.0%) | 0 (0.0%) | 0 (0.0%) | 1 (12.5%) |
 
 Examples (up to 5 per exclusion set and instrument):
 
-- StarUniqueMatchNav / coiss: N1294564000
+- BodyBlobNav / coiss: N1294564000
 
-Full lists: filelists/excluded_StarUniqueMatchNav_coiss.txt
+Full lists: filelists/excluded_BodyBlobNav_coiss.txt
 
 ## Run-time statistics
 

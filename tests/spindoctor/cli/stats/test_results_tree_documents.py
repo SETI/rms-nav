@@ -1,0 +1,269 @@
+"""The stored fixture tree is what the writer emits, and says what it claims to.
+
+``data/results_tree`` is the input the statistics ingest is measured over and
+the frozen report output is derived from, so a document there that no writer
+could have produced puts the whole measurement outside the schema: key sets,
+vocabularies and value shapes the ingest and the report then read from nothing
+the pipeline writes.  Nothing held these documents against the writer before,
+which is how they came to diverge without anyone noticing.
+
+This is what holds them.  ``results_tree_documents.py`` builds each document
+through the writer itself, and the first test here compares the bytes it
+produces against the bytes on disk, so the stored tree is writer output by
+construction.  A writer change is then reported here, and the fix is to run
+that module and re-ratify the frozen report output against what it wrote.
+
+The rest are the properties the tree is relied on for that the frozen report
+cannot see: the shutter modes that make a BOTSIM pair a pair, the attitude and
+exposure blocks a host with SPICE frames always records, and the internal
+agreements a hand-authored document is free to break -- a technique citing a
+feature the inventory does not hold, a spurious result reported as excluded
+from consensus, a recorded midtime that is not the recorded epoch.
+"""
+
+from typing import Any
+
+import pytest
+
+from spindoctor.support.file import json_as_string
+
+from .results_tree_documents import (
+    RESULTS_TREE,
+    results_tree_documents,
+    stored_documents,
+)
+
+_BOTSIM_PAIR = (
+    'COISS_2001/data/1294561143_1295221348/N1294561202_1_CALIB',
+    'COISS_2001/data/1294561143_1295221348/W1294561202_1_CALIB',
+)
+"""The two stubs of the pair whose cameras were shuttered together."""
+
+_SINGLE_CAMERA = {
+    'COISS_2001/data/1294561143_1295221348/N1294562000_1_CALIB': 'NACONLY',
+    'COISS_2001/data/1294561143_1295221348/N1294564000_1_CALIB': 'NACONLY',
+}
+"""The Cassini stubs whose labels record one camera, and which mode they record."""
+
+_LOAD_ERROR = 'COISS_2001/data/1294561143_1295221348/N1294563000_1_CALIB'
+"""The stub of the image whose load failed before an observation existed."""
+
+_SIMULATED = 'sim_scene_000042'
+"""The stub of the simulated scene, the one host with no SPICE camera frame."""
+
+
+@pytest.fixture(scope='module')
+def built() -> dict[str, dict[str, Any]]:
+    """Build every document once for the whole module.
+
+    Returns:
+        Stub to the document the writer produces for it.
+    """
+    return results_tree_documents()
+
+
+@pytest.fixture(scope='module')
+def stored() -> dict[str, dict[str, Any]]:
+    """Read every document the tree holds, once for the whole module.
+
+    Returns:
+        Stub to the parsed document.
+    """
+    return stored_documents()
+
+
+def test_the_tree_holds_exactly_the_documents_the_corpus_names(
+    built: dict[str, dict[str, Any]], stored: dict[str, dict[str, Any]]
+) -> None:
+    """A document nobody builds, or one nobody wrote, is a tree out of step.
+
+    Parameters:
+        built: What the writer produces.
+        stored: What the tree holds.
+    """
+    assert sorted(stored) == sorted(built)
+
+
+def test_every_stored_document_is_byte_for_byte_what_the_writer_emits(
+    built: dict[str, dict[str, Any]],
+) -> None:
+    """The bytes on disk are the writer's own serialization of its own output.
+
+    Parameters:
+        built: What the writer produces.
+    """
+    differing = [
+        stub
+        for stub, document in built.items()
+        if (RESULTS_TREE / f'{stub}_metadata.json').read_text(encoding='utf-8')
+        != json_as_string(document)
+    ]
+    assert differing == []
+
+
+def test_the_botsim_pair_records_the_mode_that_makes_it_a_pair(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """Without the shutter mode the pair is only two images sharing a number.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    modes = [stored[stub]['observation']['shutter_mode'] for stub in _BOTSIM_PAIR]
+    assert modes == ['BOTSIM', 'BOTSIM']
+
+
+def test_the_botsim_pair_shares_one_shutter(stored: dict[str, dict[str, Any]]) -> None:
+    """One shutter is one epoch and one clock reading, on both cameras.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    times = [stored[stub]['navigation_result']['times'] for stub in _BOTSIM_PAIR]
+    assert times[0]['midtime_et'] == times[1]['midtime_et']
+    assert times[0]['sclk_midtime'] == times[1]['sclk_midtime']
+
+
+def test_the_single_camera_images_record_their_own_shutter_mode(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """A column that only ever held one value would not tell the modes apart.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    found = {stub: stored[stub]['observation']['shutter_mode'] for stub in _SINGLE_CAMERA}
+    assert found == _SINGLE_CAMERA
+
+
+def test_the_hosts_whose_labels_carry_no_shutter_mode_record_none(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """Voyager, the simulated scene, and an image that never loaded record none.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    carrying = sorted(
+        stub
+        for stub, document in stored.items()
+        if str(document['observation']['instrument']) != 'coiss'
+        and 'shutter_mode' in document['observation']
+    )
+    assert carrying == []
+    assert 'shutter_mode' not in stored[_LOAD_ERROR]['observation']
+
+
+def test_every_navigated_image_with_spice_frames_records_its_attitude_and_times(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """Both blocks are stamped for every result of such a host, failures included.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    missing = sorted(
+        stub
+        for stub, document in stored.items()
+        if stub not in (_LOAD_ERROR, _SIMULATED)
+        if not {'pointing', 'times'} <= set(document['navigation_result'])
+    )
+    assert missing == []
+
+
+def test_only_a_navigation_that_produced_an_offset_records_a_corrected_attitude(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """A failed navigation has no offset, so it has no correction to record.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    wrong = sorted(
+        stub
+        for stub, document in stored.items()
+        if 'pointing' in document.get('navigation_result', {})
+        if ('cmatrix' in document['navigation_result']['pointing'])
+        != (document['status'] == 'success')
+    )
+    assert wrong == []
+
+
+def test_the_simulated_scene_records_no_attitude_and_no_times(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """It has no spacecraft and no furnished camera frame, so it records neither.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    navigation_result = stored[_SIMULATED]['navigation_result']
+    assert 'pointing' not in navigation_result
+    assert 'times' not in navigation_result
+
+
+def test_every_recorded_midtime_is_the_recorded_epoch(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """An image's epoch is its observation's midtime, and a reader gates on it.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    disagreeing = sorted(
+        stub
+        for stub, document in stored.items()
+        if 'times' in document.get('navigation_result', {})
+        if document['navigation_result']['times']['midtime_et']
+        != document['navigation_result']['provenance']['image_et']
+    )
+    assert disagreeing == []
+
+
+def test_every_technique_cites_features_the_inventory_holds(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """A technique consumes features that were extracted and survived the gate.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    unknown: list[str] = []
+    for stub, document in stored.items():
+        navigation_result = document.get('navigation_result', {})
+        kept = {
+            str(entry['feature_id'])
+            for entry in navigation_result.get('feature_inventory', [])
+            if not entry['gated']
+        }
+        for entry in navigation_result.get('per_technique', []):
+            unknown += [
+                f'{stub}: {entry["technique_name"]} cites {feature_id}'
+                for feature_id in entry['feature_ids']
+                if feature_id not in kept
+            ]
+    assert unknown == []
+
+
+def test_no_spurious_result_is_reported_as_excluded_from_consensus(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """The ensemble drops a spurious result before it selects a consensus.
+
+    So a spurious technique is never one the consensus left out, and a document
+    naming it in both places describes an ensemble run that cannot happen.
+
+    Parameters:
+        stored: What the tree holds.
+    """
+    both: list[str] = []
+    for stub, document in stored.items():
+        navigation_result = document.get('navigation_result', {})
+        excluded = set(navigation_result.get('excluded_from_consensus', []))
+        both += [
+            f'{stub}: {entry["technique_name"]}'
+            for entry in navigation_result.get('per_technique', [])
+            if entry['spurious']
+            if str(entry['technique_name']) in excluded
+        ]
+    assert both == []

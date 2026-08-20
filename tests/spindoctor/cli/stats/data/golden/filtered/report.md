@@ -25,12 +25,12 @@ Total images: 4
 | status | reason | coiss | total |
 |---|---|---|---|
 | error | missing_spice_data | 1 (25.0%) | 1 (25.0%) |
-| failed | no_features_extracted | 1 (25.0%) | 1 (25.0%) |
+| failed | all_features_gated | 1 (25.0%) | 1 (25.0%) |
 
 Examples (up to 3 per reason and instrument):
 
 - missing_spice_data / coiss: N1294563000
-- no_features_extracted / coiss: N1294562000
+- all_features_gated / coiss: N1294562000
 
 ![failure reasons](failure_reasons.png)
 
@@ -46,7 +46,7 @@ the scene.
 
 | content | reason | coiss | total |
 |---|---|---|---|
-| single-body | no_features_extracted | 1 (25.0%) | 1 (25.0%) |
+| single-body | all_features_gated | 1 (25.0%) | 1 (25.0%) |
 | no-features | missing_spice_data | 1 (25.0%) | 1 (25.0%) |
 
 Examples (up to 3 per content category and instrument):
@@ -95,15 +95,15 @@ Images in which each source appears.
 |---|---|---|---|
 | body:IAPETUS | IAPETUS | 2 (50.0%) | 2 (50.0%) |
 | rings:SATURN | SATURN | 1 (25.0%) | 1 (25.0%) |
-| stars:UCAC4 | UCAC4 | 1 (25.0%) | 1 (25.0%) |
+| stars | UCAC4 | 1 (25.0%) | 1 (25.0%) |
 
 ### Per-source feature counts
 
 | model | source | instrument | features | gated |
 |---|---|---|---|---|
-| body:IAPETUS | IAPETUS | coiss | 4 | 0 |
+| body:IAPETUS | IAPETUS | coiss | 4 | 2 |
 | rings:SATURN | SATURN | coiss | 2 | 1 |
-| stars:UCAC4 | UCAC4 | coiss | 7 | 1 |
+| stars | UCAC4 | coiss | 7 | 1 |
 
 ## Offset statistics (successful images)
 

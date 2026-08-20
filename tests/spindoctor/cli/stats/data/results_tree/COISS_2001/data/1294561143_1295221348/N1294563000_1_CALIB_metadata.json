@@ -1,16 +1,16 @@
 {
-  "observation": {
-    "camera": "NAC",
-    "image_name": "N1294563000_1_CALIB.IMG",
-    "image_path": "/holdings/N1294563000_1_CALIB.IMG",
-    "instrument": "coiss"
-  },
   "status": "error",
   "status_error": "missing_spice_data",
-  "status_exception": "SpiceError: missing_spice_data",
+  "status_exception": "SPICE(SPKINSUFFDATA) -- Insufficient ephemeris data has been loaded to compute the state of body -82 relative to body 699 at the ephemeris epoch 2005 MAY 22 02:26:36.000.",
+  "observation": {
+    "image_path": "/holdings/N1294563000_1_CALIB.IMG",
+    "image_name": "N1294563000_1_CALIB.IMG",
+    "instrument": "coiss",
+    "camera": "NAC"
+  },
   "timing": {
-    "elapsed_s": 1.5,
-    "end_iso8601": "2026-05-04T11:24:01",
-    "start_iso8601": "2026-05-04T11:24:00"
+    "start_iso8601": "2026-08-08T16:46:47.104881Z",
+    "end_iso8601": "2026-08-08T16:46:48.604881Z",
+    "elapsed_s": 1.5
   }
 }
