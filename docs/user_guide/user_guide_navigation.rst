@@ -639,10 +639,10 @@ policy, and one annotated example per document shape -- is the
   ``camera`` (the camera that took it, e.g. ``NAC``). An image that fails to
   load has no observation to ask, so the navigator falls back to what the
   PDS3 index told it when the image was enumerated, recording ``camera``
-  and ``image_et`` there; that needs no SPICE and never opens the image, so
-  a frame whose navigation dies for want of a kernel is still placed in
-  time and attributed to its camera. An image navigated by explicit path
-  rather than enumerated from an index has neither. ``shutter_mode`` records
+  there; that needs no SPICE and never opens the image, so a frame whose
+  navigation dies for want of a kernel is still attributed to its camera. An
+  image navigated by explicit path rather than enumerated from an index has
+  none. ``shutter_mode`` records
   the mode the image was taken in for an instrument whose label carries one
   (Cassini ISS reports ``BOTSIM`` when both cameras were exposed at once);
   instruments whose labels carry no such field omit it.

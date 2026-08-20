@@ -126,7 +126,6 @@ RECORD_FIELDS: tuple[RecordField, ...] = (
     RecordField(('camera',), _OBSERVATION, 'camera'),
     RecordField(('shutter_mode',), _OBSERVATION, 'shutter_mode'),
     RecordField(('image_path',), _OBSERVATION, 'image_path'),
-    RecordField(('observation_image_et',), _OBSERVATION, 'image_et'),
     RecordField(('image_shape_v', 'image_shape_u'), _OBSERVATION, 'image_shape'),
     RecordField(('status',), (), 'status', sentinel=UNKNOWN_STATUS),
     RecordField(('status_error',), (), 'status_error'),
@@ -197,12 +196,12 @@ DERIVED_COLUMNS = frozenset(
 """Columns the ingest computes from a document rather than copying out of it.
 
 ``subtree`` is the first path segment of the stub, which the walk knows and no
-document states; ``image_et`` holds whichever of the two recorded epochs the
-document had, so no one field is what it came from and the two fields have
-columns of their own; ``image_date`` is rendered from that epoch and
-``image_number`` from the image name; and ``n_techniques`` counts a list.  A
-rebuild that put any of them back would be inventing a field the document did
-not have, so each is read as a column by whatever wants it and none is a record
+document states; ``image_et`` is the recorded epoch under the name a filter and
+a report ask for it by, the field itself having a column of its own;
+``image_date`` is rendered from that epoch and ``image_number`` from the image
+name; and ``n_techniques`` counts a list.  A rebuild that put any of them back
+would be inventing a field the document did not have, or writing one field
+twice, so each is read as a column by whatever wants it and none is a record
 field.
 """
 

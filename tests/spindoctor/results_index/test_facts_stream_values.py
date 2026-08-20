@@ -3,8 +3,8 @@
 An agreement is worth what the documents behind it carry, so the values a
 comparison could pass while losing are read out one at a time: a covariance
 matrix no pair of per-axis sigmas states, a list whose order is not its sorted
-order, the pair of columns that tells an epoch read out of a dataset index from
-one a navigation run recorded, and an outcome named against one that is absent.
+order, an epoch a navigation run recorded against one an image that never
+loaded has none of, and an outcome named against one that is absent.
 
 Every read a query blind to the root could answer out of the wrong row is made
 against each of the two roots in turn, which record different values under the
@@ -88,23 +88,8 @@ def test_each_roots_frame_id_comes_back_from_that_root(two_roots: TwoRoots, whic
     assert found.image['camera_frame_id'] == values.camera_frame_id
 
 
-@pytest.mark.parametrize('which', BOTH_ROOTS)
-def test_an_image_that_never_loaded_records_its_epoch_under_the_observation(
-    two_roots: TwoRoots, which: str
-) -> None:
-    """The column that says which of the two epochs a document carried.
-
-    Parameters:
-        two_roots: The two ingested roots and their index.
-        which: The root to read.
-    """
-    values = two_roots.values(which)
-    found = facts_of(facts_from_index(two_roots, which, Selection()), UNLOADED_STUB)
-    assert found.image['observation_image_et'] == values.observation_et
-
-
-def test_an_image_that_never_loaded_records_no_provenance_epoch(two_roots: TwoRoots) -> None:
-    """The other half of the pair, which is what makes the two columns worth having.
+def test_an_image_that_never_loaded_records_no_epoch(two_roots: TwoRoots) -> None:
+    """An epoch is an observation's midtime, and this image built no observation.
 
     Parameters:
         two_roots: The two ingested roots and their index.
@@ -113,8 +98,18 @@ def test_an_image_that_never_loaded_records_no_provenance_epoch(two_roots: TwoRo
     assert found.image['provenance_image_et'] is None
 
 
+def test_an_image_that_never_loaded_is_placed_nowhere_in_time(two_roots: TwoRoots) -> None:
+    """The column a date filter compares against is NULL rather than standing in.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    found = facts_of(facts_from_index(two_roots, 'first', Selection()), UNLOADED_STUB)
+    assert found.image['image_et'] is None
+
+
 def test_a_navigated_image_records_its_epoch_as_provenance(two_roots: TwoRoots) -> None:
-    """Which is the case the pair of columns has to tell apart from the other.
+    """The case the column has to tell apart from the one above.
 
     Parameters:
         two_roots: The two ingested roots and their index.

@@ -49,7 +49,6 @@ IMAGES_COLUMNS: tuple[tuple[str, ColumnType, bool], ...] = (
     ('shutter_mode', sqlalchemy.Text, True),
     ('image_path', sqlalchemy.Text, True),
     ('provenance_image_et', sqlalchemy.Double, True),
-    ('observation_image_et', sqlalchemy.Double, True),
     ('image_et', sqlalchemy.Double, True),
     ('image_date', sqlalchemy.Text, True),
     ('status', sqlalchemy.Text, False),

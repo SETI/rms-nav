@@ -9,7 +9,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
-import julian
 from filecache import FCPath, FileCache
 from pdstable import PdsTable
 
@@ -57,14 +56,10 @@ class DataSetPDS3(DataSet):
     # Data definitions overriden by subclasses
     _ALL_VOLUME_NAMES: tuple[str, ...] = ()
     _INDEX_COLUMNS: tuple[str, ...] = ()
-    # Index columns holding the image's observation time, in preference order;
+    # Index columns naming the camera that took the image, in preference order;
     # the first one present and non-null in a row wins.  These are always read
-    # and land in ``ImageFile.index_file_row``, so an image's epoch is known
+    # and land in ``ImageFile.index_file_row``, so an image's camera is known
     # from the index alone -- no SPICE, and no need to load the image.  See
-    # :meth:`image_et_from_index_row`.
-    _INDEX_TIME_COLUMNS: tuple[str, ...] = ()
-    # Index columns naming the camera that took the image, in preference order,
-    # read the same way as the time columns.  See
     # :meth:`camera_from_index_row`.
     _INDEX_CAMERA_COLUMNS: tuple[str, ...] = ()
     # Maps the raw index value (upper-cased, stripped) to the camera name the
@@ -150,45 +145,13 @@ class DataSetPDS3(DataSet):
         return self.__str__()
 
     @classmethod
-    def image_et_from_index_row(cls, index_row: dict[str, Any]) -> float | None:
-        """The image's observation epoch, read from its PDS3 index row.
-
-        The index carries every image's time, so this is the one source of
-        an epoch that needs neither SPICE nor the image itself -- which is
-        what lets an image whose navigation died for want of a SPICE kernel
-        still be placed in time.  ``julian`` parses every format the index
-        tables use directly, including day-of-year (``1999-009T08:13:58.687``)
-        and a trailing ``Z``.
-
-        Parameters:
-            index_row: An ``ImageFile.index_file_row``; an empty dict (an
-                image not enumerated from an index) yields None.
-
-        Returns:
-            TDB seconds past J2000, or None when the row carries no
-            readable time (no time column, a masked/null value, or an
-            unparsable one).
-        """
-        for column in cls._INDEX_TIME_COLUMNS:
-            value = index_row.get(column)
-            # PdsTable reports a null cell via a companion ``<column>_mask``.
-            if value is None or index_row.get(f'{column}_mask'):
-                continue
-            try:
-                return float(julian.tdb_from_tai(julian.tai_from_iso(str(value))))
-            except (ValueError, TypeError, KeyError):
-                continue
-        return None
-
-    @classmethod
     def camera_from_index_row(cls, index_row: dict[str, Any]) -> str | None:
         """The camera that took the image, read from its PDS3 index row.
 
-        Like :meth:`image_et_from_index_row`, this needs neither SPICE nor
-        the image itself, so an image whose navigation died for want of a
-        SPICE kernel still names its camera.  The result uses the same
-        names as ``ObsInst.camera``, so an observation's camera and this
-        one are interchangeable.
+        This needs neither SPICE nor the image itself, so an image whose
+        navigation died for want of a SPICE kernel still names its camera.
+        The result uses the same names as ``ObsInst.camera``, so an
+        observation's camera and this one are interchangeable.
 
         Parameters:
             index_row: An ``ImageFile.index_file_row``; an empty dict (an
@@ -202,6 +165,7 @@ class DataSetPDS3(DataSet):
         """
         for column in cls._INDEX_CAMERA_COLUMNS:
             value = index_row.get(column)
+            # PdsTable reports a null cell via a companion ``<column>_mask``.
             if value is None or index_row.get(f'{column}_mask'):
                 continue
             camera = cls._INDEX_CAMERA_MAP.get(str(value).strip().upper())
@@ -748,10 +712,7 @@ class DataSetPDS3(DataSet):
         all_volume_names = self._ALL_VOLUME_NAMES
         index_columns = tuple(
             dict.fromkeys(
-                self._INDEX_COLUMNS
-                + self._INDEX_TIME_COLUMNS
-                + self._INDEX_CAMERA_COLUMNS
-                + additional_index_columns
+                self._INDEX_COLUMNS + self._INDEX_CAMERA_COLUMNS + additional_index_columns
             )
         )
         volumes_dir_name = self._VOLUMES_DIR_NAME
@@ -978,7 +939,6 @@ class DataSetPDS3(DataSet):
                 image_file_url=img_url,
                 label_file_url=label_url,
                 index_file_row=row,
-                image_et=self.image_et_from_index_row(row),
                 camera=self.camera_from_index_row(row),
                 results_path_stub=results_path_stub,
                 image_url_resolver=self._image_url_from_label,
