@@ -17,6 +17,13 @@ import pdslogger
 import pytest
 from filecache import FCPath
 from sqlalchemy import Connection
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    technique,
+    write_metadata,
+)
 
 from spindoctor.cli.stats.report import build_report
 from spindoctor.cli.stats.report_sections import IMAGE_COLUMNS
@@ -24,11 +31,6 @@ from spindoctor.dataset import DataSetPDS3CassiniISS, DataSetPDS3VoyagerISS
 from spindoctor.results_index import open_index
 
 from .conftest import (
-    index_url,
-    ingest_tree,
-    metadata_document,
-    technique,
-    write_metadata,
     write_metadata_in_each,
 )
 

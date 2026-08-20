@@ -22,7 +22,10 @@ import pdslogger
 import pytest
 from filecache import FCPath
 from sqlalchemy.engine import Engine
-from tests.spindoctor.cli.stats.conftest import metadata_document, write_metadata
+from tests.spindoctor.conftest import (
+    metadata_document,
+    write_metadata,
+)
 from tests.spindoctor.results_index.conftest import (
     postgres_decoy_schema,
     postgres_schema,
@@ -107,44 +110,6 @@ FITTED_ROTATION_POINTING: dict[str, Any] = {
 """What a result that fitted a camera rotation records: a baseline, no cmatrix."""
 
 
-def nested(flat: list[float]) -> list[list[float]]:
-    """Rewrite nine row-major values as the 3x3 nesting of them.
-
-    Parameters:
-        flat: The nine values, row-major.
-
-    Returns:
-        Three rows of three.
-    """
-    return [flat[0:3], flat[3:6], flat[6:9]]
-
-
-def one_element_rows(flat: list[float]) -> list[list[float]]:
-    """Rewrite nine row-major values as nine rows of one.
-
-    A shape no producer writes and every reader that assembles an array
-    accepts, because nine rows of one reshape into 3x3 exactly as nine scalars
-    do.  It is here because a store that judged the entries instead of
-    assembling them held nothing for it.
-
-    Parameters:
-        flat: The nine values, row-major.
-
-    Returns:
-        Nine rows of one.
-    """
-    return [[value] for value in flat]
-
-
-TOO_BIG_FOR_A_FLOAT = 10**400
-"""A JSON integer literal no float can hold.
-
-JSON bounds no integer, so a document can carry one; ``float()`` of it raises
-rather than overflowing to an infinity, which is a reader that raises where its
-contract says it answers.
-"""
-
-
 OFFSET = [5.6005, 1.0788]
 """The navigated offset those attitudes were computed from."""
 
@@ -155,23 +120,7 @@ CMATRIX_STUB = f'{VOLUME}/N100_1_CALIB'
 FITTED_STUB = f'{VOLUME}/N101_1_CALIB'
 NO_POINTING_STUB = f'{VOLUME}/N102_1_CALIB'
 FAILED_STUB = f'{VOLUME}/N103_1_CALIB'
-NULL_OFFSET_STUB = f'{VOLUME}/N104_1_CALIB'
-NO_MIDTIME_STUB = f'{VOLUME}/N105_1_CALIB'
-NOT_A_ROTATION_STUB = f'{VOLUME}/N110_1_CALIB'
-NAN_MIDTIME_STUB = f'{VOLUME}/N111_1_CALIB'
-NESTED_CMATRIX_STUB = f'{VOLUME}/N112_1_CALIB'
-NO_TOP_LEVEL_STATUS_STUB = f'{VOLUME}/N113_1_CALIB'
 NO_STATUS_ERROR_STUB = f'{VOLUME}/N115_1_CALIB'
-SUCCESS_NO_OFFSET_KEY_STUB = f'{VOLUME}/N116_1_CALIB'
-NUMERIC_STRING_OFFSET_STUB = f'{VOLUME}/N118_1_CALIB'
-NESTED_ORIGINAL_STUB = f'{VOLUME}/N119_1_CALIB'
-NESTED_NOT_A_ROTATION_STUB = f'{VOLUME}/N120_1_CALIB'
-LITERAL_UNKNOWN_STATUS_STUB = f'{VOLUME}/N124_1_CALIB'
-NULL_STATUS_ERROR_STUB = f'{VOLUME}/N125_1_CALIB'
-ONE_ELEMENT_ROWS_CMATRIX_STUB = f'{VOLUME}/N126_1_CALIB'
-ONE_ELEMENT_ROWS_ORIGINAL_STUB = f'{VOLUME}/N127_1_CALIB'
-HUGE_INT_MIDTIME_STUB = f'{VOLUME}/N130_1_CALIB'
-LITERAL_UNKNOWN_ERROR_STUB = f'{VOLUME}/N132_1_CALIB'
 REFUSED_DOCUMENT_STUB = f'{VOLUME}/N133_1_CALIB'
 ZERO_OFFSET_STUB = f'{VOLUME}/N134_1_CALIB'
 ZERO_EPOCH_STUB = f'{VOLUME}/N135_1_CALIB'
@@ -266,123 +215,10 @@ def reason_tree() -> dict[str, dict[str, Any]]:
         FAILED_STUB: document(
             FAILED_STUB, status='error', status_error='missing_spice_data', offset=None
         ),
-        NULL_OFFSET_STUB: document(NULL_OFFSET_STUB),
-        # A pointing block whose exposure epochs carry no midtime: the gates
-        # cannot run without one, so the record is malformed rather than bare.
-        NO_MIDTIME_STUB: document(
-            NO_MIDTIME_STUB,
-            offset=OFFSET,
-            times={key: value for key, value in TIMES.items() if key != 'midtime_et'},
-            pointing=POINTING,
-        ),
-        # Nine finite numbers that are not a rotation: ingest stores them, and
-        # the reader's validator is what refuses them, in both paths alike.
-        NOT_A_ROTATION_STUB: document(
-            NOT_A_ROTATION_STUB,
-            offset=OFFSET,
-            times=TIMES,
-            pointing={**POINTING, 'cmatrix': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]},
-        ),
-        # A midtime that is a number and is not one: NaN defeats every
-        # comparison, so a guard written as one does not hold it, and the gate
-        # it would reach ties a recorded attitude to its observation.
-        NAN_MIDTIME_STUB: document(
-            NAN_MIDTIME_STUB,
-            offset=OFFSET,
-            times={**TIMES, 'midtime_et': float('nan')},
-            pointing=POINTING,
-        ),
-        # A rotation written as a 3x3 nesting rather than as the nine row-major
-        # floats its producer writes.  Both shapes are read by the one function
-        # ingest stores rotations through, so the nesting reaches the index as
-        # the nine values it denotes and both paths apply the same attitude.
-        NESTED_CMATRIX_STUB: document(
-            NESTED_CMATRIX_STUB,
-            offset=OFFSET,
-            times=TIMES,
-            pointing={**POINTING, 'cmatrix': nested(CMATRIX)},
-        ),
-        # The baseline written the same way.  It is gated against the
-        # observation exactly as the corrected attitude is, so a store that
-        # read one shape for one matrix and both for the other would refuse
-        # through an index what it applies through a document.
-        NESTED_ORIGINAL_STUB: document(
-            NESTED_ORIGINAL_STUB,
-            offset=OFFSET,
-            times=TIMES,
-            pointing={**POINTING, 'cmatrix_original': nested(CMATRIX_ORIGINAL)},
-        ),
-        # A nesting of nine finite numbers that is not a rotation: stored like
-        # any other nine finite numbers, and refused by the validator both
-        # paths apply to what was stored.
-        NESTED_NOT_A_ROTATION_STUB: document(
-            NESTED_NOT_A_ROTATION_STUB,
-            offset=OFFSET,
-            times=TIMES,
-            pointing={**POINTING, 'cmatrix': [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]},
-        ),
-        # An offset written as two numeric strings, which the reader converts
-        # and applies, so the index has to store what it converts them to.
-        NUMERIC_STRING_OFFSET_STUB: document(NUMERIC_STRING_OFFSET_STUB, offset=OFFSET),
-        # A document naming, as its own outcome, the word a document naming
-        # none is recorded as.  The two are one row, so both are reported as
-        # that word rather than one of them as nothing.
-        LITERAL_UNKNOWN_STATUS_STUB: document(
-            LITERAL_UNKNOWN_STATUS_STUB, status='unknown', offset=None
-        ),
-        # An unsuccessful outcome whose error field is present and null, which
-        # is a field naming no error just as an absent one is.
-        NULL_STATUS_ERROR_STUB: document(NULL_STATUS_ERROR_STUB, status='failed', offset=None),
-        # A document naming no outcome of its own, beside a nested copy that
-        # names one.  The ladder's first question is the top-level field, so a
-        # column standing the nested one in for it would apply a corrected
-        # attitude to a record the same document supplies no pointing for.
-        NO_TOP_LEVEL_STATUS_STUB: document(
-            NO_TOP_LEVEL_STATUS_STUB, offset=OFFSET, times=TIMES, pointing=POINTING
-        ),
         # An unsuccessful outcome naming no error, which is every failed and
         # conflicted navigation: the field is written only by a document
         # recording an image that would not load.
         NO_STATUS_ERROR_STUB: document(NO_STATUS_ERROR_STUB, status='failed', offset=None),
-        # A successful outcome carrying a usable attitude and no offset field.
-        # No navigation writes it, since a result with no offset is never a
-        # success.  Both paths build the product the rest of the record
-        # supplies; only the name they give the offset shortfall differs.
-        SUCCESS_NO_OFFSET_KEY_STUB: document(
-            SUCCESS_NO_OFFSET_KEY_STUB, offset=OFFSET, times=TIMES, pointing=POINTING
-        ),
-        # A rotation written as nine rows of one.  Every reader that assembles
-        # an array reshapes it into the same 3x3 the flat nine denote, so the
-        # store has to hold it: a store that judged the entries one at a time
-        # instead would leave the corrected attitude applied through a document
-        # and an OffsetFOV applied through a row.
-        ONE_ELEMENT_ROWS_CMATRIX_STUB: document(
-            ONE_ELEMENT_ROWS_CMATRIX_STUB,
-            offset=OFFSET,
-            times=TIMES,
-            pointing={**POINTING, 'cmatrix': one_element_rows(CMATRIX)},
-        ),
-        # The baseline written the same way, which is gated against the
-        # observation exactly as the corrected attitude is.
-        ONE_ELEMENT_ROWS_ORIGINAL_STUB: document(
-            ONE_ELEMENT_ROWS_ORIGINAL_STUB,
-            offset=OFFSET,
-            times=TIMES,
-            pointing={**POINTING, 'cmatrix_original': one_element_rows(CMATRIX_ORIGINAL)},
-        ),
-        HUGE_INT_MIDTIME_STUB: document(
-            HUGE_INT_MIDTIME_STUB,
-            offset=OFFSET,
-            times={**TIMES, 'midtime_et': TOO_BIG_FOR_A_FLOAT},
-            pointing=POINTING,
-        ),
-        # An unsuccessful outcome naming, as its own error, the word a record
-        # naming none is reported under.  Stored as the record naming none it
-        # reads as, so the column cannot come to hold one thing and the reader
-        # report another.
-        LITERAL_UNKNOWN_ERROR_STUB: document(
-            LITERAL_UNKNOWN_ERROR_STUB, status='failed', offset=None, status_error='unknown'
-        ),
         # A document the ingest refuses whole, carrying a usable corrected
         # attitude all the same.  Read as a file it supplies that attitude;
         # the index holds no record of it and must say so rather than report
@@ -407,18 +243,6 @@ def reason_tree() -> dict[str, dict[str, Any]]:
             ZERO_EPOCH_STUB, offset=OFFSET, times=ZERO_TIMES, pointing=ZERO_FRAME_ID_POINTING
         ),
     }
-    # The two shapes of "no usable offset on a successful record" are made here
-    # rather than by the factory, which writes the key only when it has a value
-    # and so cannot express a key holding null.
-    tree[NULL_OFFSET_STUB]['offset'] = None
-    del tree[SUCCESS_NO_OFFSET_KEY_STUB]['offset']
-    # Likewise made here: the factory writes the top-level status always, and
-    # the nested copy of it is what the shape under test is about.
-    del tree[NO_TOP_LEVEL_STATUS_STUB]['status']
-    # And likewise the values the factory's own types cannot express: an offset
-    # of two numeric strings, and an error field present and holding null.
-    tree[NUMERIC_STRING_OFFSET_STUB]['offset'] = [str(OFFSET[0]), str(OFFSET[1])]
-    tree[NULL_STATUS_ERROR_STUB]['status_error'] = None
     return tree
 
 

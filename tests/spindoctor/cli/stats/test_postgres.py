@@ -27,13 +27,15 @@ from tests.spindoctor.cli.stats.conftest import (
     build_tree,
     complete,
     fan_out,
-    ingest_tree,
-    metadata_document,
     recorded_lines,
     refusal_report,
     report_from_tree,
     reported,
     run_rows,
+)
+from tests.spindoctor.conftest import (
+    ingest_tree,
+    metadata_document,
     technique,
     write_metadata,
     write_refusal,

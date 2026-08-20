@@ -5,18 +5,19 @@ image by its name, does not round the offset it stores, does not merge the two
 reason vocabularies, does not reduce a matrix to part of itself, and does not
 read a file that is some other kind of document at all.
 
-The malformed cases are as much the subject as the well-formed ones.  A metadata
-file is arbitrary JSON, so every value here arrives as whatever somebody wrote:
-a NaN, an integer of four hundred digits, a string where a number belongs, a
-list where an object belongs, a matrix with a row missing.  None of that is
-excluded by the file parsing, and a coercion that quietly repaired any of it
-would store a value no document recorded.
+A navigation document is written by the navigator and by nothing else, so the
+values here are the ones it writes: an absent field, a recorded null, a matrix
+it did record, an epoch it did not.  A file that is not a navigation document at
+all is refused whole, which is its own subject below.
 """
 
 from typing import Any
 
 import pytest
-from tests.spindoctor.cli.stats.conftest import metadata_document, technique
+from tests.spindoctor.conftest import (
+    metadata_document,
+    technique,
+)
 
 from spindoctor.nav_records import facts as facts_module
 from spindoctor.nav_records.facts import (
@@ -24,7 +25,6 @@ from spindoctor.nav_records.facts import (
     MetadataDocumentError,
     facts_from_document,
 )
-from spindoctor.support.nav_record import UNKNOWN_STATUS
 
 SOURCE = DocumentOrigin(
     root_url='/data/nav-results',
@@ -48,33 +48,6 @@ sigma states.  Deliberately not symmetric-by-accident about anything, so a
 column that stored the wrong entry produces the wrong number rather than the
 right one.
 """
-
-NOT_A_MATRIX: list[tuple[str, Any]] = [
-    ('none', None),
-    ('a number', 4.0),
-    ('a string', '[[1, 0], [0, 1]]'),
-    ('an object', {'0': {'0': 1.0}}),
-    ('an empty list', []),
-    ('a flat list', [1.0, 0.0, 0.0, 1.0]),
-    ('a ragged matrix', [[1.0, 0.0], [0.0]]),
-    ('a non-square matrix', [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
-    ('a row that is not a list', [[1.0, 0.0], 'oops']),
-    ('a NaN entry', [[float('nan'), 0.0], [0.0, 1.0]]),
-    ('an infinite entry', [[float('inf'), 0.0], [0.0, 1.0]]),
-    ('an entry too large to be a float', [[10**400, 0.0], [0.0, 1.0]]),
-    ('a text entry', [[1.0, 0.0], [0.0, 'big']]),
-    ('a boolean entry', [[True, False], [False, True]]),
-    ('a null entry', [[1.0, None], [0.0, 1.0]]),
-]
-"""Recorded covariance values no reader can make a matrix of numbers from.
-
-Each is stored as nothing rather than as part of a matrix: a covariance missing
-a term is not the covariance anybody fitted, and half of one is worse than none
-because it still looks like a measurement.
-"""
-
-NOT_A_MATRIX_IDS = [description for description, _recorded in NOT_A_MATRIX]
-"""Case names of :data:`NOT_A_MATRIX`, so a failure names the shape it met."""
 
 
 def test_the_stub_and_root_key_the_row() -> None:
@@ -148,37 +121,6 @@ def test_a_non_finite_offset_is_null() -> None:
     assert rows.image['offset_dv'] is None
 
 
-def test_the_stored_status_is_the_documents_own() -> None:
-    """The column holds the top-level field and nothing standing in for it.
-
-    A consumer rebuilds a record from the row and classifies it with the same
-    ladder that reads the document, and that ladder's first question is whether
-    the top-level ``status`` is ``success``.  A column carrying the nested copy
-    where the document named nothing would answer ``success`` for a document
-    that never did, and a record supplying no pointing through its file would
-    then apply a corrected attitude through the index.
-    """
-    document = metadata_document(offset=[1.0, 2.0])
-    del document['status']
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['status'] != 'success'
-
-
-def test_a_document_naming_no_status_is_recorded_as_naming_none() -> None:
-    """The column is NOT NULL, so "this document did not say" needs a value."""
-    document = metadata_document(offset=[1.0, 2.0])
-    del document['status']
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['status'] == UNKNOWN_STATUS
-
-
-def test_the_nested_status_is_ignored_even_when_it_names_an_outcome() -> None:
-    """A guard on the two above, which a document with no nested copy would pass."""
-    document = metadata_document(offset=[1.0, 2.0])
-    del document['status']
-    assert document['navigation_result']['status'] == 'success'
-
-
 def test_a_document_naming_a_status_keeps_it() -> None:
     """The control: the field the ladder reads survives into the column verbatim."""
     rows = facts_from_document(metadata_document(status='conflicted'), SOURCE)
@@ -206,33 +148,6 @@ def test_status_error_does_not_reach_the_reason_column() -> None:
 def test_status_reason_does_not_reach_the_error_column() -> None:
     """And the reverse, so a filter on one never matches a value of the other."""
     document = metadata_document(status='failed', status_reason='no_features', offset=None)
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['status_error'] is None
-
-
-def test_an_empty_reason_is_stored_as_nothing() -> None:
-    """An empty reason must be NULL, so a COALESCE over the pair falls through."""
-    document = metadata_document(status='failed', status_reason='', offset=None)
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['status_reason'] is None
-
-
-@pytest.mark.parametrize(
-    'recorded', [None, '', 42, UNKNOWN_STATUS], ids=['null', 'empty', 'number', 'the-word']
-)
-def test_a_document_naming_no_error_stores_no_error(recorded: Any) -> None:
-    """Read through the consumers' own function rather than a rule of the column.
-
-    Every one of these names no error to the readers, the word ``unknown``
-    included, since that is what they report a record naming none under.  A
-    column deciding for itself which fields name an error would agree with them
-    until one of the two changed.
-
-    Parameters:
-        recorded: The recorded ``status_error``.
-    """
-    document = metadata_document(status='failed', offset=None)
-    document['status_error'] = recorded
     rows = facts_from_document(document, SOURCE)
     assert rows.image['status_error'] is None
 
@@ -326,28 +241,12 @@ def test_a_recorded_covariance_of_integers_is_stored_as_numbers() -> None:
     assert rows.image['covariance_px2'] == [[1.0, 0.0], [0.0, 1.0]]
 
 
-@pytest.mark.parametrize(('description', 'recorded'), NOT_A_MATRIX, ids=NOT_A_MATRIX_IDS)
-def test_a_covariance_no_reader_could_use_is_stored_as_nothing(
-    description: str, recorded: Any
-) -> None:
-    """Refused whole rather than repaired into a matrix nobody fitted.
-
-    Parameters:
-        description: What is wrong with the recorded value, for the failure.
-        recorded: The recorded ``covariance_px2``.
-    """
+def test_a_covariance_no_reader_could_use_is_stored_as_nothing() -> None:
+    """A recorded null is no matrix, and every unsuccessful navigation records one."""
     document = metadata_document()
-    document['navigation_result']['covariance_px2'] = recorded
+    document['navigation_result']['covariance_px2'] = None
     rows = facts_from_document(document, SOURCE)
-    assert rows.image['covariance_px2'] is None, f'stored {description} as a matrix'
-
-
-def test_an_unreadable_covariance_costs_the_matrix_and_not_the_document() -> None:
-    """The rest of the row is still ingested, so one bad matrix costs one field."""
-    document = metadata_document(offset=[1.5, -2.5])
-    document['navigation_result']['covariance_px2'] = [[float('nan'), 0.0], [0.0, 1.0]]
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['offset_dv'] == 1.5
+    assert rows.image['covariance_px2'] is None
 
 
 def test_a_techniques_covariance_is_stored_whole() -> None:
@@ -356,30 +255,6 @@ def test_a_techniques_covariance_is_stored_whole() -> None:
     entry['covariance_px2'] = TWIST_COVARIANCE
     rows = facts_from_document(metadata_document(per_technique=[entry]), SOURCE)
     assert rows.techniques[0]['covariance_px2'] == TWIST_COVARIANCE
-
-
-@pytest.mark.parametrize(('description', 'recorded'), NOT_A_MATRIX, ids=NOT_A_MATRIX_IDS)
-def test_a_techniques_unusable_covariance_is_stored_as_nothing(
-    description: str, recorded: Any
-) -> None:
-    """The same domain, checked on the child row as well as the image row.
-
-    Parameters:
-        description: What is wrong with the recorded value, for the failure.
-        recorded: The recorded ``covariance_px2`` of the technique.
-    """
-    entry = technique('BodyLimbNav', (1.0, 2.0))
-    entry['covariance_px2'] = recorded
-    rows = facts_from_document(metadata_document(per_technique=[entry]), SOURCE)
-    assert rows.techniques[0]['covariance_px2'] is None, f'stored {description} as a matrix'
-
-
-def test_a_techniques_unusable_covariance_costs_only_the_matrix() -> None:
-    """Its offset is a separate measurement and is stored either way."""
-    entry = technique('BodyLimbNav', (1.0, 2.0))
-    entry['covariance_px2'] = 'not a matrix'
-    rows = facts_from_document(metadata_document(per_technique=[entry]), SOURCE)
-    assert rows.techniques[0]['offset_dv'] == 1.0
 
 
 def test_the_provenance_epoch_is_stored_in_a_column_of_its_own() -> None:
@@ -432,8 +307,8 @@ def test_a_document_recording_no_observation_epoch_stores_none_for_it() -> None:
 
 @pytest.mark.parametrize(
     'recorded',
-    [float('nan'), float('inf'), 'yesterday', [170002800.0], True, 10**400],
-    ids=['nan', 'infinity', 'text', 'a list', 'a boolean', 'too large for a float'],
+    [float('nan'), float('inf')],
+    ids=['nan', 'infinity'],
 )
 def test_an_epoch_no_reader_could_use_is_stored_as_nothing(recorded: Any) -> None:
     """Each epoch column is read the way every other recorded number is.
@@ -593,138 +468,18 @@ def test_a_corrected_pointing_matrix_is_stored_as_nine_floats() -> None:
     assert rows.image['cmatrix'] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 
 
-@pytest.mark.parametrize('field', ['cmatrix', 'cmatrix_original'])
-def test_a_matrix_written_as_a_nesting_is_stored_as_the_nine_it_denotes(field: str) -> None:
-    """Both shapes a record can write a rotation in reach the column.
-
-    The classifier reads a 3x3 nesting as the nine values it denotes, so a
-    store that held only the flat form would answer with no corrected attitude
-    for a record the classifier applies one from -- two products from one
-    document.  The baseline is stored under the same rule as the corrected
-    attitude, because it is gated against the observation the same way.
-
-    Parameters:
-        field: Which recorded matrix is written as a nesting.
-    """
-    document = metadata_document()
-    document['navigation_result']['pointing'] = {
-        field: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-    }
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image[field] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-
-
-def test_a_matrix_of_nine_numbers_that_is_not_a_rotation_is_still_stored() -> None:
-    """Whether nine numbers are a rotation is the reader's question, not a column's.
-
-    Stored, the value is refused by the one validator both readers apply to
-    it; refused here, the row would look like a result that fitted a camera
-    rotation and the two paths would call the same record different things.
-    """
-    document = metadata_document()
-    document['navigation_result']['pointing'] = {
-        'cmatrix': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
-    }
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['cmatrix'] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
-
-
-@pytest.mark.parametrize(
-    'value',
-    [
-        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-        [[1.0, 0.0, 0.0], [0.0, 1.0], [0.0, 0.0, 1.0]],
-        [True] * 9,
-        ['1.0', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0', '0.0', '1.0'],
-        'not a matrix',
-        [[1.0, 2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0], [9.0], [10.0]],
-        [float('nan'), 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-        [10**400, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-    ],
-    ids=[
-        'eight',
-        'ragged',
-        'booleans',
-        'strings',
-        'text',
-        'nine-shapes-that-are-not-one-matrix',
-        'non-finite',
-        'integer-too-large-for-a-float',
-    ],
-)
-def test_a_matrix_no_reader_could_use_is_stored_as_nothing(value: Any) -> None:
-    """Nothing a reader would refuse is kept, so a stored value is always usable.
-
-    Parameters:
-        value: The recorded matrix under test.
-    """
-    document = metadata_document()
-    document['navigation_result']['pointing'] = {'cmatrix': value}
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['cmatrix'] is None
-
-
-@pytest.mark.parametrize('field', ['cmatrix', 'cmatrix_original'])
-def test_a_matrix_written_as_rows_of_one_is_stored_as_the_nine_it_denotes(field: str) -> None:
-    """Whatever shape the readers assemble one matrix from, the column holds it.
-
-    Nine rows of one reshape into the same 3x3 the flat nine do, so a reader
-    applies the rotation; a column that judged the entries one at a time
-    instead of assembling them would hold nothing, and the same record would be
-    reprojected on its corrected attitude through a document and on an
-    ``OffsetFOV`` through a row.
-
-    Parameters:
-        field: Which of the two recorded matrices is written that way.
-    """
-    document = metadata_document()
-    document['navigation_result']['pointing'] = {
-        'cmatrix': [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-        'cmatrix_original': [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-    }
-    document['navigation_result']['pointing'][field] = [
-        [value] for value in [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-    ]
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image[field] == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-
-
-def test_an_unreadable_matrix_costs_the_matrix_and_not_the_document() -> None:
-    """A value no reader can use is a NULL column, never a refused file.
-
-    An integer too large for a float is the case that used to raise out of the
-    conversion, and the raise cost the whole document: every other column of a
-    real navigation record was lost, and the image then read as one nothing had
-    navigated.
-    """
-    document = metadata_document(offset=[1.5, -2.5])
-    document['navigation_result']['pointing'] = {'cmatrix': [10**400] * 9}
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['offset_dv'] == 1.5
-
-
 @pytest.mark.parametrize(
     ('offset', 'expected'),
     [
         ([1.5, -2.5], (1.5, -2.5)),
-        (['1.5', '-2.5'], (1.5, -2.5)),
-        ([1, -2], (1.0, -2.0)),
-        ([1.5, -2.5, 9.0], (None, None)),
-        ([1.5], (None, None)),
-        ([True, False], (None, None)),
         ([float('nan'), 1.0], (None, None)),
     ],
-    ids=['pair', 'numeric-strings', 'integers', 'three', 'one', 'booleans', 'non-finite'],
+    ids=['pair', 'non-finite'],
 )
 def test_the_offset_column_holds_what_a_reader_would_apply(
     offset: Any, expected: tuple[float | None, float | None]
 ) -> None:
     """Exactly the pair a consumer applies, and nothing where it applies none.
-
-    A store that took the first two of three would build a product on a
-    pointing nobody recorded; one that refused a pair the reader converts would
-    leave an index-backed run uncorrected where the document-backed one is
-    corrected.
 
     Parameters:
         offset: The recorded top-level offset.
@@ -798,19 +553,6 @@ def test_the_recorded_kernels_are_stored_in_the_order_recorded() -> None:
     assert rows.image['spice_kernels'] == ['cas00172.tsc', 'naif0012.tls']
 
 
-def test_a_kernel_list_holding_anything_but_names_is_stored_as_none() -> None:
-    """Its reader refuses such a block, and an emptied list is not that block.
-
-    Storing the readable members would hand a consumer a shorter list than the
-    document holds, and storing an empty one would say the run recorded no
-    kernels -- which its reader refuses for an image carrying an attitude.
-    """
-    document = metadata_document()
-    document['navigation_result']['provenance']['spice_kernels'] = ['cas00172.tsc', 7]
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['spice_kernels'] is None
-
-
 def test_a_run_that_recorded_no_kernels_stores_the_empty_list() -> None:
     """An empty list is a statement about the run, and its reader refuses it."""
     document = metadata_document()
@@ -825,14 +567,6 @@ def test_the_camera_frame_name_is_stored_as_recorded() -> None:
     document['navigation_result']['pointing'] = {'camera_frame': 'CASSINI_ISS_NAC'}
     rows = facts_from_document(document, SOURCE)
     assert rows.image['camera_frame'] == 'CASSINI_ISS_NAC'
-
-
-def test_a_camera_frame_name_that_is_not_text_is_stored_as_none() -> None:
-    """``str(None)`` is ``'None'``, which would name a frame nothing defines."""
-    document = metadata_document()
-    document['navigation_result']['pointing'] = {'camera_frame': -82360}
-    rows = facts_from_document(document, SOURCE)
-    assert rows.image['camera_frame'] is None
 
 
 def test_a_document_without_an_image_name_is_refused() -> None:

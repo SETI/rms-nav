@@ -6,7 +6,7 @@ walk's own metrics ride along with what came out of it, that a file which is no
 navigation document is reported rather than raised on, and that a selection is
 honoured the way the stream of records honours it.  That the answer matches the
 index's is tested where both storages can be driven over one tree, in
-:mod:`tests.spindoctor.results_index.test_facts_stream`.
+:mod:`tests.spindoctor.results_index.test_facts_stream_agreement`.
 """
 
 import json

@@ -19,6 +19,14 @@ import pdslogger
 import pytest
 import sqlalchemy
 from filecache import FCPath
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    technique,
+    write_metadata,
+    write_summary_png,
+)
 
 from spindoctor.cli.stats.ingest import INGEST_COMMIT_CHUNK_SIZE, ingest_metadata_files
 from spindoctor.cli.stats.ingest import chunks as chunks_module
@@ -33,13 +41,7 @@ from spindoctor.results_index import (
 )
 
 from .conftest import (
-    index_url,
-    ingest_tree,
-    metadata_document,
     run_rows,
-    technique,
-    write_metadata,
-    write_summary_png,
 )
 
 TWO_ROOT_STUB = 'COISS_2001/data/1294561143_1295221348/N1294561202_1_CALIB'

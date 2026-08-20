@@ -30,7 +30,9 @@ from typing import Any
 
 import pytest
 import sqlalchemy
-from tests.spindoctor.cli.stats.conftest import metadata_document
+from tests.spindoctor.conftest import (
+    metadata_document,
+)
 
 from spindoctor.cli.ck.inputs import RECORD_COLUMNS as CK_COLUMNS
 from spindoctor.cli.reproj.offsets import select_pointing

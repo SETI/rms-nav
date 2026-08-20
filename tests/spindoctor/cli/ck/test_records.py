@@ -21,7 +21,11 @@ import pytest
 import sqlalchemy
 from filecache import FCPath
 from tests.spindoctor.cli.ck.ck_helpers import KernelPool, image_metadata
-from tests.spindoctor.cli.stats.conftest import index_url, ingest_tree, write_metadata
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    write_metadata,
+)
 
 from spindoctor.cli.ck.images import ImageEntry
 from spindoctor.cli.ck.inputs import RECORD_COLUMNS, read_whole_mission

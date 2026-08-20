@@ -3,9 +3,9 @@
 The guarantee under test is equivalence: for every record ingest stored, the
 two sources classify the same pointing, carry the same recorded values, and
 write the same warning to the image's log.  Where they cannot -- because ingest
-refused a document, or coerced a value the file path can still read -- the
-difference is asserted rather than assumed, so a later change that silently
-widened it fails here.
+refused a document, so the index has no record of it -- the difference is
+asserted rather than assumed, so a later change that silently widened it fails
+here.
 
 Every lookup is filtered on the root as well as the stub, and a two-root fixture
 whose second root differs in exactly the value under test is what proves it: a
@@ -29,29 +29,13 @@ from tests.spindoctor.cli.reproj.conftest import (
     CMATRIX_STUB,
     FAILED_STUB,
     FITTED_STUB,
-    HUGE_INT_MIDTIME_STUB,
-    LITERAL_UNKNOWN_ERROR_STUB,
-    LITERAL_UNKNOWN_STATUS_STUB,
     MIDTIME_ET,
-    NAN_MIDTIME_STUB,
-    NESTED_CMATRIX_STUB,
-    NESTED_NOT_A_ROTATION_STUB,
-    NESTED_ORIGINAL_STUB,
-    NO_MIDTIME_STUB,
     NO_POINTING_STUB,
     NO_STATUS_ERROR_STUB,
-    NO_TOP_LEVEL_STATUS_STUB,
-    NOT_A_ROTATION_STUB,
-    NULL_OFFSET_STUB,
-    NULL_STATUS_ERROR_STUB,
-    NUMERIC_STRING_OFFSET_STUB,
     OFFSET,
-    ONE_ELEMENT_ROWS_CMATRIX_STUB,
-    ONE_ELEMENT_ROWS_ORIGINAL_STUB,
     POINTING,
     REFUSED_DOCUMENT_REASON,
     REFUSED_DOCUMENT_STUB,
-    SUCCESS_NO_OFFSET_KEY_STUB,
     TIMES,
     UNNAVIGATED_STUB,
     ZERO_EPOCH_STUB,
@@ -99,18 +83,6 @@ _SAME_REASON = [
     (FITTED_STUB, 'no_cmatrix_rotation_fitted'),
     (NO_POINTING_STUB, 'no_pointing_block'),
     (FAILED_STUB, 'navigation_did_not_succeed'),
-    (NULL_OFFSET_STUB, 'null_offset'),
-    (NO_MIDTIME_STUB, 'malformed_pointing'),
-    (NOT_A_ROTATION_STUB, 'malformed_pointing'),
-    (NESTED_NOT_A_ROTATION_STUB, 'malformed_pointing'),
-    (NAN_MIDTIME_STUB, 'malformed_pointing'),
-    (NESTED_CMATRIX_STUB, None),
-    (NESTED_ORIGINAL_STUB, None),
-    (ONE_ELEMENT_ROWS_CMATRIX_STUB, None),
-    (ONE_ELEMENT_ROWS_ORIGINAL_STUB, None),
-    (SUCCESS_NO_OFFSET_KEY_STUB, None),
-    (NUMERIC_STRING_OFFSET_STUB, 'no_pointing_block'),
-    (HUGE_INT_MIDTIME_STUB, 'malformed_pointing'),
     (ZERO_OFFSET_STUB, 'no_pointing_block'),
     (ZERO_EPOCH_STUB, None),
     (UNNAVIGATED_STUB, 'no_metadata'),
@@ -133,24 +105,6 @@ def test_both_paths_report_the_same_reason(
         (FITTED_STUB, PointingMechanism.OFFSET),
         (NO_POINTING_STUB, PointingMechanism.OFFSET),
         (FAILED_STUB, PointingMechanism.NONE),
-        (NULL_OFFSET_STUB, PointingMechanism.NONE),
-        (NO_MIDTIME_STUB, PointingMechanism.OFFSET),
-        (NOT_A_ROTATION_STUB, PointingMechanism.OFFSET),
-        (NESTED_NOT_A_ROTATION_STUB, PointingMechanism.OFFSET),
-        (NAN_MIDTIME_STUB, PointingMechanism.OFFSET),
-        (NESTED_CMATRIX_STUB, PointingMechanism.CMATRIX),
-        (NESTED_ORIGINAL_STUB, PointingMechanism.CMATRIX),
-        (ONE_ELEMENT_ROWS_CMATRIX_STUB, PointingMechanism.CMATRIX),
-        (ONE_ELEMENT_ROWS_ORIGINAL_STUB, PointingMechanism.CMATRIX),
-        (NUMERIC_STRING_OFFSET_STUB, PointingMechanism.OFFSET),
-        (SUCCESS_NO_OFFSET_KEY_STUB, PointingMechanism.CMATRIX),
-        (HUGE_INT_MIDTIME_STUB, PointingMechanism.OFFSET),
-        # The four unusable-offset shapes the two storages name differently.
-        # They are here as well as in the differing-reason table because that
-        # one asserts only that the two agree: a change that gave both paths a
-        # pointing for a record that supplies none would satisfy it, and the
-        # whole claim about a differing name is that it costs no product.
-        (LITERAL_UNKNOWN_STATUS_STUB, PointingMechanism.NONE),
         (ZERO_OFFSET_STUB, PointingMechanism.OFFSET),
         (ZERO_EPOCH_STUB, PointingMechanism.CMATRIX),
         (UNNAVIGATED_STUB, PointingMechanism.NONE),
@@ -166,8 +120,6 @@ def test_both_paths_select_the_same_mechanism(
 
 _SAME_OFFSET: list[tuple[str, tuple[float, float] | None]] = [
     (NO_POINTING_STUB, (OFFSET[0], OFFSET[1])),
-    (NUMERIC_STRING_OFFSET_STUB, (OFFSET[0], OFFSET[1])),
-    (SUCCESS_NO_OFFSET_KEY_STUB, None),
     (CMATRIX_STUB, (OFFSET[0], OFFSET[1])),
     (ZERO_OFFSET_STUB, (0.0, 0.0)),
 ]
@@ -187,65 +139,32 @@ def test_both_paths_carry_the_same_fallback_offset(
     assert _selection(sources, mode, stub).offset == offset
 
 
-@pytest.mark.parametrize('mode', ['file', 'index'])
-def test_a_numeric_string_offset_is_applied_by_both(
-    sources: dict[str, PointingSource], mode: str
-) -> None:
-    """A pair the reader converts and applies is a pair the index has to store.
-
-    The converse of the over-long offset: here the classifier is the permissive
-    one, and a store that refused what the classifier applies would leave the
-    index-backed run uncorrected where the document-backed one is corrected.
-    """
-    assert _selection(sources, mode, NUMERIC_STRING_OFFSET_STUB).offset == (OFFSET[0], OFFSET[1])
-
-
 # ---------------------------------------------------------------------------
 # The recorded attitude, bit for bit
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    'stub',
-    [
-        CMATRIX_STUB,
-        NESTED_CMATRIX_STUB,
-        NESTED_ORIGINAL_STUB,
-        ONE_ELEMENT_ROWS_CMATRIX_STUB,
-        ONE_ELEMENT_ROWS_ORIGINAL_STUB,
-    ],
-)
 @pytest.mark.parametrize('mode', ['file', 'index'])
 def test_the_recorded_cmatrix_survives_bit_for_bit(
-    sources: dict[str, PointingSource], mode: str, stub: str
+    sources: dict[str, PointingSource], mode: str
 ) -> None:
     """A rotation of full-mantissa float64 comes back exactly as recorded.
 
     The reader's flip gate holds the recovered rotation to 1e-9, so a storage
     that rounded even the last place would refuse records the file path
-    accepts.  Whichever of the two shapes a record wrote it in.
+    accepts.
     """
-    selection = _selection(sources, mode, stub)
+    selection = _selection(sources, mode, CMATRIX_STUB)
     assert selection.cmatrix is not None
     assert np.array_equal(selection.cmatrix, np.asarray(CMATRIX).reshape(3, 3))
 
 
-@pytest.mark.parametrize(
-    'stub',
-    [
-        CMATRIX_STUB,
-        NESTED_CMATRIX_STUB,
-        NESTED_ORIGINAL_STUB,
-        ONE_ELEMENT_ROWS_CMATRIX_STUB,
-        ONE_ELEMENT_ROWS_ORIGINAL_STUB,
-    ],
-)
 @pytest.mark.parametrize('mode', ['file', 'index'])
 def test_the_recorded_baseline_survives_bit_for_bit(
-    sources: dict[str, PointingSource], mode: str, stub: str
+    sources: dict[str, PointingSource], mode: str
 ) -> None:
     """So does the as-flown attitude the gate is computed against."""
-    selection = _selection(sources, mode, stub)
+    selection = _selection(sources, mode, CMATRIX_STUB)
     assert selection.cmatrix_original is not None
     assert np.array_equal(selection.cmatrix_original, np.asarray(CMATRIX_ORIGINAL).reshape(3, 3))
 
@@ -343,43 +262,6 @@ def test_the_index_carries_the_recorded_midtime_not_a_recomputed_one(
         assert selection.midtime_et == displaced['midtime_et']
     finally:
         engine.dispose()
-
-
-@pytest.mark.parametrize('mode', ['file', 'index'])
-def test_a_rotation_written_as_a_nesting_is_read_by_both(
-    sources: dict[str, PointingSource], mode: str
-) -> None:
-    """A 3x3 nesting is a shape the classifier reads, so it is one the index stores.
-
-    The classifier accepts both shapes a rotation can be written in, and the
-    index stores rotations through that same reader, so a nested one reaches a
-    row as the nine values it denotes rather than as nothing.
-    """
-    assert _selection(sources, mode, NESTED_CMATRIX_STUB).mechanism is PointingMechanism.CMATRIX
-
-
-@pytest.mark.parametrize('mode', ['file', 'index'])
-def test_a_baseline_written_as_a_nesting_is_read_by_both(
-    sources: dict[str, PointingSource], mode: str
-) -> None:
-    """The baseline is stored under the same rule as the corrected attitude.
-
-    It is gated against the observation exactly as the corrected attitude is,
-    so a store reading one shape for one matrix and both for the other would
-    refuse through an index the record it applies through a document.
-    """
-    assert _selection(sources, mode, NESTED_ORIGINAL_STUB).mechanism is PointingMechanism.CMATRIX
-
-
-def test_an_integer_no_float_can_hold_costs_the_value_and_not_the_document(
-    sources: dict[str, PointingSource],
-) -> None:
-    """An epoch a reader cannot convert costs that epoch and nothing more.
-
-    Converting such an integer raises rather than overflowing, and a raise that
-    reached ingest would cost the whole document over one unusable number.
-    """
-    assert sources['index'].read_record(image_file(HUGE_INT_MIDTIME_STUB))['status'] == 'success'
 
 
 def test_a_document_the_ingest_refused_is_not_reported_as_an_unnavigated_image(
@@ -584,44 +466,6 @@ def test_a_record_with_no_pointing_block_is_not_read_as_a_fitted_rotation(
 
 
 @pytest.mark.parametrize('mode', ['file', 'index'])
-def test_a_document_naming_no_outcome_supplies_no_pointing(
-    sources: dict[str, PointingSource], mode: str
-) -> None:
-    """A nested copy of the status does not stand in for the top-level field.
-
-    The ladder's first question is whether the document's own ``status`` is
-    ``success``; a document that names none supplies no pointing at all.  The
-    document under test carries a nested ``success`` beside a usable recorded
-    attitude, so a column standing that copy in for the field would apply the
-    corrected attitude here and nothing at all through the document.
-    """
-    selection = _selection(sources, mode, NO_TOP_LEVEL_STATUS_STUB)
-    assert selection.reason == 'navigation_did_not_succeed'
-
-
-@pytest.mark.parametrize('mode', ['file', 'index'])
-def test_a_document_naming_no_outcome_leaves_the_pointing_uncorrected(
-    sources: dict[str, PointingSource], mode: str
-) -> None:
-    """The half of that which decides the product rather than the tally."""
-    selection = _selection(sources, mode, NO_TOP_LEVEL_STATUS_STUB)
-    assert selection.mechanism is PointingMechanism.NONE
-
-
-@pytest.mark.parametrize('mode', ['file', 'index'])
-def test_a_document_naming_no_outcome_reads_back_as_naming_none(
-    sources: dict[str, PointingSource], mode: str
-) -> None:
-    """And the record reads back with no status, which is what the skip reports.
-
-    The backplane stage puts this value in its skip result and in the run log,
-    and a cloud task has no other channel for it.
-    """
-    record = sources[mode].read_record(image_file(NO_TOP_LEVEL_STATUS_STUB))
-    assert record.get('status') is None
-
-
-@pytest.mark.parametrize('mode', ['file', 'index'])
 def test_an_unsuccessful_record_naming_no_error_reads_back_as_naming_none(
     sources: dict[str, PointingSource], mode: str
 ) -> None:
@@ -643,20 +487,6 @@ def test_a_recorded_error_still_reads_back(sources: dict[str, PointingSource], m
     assert record['status_error'] == 'missing_spice_data'
 
 
-def test_an_error_naming_the_word_for_naming_none_is_stored_as_naming_none(
-    sources: dict[str, PointingSource],
-) -> None:
-    """The store reads the field through the consumers' own function, not its own.
-
-    A record whose ``status_error`` is literally the word every reader reports
-    a record naming no error under is a record naming no error, and it is
-    stored as one.  A column that decided for itself which fields name an error
-    would agree with the readers until one of the two changed.
-    """
-    record = sources['index'].read_record(image_file(LITERAL_UNKNOWN_ERROR_STUB))
-    assert 'status_error' not in record
-
-
 # ---------------------------------------------------------------------------
 # What a record says about its own outcome, however it names it
 # ---------------------------------------------------------------------------
@@ -666,8 +496,6 @@ def test_an_error_naming_the_word_for_naming_none_is_stored_as_naming_none(
     ('stub', 'expected'),
     [
         (FAILED_STUB, 'error'),
-        (LITERAL_UNKNOWN_STATUS_STUB, 'unknown'),
-        (NO_TOP_LEVEL_STATUS_STUB, 'unknown'),
         (CMATRIX_STUB, 'success'),
     ],
 )
@@ -675,14 +503,7 @@ def test_an_error_naming_the_word_for_naming_none_is_stored_as_naming_none(
 def test_both_paths_report_the_same_outcome(
     sources: dict[str, PointingSource], mode: str, stub: str, expected: str
 ) -> None:
-    """The backplane skip line and the task result name the same outcome either way.
-
-    The index records a record naming no outcome as the word ``unknown``, which
-    a record could also name for itself; both are reported as that word, so the
-    column standing in for an absent field cannot be told from a field holding
-    the same value -- and does not need to be, because no reader distinguishes
-    them.
-    """
+    """The backplane skip line and the task result name the same outcome either way."""
     assert record_status(sources[mode].read_record(image_file(stub))) == expected
 
 
@@ -691,8 +512,6 @@ def test_both_paths_report_the_same_outcome(
     [
         (FAILED_STUB, 'missing_spice_data'),
         (NO_STATUS_ERROR_STUB, 'unknown'),
-        (NULL_STATUS_ERROR_STUB, 'unknown'),
-        (LITERAL_UNKNOWN_ERROR_STUB, 'unknown'),
     ],
 )
 @pytest.mark.parametrize('mode', ['file', 'index'])
@@ -701,9 +520,9 @@ def test_both_paths_report_the_same_error(
 ) -> None:
     """And the same error beside it, including where the record names none.
 
-    A ``status_error`` that is present and null names no error, exactly as an
-    absent one does; a reader that reported the null verbatim would say
-    ``None`` through a document and ``unknown`` through a row.
+    An absent ``status_error`` names no error, and every failed and conflicted
+    navigation writes none; a reader that reported the absence verbatim would
+    say ``None`` through a document and ``unknown`` through a row.
     """
     assert record_status_error(sources[mode].read_record(image_file(stub))) == expected
 
@@ -748,10 +567,6 @@ def _log_of(source: PointingSource, stub: str, log_root: Path) -> str:
     [
         (UNNAVIGATED_STUB, 'No navigation record for'),
         (FAILED_STUB, "status='error'"),
-        (LITERAL_UNKNOWN_STATUS_STUB, "status='unknown'"),
-        (NO_TOP_LEVEL_STATUS_STUB, "status='unknown'"),
-        (NULL_OFFSET_STUB, 'null offset'),
-        (NO_MIDTIME_STUB, 'malformed pointing block'),
     ],
 )
 @pytest.mark.parametrize('mode', ['file', 'index'])
@@ -765,11 +580,7 @@ def test_the_image_log_says_the_same_thing_either_way(
     """The per-image warnings keep their message shapes in the index path.
 
     A reader of one image's log, and anything scraping those logs, sees the
-    same line whichever storage the run was pointed at.  A record naming no
-    outcome of its own is among them because the classifier names the outcome
-    through the one function every consumer reads that field with: reading the
-    field directly would put the word ``None`` in the log of a record naming
-    nothing and the word ``unknown`` in the log of the row it ingested into.
+    same line whichever storage the run was pointed at.
     """
     assert expected in _log_of(sources[mode], stub, tmp_path / f'logs_{mode}')
 

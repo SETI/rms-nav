@@ -22,16 +22,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.spindoctor.conftest import (
+    index_url,
+    metadata_document,
+    write_metadata,
+)
 
 from spindoctor.cli import sd_stats_ingest
 from spindoctor.config import MAIN_LOGGER
 
 from .conftest import (
     REFUSAL_REPORT_LEAD,
-    index_url,
-    metadata_document,
     refusal_report,
-    write_metadata,
 )
 
 PASSWORD = 'sup3rs3cr3t'

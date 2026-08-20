@@ -27,6 +27,13 @@ import pdslogger
 import pytest
 import sqlalchemy
 from filecache import FCPath
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    technique,
+    write_metadata,
+)
 
 from spindoctor.cli.stats.ingest import UnwritableRowError
 from spindoctor.cli.stats.ingest import driver as driver_module
@@ -44,14 +51,6 @@ from spindoctor.nav_records.facts import (
 )
 from spindoctor.results_index import FAILED_FILES, IMAGES, INGEST_RUNS, TECHNIQUES, open_index
 from spindoctor.support.nav_record import record_status
-
-from .conftest import (
-    index_url,
-    ingest_tree,
-    metadata_document,
-    technique,
-    write_metadata,
-)
 
 SOURCE = DocumentOrigin(
     root_url='/data/nav-results',

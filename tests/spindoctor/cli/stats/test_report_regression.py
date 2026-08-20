@@ -47,8 +47,15 @@ from typing import Any
 
 import pdslogger
 import pytest
+from tests.spindoctor.conftest import (
+    index_url,
+)
 
-from .conftest import GOLDEN_DIR, RESULTS_TREE, index_url, report_from_tree
+from .conftest import (
+    GOLDEN_DIR,
+    RESULTS_TREE,
+    report_from_tree,
+)
 
 _TREE_PLACEHOLDER = '{results_tree}'
 """What the frozen CSV holds in place of the tree's absolute path."""

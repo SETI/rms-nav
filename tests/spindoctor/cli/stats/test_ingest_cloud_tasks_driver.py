@@ -18,11 +18,15 @@ from typing import Any
 
 import pytest
 import sqlalchemy
+from tests.spindoctor.conftest import (
+    index_url,
+    metadata_document,
+    write_metadata,
+)
 
 from spindoctor.cli import sd_stats_ingest
 from spindoctor.results_index import IMAGES, INGEST_RUNS, normalize_root_url, open_index
 
-from .conftest import index_url, metadata_document, write_metadata
 from .ingest_driver_helpers import (
     STUB,
     fanned_out,

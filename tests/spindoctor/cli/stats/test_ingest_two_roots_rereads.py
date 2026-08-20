@@ -21,10 +21,14 @@ from pathlib import Path
 
 import pdslogger
 import sqlalchemy
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    write_metadata,
+)
 
 from spindoctor.results_index import FAILED_FILES, normalize_root_url, open_index
-
-from .conftest import index_url, ingest_tree, metadata_document, write_metadata
 
 INGESTED = 'COISS_2001/data/a/N1454725799_1_CALIB'
 """Stub of the document both roots hold and the ingest reads."""

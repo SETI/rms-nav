@@ -33,7 +33,7 @@ import pdslogger
 import pytest
 import sqlalchemy
 from filecache import FCPath
-from tests.spindoctor.cli.stats.conftest import (
+from tests.spindoctor.conftest import (
     index_url,
     ingest_tree,
     metadata_document,

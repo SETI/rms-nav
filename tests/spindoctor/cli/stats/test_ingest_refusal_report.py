@@ -26,6 +26,11 @@ from pathlib import Path
 import pdslogger
 import pytest
 import sqlalchemy
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    write_refusal,
+)
 
 from spindoctor.cli.stats.ingest import store
 from spindoctor.cli.stats.ingest.counts import IngestCounts
@@ -44,12 +49,9 @@ from .conftest import (
     complete,
     cycle,
     fan_out,
-    index_url,
-    ingest_tree,
     recorded_lines,
     refusal_report,
     run_shares,
-    write_refusal,
 )
 
 SECOND_STUB = 'VOL/N1454725800_1_CALIB'
