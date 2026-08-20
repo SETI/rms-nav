@@ -28,7 +28,6 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         'NHK2LO_2001',
     )
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
-    _INDEX_TIME_COLUMNS = ('START_TIME',)
     _INDEX_CAMERA_COLUMNS = ('INSTRUMENT_ID',)
     _INDEX_CAMERA_MAP: ClassVar[dict[str, str]] = {'LORRI': 'LORRI'}
     _VOLUMES_DIR_NAME = 'volumes'

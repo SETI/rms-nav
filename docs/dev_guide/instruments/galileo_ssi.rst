@@ -62,8 +62,8 @@ the single ``filters`` entry in the metadata. ``get_public_metadata`` carries
 the spacecraft-clock reads commented out, so no clock field is written.
 
 **Index columns.** ``_INDEX_COLUMNS`` is ``FILE_SPECIFICATION_NAME``,
-``_INDEX_TIME_COLUMNS`` is ``('IMAGE_TIME',)``, ``_INDEX_CAMERA_COLUMNS`` is
-``('INSTRUMENT_ID',)`` and ``_INDEX_CAMERA_MAP`` is ``{'SSI': 'SSI'}`` -- an
+``_INDEX_CAMERA_COLUMNS`` is ``('INSTRUMENT_ID',)`` and ``_INDEX_CAMERA_MAP``
+is ``{'SSI': 'SSI'}`` -- an
 identity map, present so that the camera an image is attributed to comes from
 the same mechanism for every instrument rather than being special-cased for a
 single-camera one.

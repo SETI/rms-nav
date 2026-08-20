@@ -3,11 +3,11 @@
 Enumerating a selection is one question; what a single image turns out to be is
 another, and it is answered without SPICE and without opening the image.  A
 label names the file its data really lives in, which is not always the name the
-holdings layout predicts; an index row carries the observation's epoch and the
-camera that took it, in a spelling that differs per instrument and may be masked
-or absent altogether.  Each of those readings has to answer None rather than
-raise when the value is not there, because an image that cannot be placed in
-time is still an image the enumeration yields.
+holdings layout predicts; an index row names the camera that took the image, in
+a spelling that differs per instrument and may be masked or absent altogether.
+Each of those readings has to answer None rather than raise when the value is
+not there, because an image whose camera the index does not name is still an
+image the enumeration yields.
 """
 
 from collections.abc import Callable
@@ -23,7 +23,6 @@ from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
 from spindoctor.dataset.dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
 from spindoctor.dataset.dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
-from spindoctor.nav_records.derived import datetime_from_image_et
 
 # --- ^IMAGE pointer parsing (issue #12) ---
 
@@ -179,112 +178,6 @@ def test_resolve_image_url_falls_back_when_resolver_raises(
     assert len(calls) == 1
     captured = capsys.readouterr()
     assert 'Image URL resolution from label' in captured.out + captured.err
-
-
-# --- observation epoch from the index row ---
-
-
-@pytest.mark.parametrize(
-    ('dataset_class', 'row', 'expected_iso'),
-    [
-        # Cassini ISS index times are day-of-year; IMAGE_MID_TIME wins.
-        (
-            DataSetPDS3CassiniISS,
-            {'IMAGE_MID_TIME': '1999-230T02:28:20.833', 'IMAGE_TIME': '1999-230T02:28:22.835'},
-            '1999-08-18T02:28:21',
-        ),
-        # Voyager ISS index times are plain ISO.
-        (DataSetPDS3VoyagerISS, {'IMAGE_TIME': '1978-12-11T00:29:23'}, '1978-12-11T00:29:23'),
-        # Galileo SSI index times carry a trailing Z.
-        (DataSetPDS3GalileoSSI, {'IMAGE_TIME': '1996-06-03T17:05:38.015Z'}, '1996-06-03T17:05:38'),
-        # New Horizons LORRI has no IMAGE_TIME; START_TIME is the epoch.
-        (
-            DataSetPDS3NewHorizonsLORRI,
-            {'START_TIME': '2006-02-24T16:12:48.306'},
-            '2006-02-24T16:12:48',
-        ),
-    ],
-)
-def test_image_et_from_index_row_parses_each_instrument_format(
-    dataset_class: type[DataSetPDS3], row: dict[str, Any], expected_iso: str
-) -> None:
-    """Every instrument's index time format is read without SPICE."""
-    image_et = dataset_class.image_et_from_index_row(row)
-    assert image_et is not None
-    assert datetime_from_image_et(image_et) == expected_iso
-
-
-def test_image_et_from_index_row_prefers_first_available_column() -> None:
-    """A missing preferred column falls through to the next one."""
-    row = {'IMAGE_TIME': '1999-230T02:28:20.833'}
-    image_et = DataSetPDS3CassiniISS.image_et_from_index_row(row)
-    assert image_et is not None
-    assert datetime_from_image_et(image_et) == '1999-08-18T02:28:21'
-
-
-def test_image_et_from_index_row_skips_masked_value() -> None:
-    """A null cell (flagged by PdsTable's companion mask) is skipped."""
-    row = {
-        'IMAGE_MID_TIME': 'UNK',
-        'IMAGE_MID_TIME_mask': True,
-        'IMAGE_TIME': '1999-230T02:28:20.833',
-    }
-    image_et = DataSetPDS3CassiniISS.image_et_from_index_row(row)
-    assert image_et is not None
-    assert datetime_from_image_et(image_et) == '1999-08-18T02:28:21'
-
-
-def test_image_et_from_index_row_unparsable_value() -> None:
-    """An unreadable time yields None rather than raising."""
-    assert DataSetPDS3CassiniISS.image_et_from_index_row({'IMAGE_MID_TIME': 'UNK'}) is None
-
-
-def test_image_et_from_index_row_without_index() -> None:
-    """An image not enumerated from an index has no epoch."""
-    assert DataSetPDS3CassiniISS.image_et_from_index_row({}) is None
-
-
-def _image_file_with_epoch(image_et: float | None) -> ImageFile:
-    """Build an ``ImageFile`` carrying one enumerated epoch.
-
-    Parameters:
-        image_et: The epoch the enumeration read out of the index row.
-
-    Returns:
-        The image file, with its epoch settled as construction settles it.
-    """
-    return ImageFile(
-        image_file_url=FCPath('/holdings/N1454725799_1.IMG'),
-        label_file_url=FCPath('/holdings/N1454725799_1.LBL'),
-        results_path_stub='stub',
-        image_et=image_et,
-    )
-
-
-@pytest.mark.parametrize(
-    'recorded',
-    [float('nan'), float('inf'), float('-inf')],
-    ids=['nan', 'inf', 'negative-inf'],
-)
-def test_an_epoch_no_reader_could_place_reads_as_no_epoch(recorded: float) -> None:
-    """An index value that is not a finite number places the image nowhere.
-
-    The index file is not this project's to fix, so such a value is a fact
-    about someone else's data rather than a defect here, and refusing it
-    would fail a whole enumeration over one row.  Every comparison against a
-    NaN is False, so a NaN epoch would fall inside every time range at once
-    and an infinite one inside a half-bounded range it can have no business
-    in.  None is already what this field says when no epoch is known.
-
-    Parameters:
-        recorded: The non-finite epoch the enumeration supplied.
-    """
-    assert _image_file_with_epoch(recorded).image_et is None
-
-
-def test_a_readable_epoch_survives_untouched() -> None:
-    """The control: a finite epoch is carried through exactly as enumerated."""
-    assert _image_file_with_epoch(221309426.8040615).image_et == 221309426.8040615
 
 
 # --- camera from the index row ---

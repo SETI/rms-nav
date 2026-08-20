@@ -608,15 +608,10 @@ def facts_from_document(metadata: dict[str, Any], source: DocumentOrigin) -> Ima
     classifier = _object(nav.get('image_classifier'), 'navigation_result.image_classifier', source)
     times = _object(nav.get('times'), 'navigation_result.times', source)
     pointing = _object(nav.get('pointing'), 'navigation_result.pointing', source)
-    # A navigated image's epoch comes from its observation (provenance); an
-    # image that never loaded has no provenance, so the navigator records the
-    # epoch it read from the index under ``observation.image_et``.  Either way
-    # every image is placed in time.  Each field is stored in a column of its
-    # own as well, because which of the two a document carried says whether the
-    # image loaded and no column holding whichever was there could answer that.
-    provenance_image_et = finite_float(provenance.get('image_et'))
-    observation_image_et = finite_float(observation.get('image_et'))
-    image_et = provenance_image_et if provenance_image_et is not None else observation_image_et
+    # An image's epoch is its observation's midtime, which the navigator
+    # records as provenance.  A document written for an image that never
+    # loaded has no provenance and so no epoch, and reads as None here.
+    image_et = finite_float(provenance.get('image_et'))
     per_technique = _array_of_objects(
         nav.get('per_technique'), 'navigation_result.per_technique', source
     )
@@ -658,8 +653,10 @@ def facts_from_document(metadata: dict[str, Any], source: DocumentOrigin) -> Ima
         'camera': _str_or_none(observation.get('camera')),
         'shutter_mode': _str_or_none(observation.get('shutter_mode')),
         'image_path': _str_or_none(observation.get('image_path')),
-        'provenance_image_et': provenance_image_et,
-        'observation_image_et': observation_image_et,
+        # The epoch twice over: a copy of the document's own field, which is
+        # what a rebuilt record carries it back as, and the column a filter
+        # and a report compare against alongside the date rendered from it.
+        'provenance_image_et': image_et,
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),
         # The document's own top-level field, read by the function every

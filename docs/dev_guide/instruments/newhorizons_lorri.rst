@@ -59,10 +59,6 @@ name to record. It is the only instrument whose ``filters`` list is empty
 rather than carrying one or two entries.
 
 **Index columns.** ``_INDEX_COLUMNS`` is ``FILE_SPECIFICATION_NAME``.
-``_INDEX_TIME_COLUMNS`` is ``('START_TIME',)`` -- the only instrument whose
-epoch column is the exposure start rather than a mid or image time, which
-matters because that column is what places an image in time for the
-``--start-time`` / ``--stop-time`` filters and for the statistics database.
 ``_INDEX_CAMERA_COLUMNS`` is ``('INSTRUMENT_ID',)`` and ``_INDEX_CAMERA_MAP``
 is ``{'LORRI': 'LORRI'}`` -- an identity map, present so that the camera an
 image is attributed to comes from the same mechanism for every instrument
