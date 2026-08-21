@@ -792,7 +792,10 @@ def main_report(cmdline: list[str] | None = None) -> int:
 
     An index is optional here as it is everywhere else.  Named, its rows are
     read; unnamed, the navigation results tree is read, one document per image.
-    Both answer the same seam, so both produce the same report.
+    Both answer the same seam, so over the records both of them can read they
+    produce the same report; the count of files that yielded no record is the
+    one exception, a file the storage could not deliver at all being counted
+    from a tree and not from an index.
 
     Parameters:
         cmdline: Argument list; None uses ``sys.argv``.
@@ -816,6 +819,16 @@ def main_report(cmdline: list[str] | None = None) -> int:
     )
     _add_arguments(parser)
     arguments = parser.parse_args(cmdline)
+    # Checked here, before any storage is opened, so that the one thing a
+    # ValueError out of the pass can still mean is a storage that stopped
+    # answering.  Left to the pass, an unparseable bound and an index that
+    # cannot be read arrive as the same exception at the same place, and the
+    # exit code the caller reads then says usage error for both.
+    try:
+        _image_bound(arguments.min_image, option='--min-image')
+        _image_bound(arguments.max_image, option='--max-image')
+    except ValueError as exc:
+        parser.error(str(exc))
 
     url = get_results_db_url(arguments, DEFAULT_CONFIG, warn=_to_stderr)
     if url is None:
@@ -866,7 +879,7 @@ def _report_from_an_index(
 
     The roots read are the roots the index holds a completed ingest of, and no
     others.  Under a half-ingested root the absence of a row says nothing, so a
-    report that counted one would be reading absence it has no licence to read.
+    report that counted one would be reading absence it has no license to read.
 
     Parameters:
         url: Connection URL of the results index.
@@ -874,7 +887,9 @@ def _report_from_an_index(
         parser: The parser, for the refusals it reports as usage errors.
 
     Returns:
-        Process exit code.
+        Process exit code: 0 on success, and 1 when the index cannot be opened,
+        when it holds no completed ingest of any root, or when it stops
+        answering while the pass streams from it.
 
     Raises:
         SystemExit: With status 2, from the parser, for a ``--root`` that is not
@@ -921,7 +936,11 @@ def _report_from_an_index(
         with IndexRecordSource(engine, held, url, ()) as source:
             report_path = _report_written_from(source, arguments, covered, dropped)
     except ValueError as exc:
-        parser.error(str(exc))
+        # The stream issues its queries while the pass reads them, so an index
+        # that stops answering fails here rather than where it was opened.  That
+        # is a run that failed on what it found, not a command line to reject.
+        print(f'Cannot read the results index: {exc}', file=sys.stderr)
+        return 1
     print(f'Wrote {report_path}')
     return 0
 
@@ -939,8 +958,9 @@ def _report_over_a_tree(arguments: argparse.Namespace, parser: argparse.Argument
         parser: The parser, for the refusals it reports as usage errors.
 
     Returns:
-        Process exit code: 0 on success, and 1 when a root cannot be resolved or
-        cannot be read whole.
+        Process exit code: 0 on success, and 1 when no root can be resolved, or
+        when a root cannot be read whole -- one that cannot be listed, and one
+        that stops answering while the pass reads it.
 
     Raises:
         SystemExit: With status 2, from the parser, for a command line that names
@@ -974,12 +994,12 @@ def _report_over_a_tree(arguments: argparse.Namespace, parser: argparse.Argument
     try:
         with TreeRecordSource(roots) as source:
             report_path = _report_written_from(source, arguments, ())
-    except UnlistableDirectoryError as exc:
+    except (UnlistableDirectoryError, ValueError) as exc:
         # A root the walk could not read whole is a report that would cover less
-        # than the tree and say nothing about it.
+        # than the tree and say nothing about it, and a tree that stops answering
+        # part way through is the same report.  Both are runs that failed on what
+        # they found rather than command lines to reject.
         print(f'Cannot read the navigation results tree: {exc}', file=sys.stderr)
         return 1
-    except ValueError as exc:
-        parser.error(str(exc))
     print(f'Wrote {report_path}')
     return 0

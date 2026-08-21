@@ -23,6 +23,7 @@ import pytest
 import sqlalchemy
 from tests.spindoctor.cli.stats.conftest import (
     GOLDEN_DIR,
+    GOLDEN_VARIANTS,
     REFUSAL_REPORT_LEAD,
     build_tree,
     complete,
@@ -61,8 +62,15 @@ from spindoctor.results_index import (
 
 pytestmark = pytest.mark.postgres
 
-_FULL_VARIANT: dict[str, Any] = {'top_n': 5, 'filelists': True, 'csv_export': True}
-"""The unfiltered report invocation the frozen output was produced by."""
+_FULL_VARIANT: dict[str, Any] = GOLDEN_VARIANTS['full']
+"""The unfiltered report invocation the frozen ``full`` output was produced by.
+
+Read off the shared definition rather than restated beside it.  Every comparison
+below is against output frozen for that variant, so a restatement that drifted
+from it would have this module produce a report under one set of options and
+measure it against output produced under another, and fail for a reason that has
+nothing to do with the backend it is here to exercise.
+"""
 
 _TWIST_COVARIANCE = [
     [0.0961, 0.0100, 0.0025],

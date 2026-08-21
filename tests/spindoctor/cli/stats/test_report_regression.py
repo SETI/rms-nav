@@ -307,8 +307,8 @@ it with ``cut -f`` -- so a column inserted in the middle silently re-points
 every reader that counts.  The first two are the key of the row, naming the stub
 and the root each one came from, and a reader joining the export back to a
 results tree needs them where they are.  The stub leads, because the rows are
-written where they are read and ``sort -t, -k1,1 images.csv`` is then all an
-operator has to type to put the file in key order.
+written where they are read and a sort on field 1 is then all an operator has to
+reach for to put the file in key order.
 """
 
 

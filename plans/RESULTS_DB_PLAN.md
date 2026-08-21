@@ -960,15 +960,16 @@ differ (`json_each` vs `jsonb_array_elements_text`).
 
 It reads through the record seam rather than the database. One pass of
 accumulators over `facts(selection)` answers every section, so the report runs
-over a results tree or an index and needs no database at all; no SQL, no
-connection and no `where_clause` survives in the report modules, whose only
-remaining database reader is the ingest package beside them.
+over a results tree or an index with no query of its own: no SQL, no connection
+and no `where_clause` lives in the report modules. Over a tree that means no
+database is opened at all; over an index it means one is read, through
+`IndexRecordSource`, which is the seam's reader rather than the report's.
 `--nav-results-root` and its ladder name the trees to read; `--root` selects
 among the roots one index holds, and is refused rather than read as a second
 spelling of it. With
 no `--root`, an index-backed report covers the roots whose newest ingest run
 completed rather than every row `images` happens to hold, since under a
-half-ingested root a report reads absence it has no licence to read.
+half-ingested root a report reads absence it has no license to read.
 `images.csv` is written a row at a time and is therefore unsorted, with
 `results_path_stub` as its first column so an operator sorts it in the shell.
 A file that yielded no record is counted and the count is printed whether it
@@ -2411,7 +2412,7 @@ Details settled during execution, none of them a change of intent:
   more than one, naming them: a bare stub does not say which root it belongs to,
   and an index-backed source checks each root's ingest bookkeeping once at
   opening rather than per query.
-- **The prune's licence became a type rather than a check.** One function builds
+- **The prune's license became a type rather than a check.** One function builds
   the listing the prune takes, it builds one only for a root it listed entirely,
   and the listing carries the root it was of -- so a share of a root, a partial
   listing, and a prune of one root on the evidence of another are all
@@ -2445,7 +2446,7 @@ Details settled during execution, none of them a change of intent:
   `nav_records` probe keeps its no-SQLAlchemy half, which is load-bearing, and
   drops its oops half.
 
-Behaviour changes review must see:
+Behavior changes review must see:
 
 - **The kernel writer refuses a root it cannot list whole**, where it used to
   write a short mission and report a clean run. It also refuses a root it cannot
@@ -2503,7 +2504,7 @@ Behaviour changes review must see:
    fails. It matches text, so it cannot tell whether an entry says something
    true about its member; that is what each member's own behavioral test is for.
    Neither carve-out is asserted to be complete: a divergence outside them is a
-   defect of the enumeration, to be fixed or enumerated, and not a licence to
+   defect of the enumeration, to be fixed or enumerated, and not a license to
    differ.
    `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
    byte-identical report.

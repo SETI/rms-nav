@@ -617,8 +617,9 @@ _SORT_COLUMN = 'results_path_stub'
 
 The rows are not sorted.  Sorting them means holding every one of them, which is
 what a streaming write exists not to do, so the file leads with the column an
-operator would sort on -- ``sort -t, -k1,1 images.csv`` -- and the root each row
-came from stays a column of its own further right.
+operator would sort on -- field 1 of a ``sort -t,``, once the header line has
+been held out of the sort -- and the root each row came from stays a column of
+its own further right.
 """
 
 _EXPORT_IMAGE_COLUMNS: tuple[str, ...] = (

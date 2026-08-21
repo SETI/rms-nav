@@ -367,7 +367,7 @@ a row is an answer, so presence has to mean the tree still holds the document,
 which is why each pass removes the rows of documents its walk did not find. A
 worker handed a share of a root has no evidence about the stubs outside its
 share and would delete its peers' rows, so nothing hands a worker a listing. The
-licence is a type rather than a check: one function builds the listing the prune
+license is a type rather than a check: one function builds the listing the prune
 takes, it builds one only for a root it listed entirely, and it carries the root
 it listed --- so a share of a root, a partial listing and a prune of one root on
 the evidence of another are all unrepresentable rather than refused. In a

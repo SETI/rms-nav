@@ -394,7 +394,7 @@ class ReportStatistics:
     slowest: SlowestImages = field(default_factory=lambda: SlowestImages(0))
 
     def __post_init__(self) -> None:
-        """Size the two structures that are bounded by an option rather than by the data."""
+        """Size the slowest-image heap, which ``top_n`` bounds rather than the data."""
         self.slowest = SlowestImages(self.top_n)
 
 

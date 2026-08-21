@@ -221,7 +221,7 @@ def test_a_report_covering_every_root_names_no_dropped_root(
 def test_a_dropped_root_contributes_no_images(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Reading rows under a root whose pass died is reading absence with no licence to.
+    """Reading rows under a root whose pass died is reading absence with no license to.
 
     The dropped root holds one image, and the index holds its row.  Counting it
     would report a number nothing stands behind: whatever else that root holds

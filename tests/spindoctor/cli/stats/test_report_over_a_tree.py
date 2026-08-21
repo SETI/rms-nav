@@ -1052,7 +1052,7 @@ def test_a_report_over_every_root_leaves_out_a_half_ingested_one(
 ) -> None:
     """Under a root whose newest ingest died, absence of a row says nothing.
 
-    A report that counted such a root would be reading absence it has no licence
+    A report that counted such a root would be reading absence it has no license
     to read, so the roots reported over are the roots the index holds a completed
     ingest of.
     """

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pdslogger
 import pytest
+import sqlalchemy
 from tests.spindoctor.conftest import (
     index_url,
     ingest_tree,
@@ -23,7 +24,7 @@ from tests.spindoctor.conftest import (
 )
 
 from spindoctor.cli.stats.report import main_report
-from spindoctor.results_index import INGEST_RUNS, SCHEMA_VERSION, open_index
+from spindoctor.results_index import INGEST_RUNS, SCHEMA_VERSION, TECHNIQUES, open_index
 
 # ---------------------------------------------------------------------------
 # The command line
@@ -218,32 +219,121 @@ def test_main_report_leaves_no_database_behind(
     assert not missing.exists()
 
 
+def test_a_read_failure_while_streaming_fails_the_run(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An index that stops answering mid-pass is a failed run, not a bad command line.
+
+    The stream issues its queries while the report reads them, so an index that
+    can be opened and then cannot be read fails from inside the pass.  Reported
+    as a usage error it would exit 2 and print a usage line over a database
+    failure no command line could have avoided.  What kind of failure it is does
+    not matter, only that it lands while the pass is reading, so a table dropped
+    after the open stands in for a lost connection.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(sqlalchemy.text(f'DROP TABLE {TECHNIQUES.name}'))
+    finally:
+        engine.dispose()
+    exit_code = main_report(['--results-db', url, '--output-dir', str(tmp_path / 'report')])
+    assert exit_code == 1
+
+
+def test_a_read_failure_while_streaming_says_the_index_could_not_be_read(
+    tmp_path: Path,
+    quiet_logger: pdslogger.PdsLogger,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The exit code says a run failed and the message has to say what failed.
+
+    Nothing else on the command line is at fault, so a line that did not name
+    the index would leave an operator looking at their own flags.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(sqlalchemy.text(f'DROP TABLE {TECHNIQUES.name}'))
+    finally:
+        engine.dispose()
+    main_report(['--results-db', url, '--output-dir', str(tmp_path / 'report')])
+    assert 'Cannot read the results index' in capsys.readouterr().err
+
+
+def test_an_image_bound_with_no_digits_is_a_usage_error(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bound naming no number is a value on the command line, and exits 2 for it.
+
+    The bound is read before any storage is opened, which is what leaves a
+    failure raised later in the pass meaning one thing.  Read after the source
+    is open, it would arrive at the same place as an index that could not be
+    read, and one of the two would take the other's exit code.
+    """
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    with pytest.raises(SystemExit) as caught:
+        main_report(
+            [
+                '--results-db',
+                url,
+                '--min-image',
+                'nodigits',
+                '--output-dir',
+                str(tmp_path / 'report'),
+            ]
+        )
+    assert caught.value.code == 2
+
+
 def test_main_report_honors_the_none_sentinel(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An exported index URL can be overridden on the command line.
+    """An exported index URL is overridden on the command line, and the tree answers.
 
-    The sentinel means here what it means everywhere: read the tree.  So it is
-    the tree that answers, and the exported index is not read at all -- which is
+    The sentinel means here what it means everywhere: read the tree -- which is
     what a machine with an index configured says to ask for a report over the
-    documents as they are now.
+    documents as they are now.  The tree therefore holds an image written after
+    the ingest, which the index carries no row for, and the report names it as
+    the highest-numbered image it selected.  Measured by exit code alone this
+    would pass on a run that read the exported index instead, since that index
+    reports on the same root and exits 0 doing it.
     """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
+    write_metadata(
+        root, 'VOL/N1595336177_1_CALIB', metadata_document(image_name='N1595336177_1_CALIB.IMG')
+    )
     monkeypatch.setenv('NAV_RESULTS_DB', url)
-    exit_code = main_report(
+    out = tmp_path / 'report'
+    main_report(
         [
             '--results-db',
             'none',
             '--nav-results-root',
             str(root),
             '--output-dir',
-            str(tmp_path / 'report'),
+            str(out),
         ]
     )
-    assert exit_code == 0
+    assert 'N1595336177' in (out / 'report.md').read_text(encoding='utf-8')
 
 
 def test_main_report_reads_the_environment_variable(

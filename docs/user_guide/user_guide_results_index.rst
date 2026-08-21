@@ -105,7 +105,11 @@ Which programs read it
      - Writes one share of it, as a queue worker.
    * - ``sd_stats_report``
      - Every section of the report. Given no index it reads the results tree
-       instead, and the report is the same either way.
+       instead, and over the records both storages can read the report is the
+       same either way. The count of files that yielded no record is the one
+       exception: a file the storage could not deliver at all is counted from a
+       tree and not from an index, because the ingest deliberately records no
+       refusal for a retrieval that failed once.
    * - ``sd_offset``
      - The results-based selection filters (``--has-offset-file``,
        ``--has-no-offset-file``, the error filters), which otherwise walk the

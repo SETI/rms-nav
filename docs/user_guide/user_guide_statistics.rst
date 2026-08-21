@@ -16,11 +16,17 @@ being a single non-interactive invocation:
         --instrument coiss --start-date 2005-03-01 --end-date 2005-03-01 \
         --output-dir day_report
 
-**The report reads a navigation results tree or a results index, and it is the
-same report either way.** Every number in it comes from one pass over the
-per-image records, and the two storages hand that pass the same records, so a
-report over a tree and a report from an index built from that tree carry the
-same text and the same charts.
+**The report reads a navigation results tree or a results index, and over the
+records both storages can read it is the same report either way.** Every number
+in it comes from one pass over the per-image records, and the two storages hand
+that pass the same records, so a report over a tree and a report from an index
+built from that tree carry the same text and the same charts.
+
+One count is the exception, and it is the count of files that yielded no record:
+a file the storage could not deliver at all is counted from a tree and not from
+an index, because the ingest deliberately records no refusal for a retrieval
+that failed once. The **Files that yielded no record** entry below says what
+that means for the number printed.
 
 An index is optional here exactly as it is everywhere else, and
 ``--results-db`` is resolved the same way: from the command line, then the
@@ -115,8 +121,11 @@ Three options control drill-down output:
   their order is whatever the storage yields them in -- the directory order of
   a tree, the server's own order for an index -- and the two do not agree.
   ``results_path_stub`` is the first column so that putting them in order is
-  one shell command, ``sort -t, -k1,1 images.csv``, holding the header line out
-  of the sort where that matters.
+  one shell pipeline, with the header line held out of the sort:
+
+  .. code-block:: bash
+
+      { head -n 1 images.csv; tail -n +2 images.csv | sort -t, -k1,1; } > sorted-images.csv
 
 The first two write *image names* rather than file names -- ``N1454725799``
 rather than ``N1454725799_1_CALIB.IMG`` -- because that is the token the

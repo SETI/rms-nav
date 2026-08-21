@@ -852,9 +852,9 @@ def test_csv_export_leads_with_the_column_an_operator_sorts_on(
 ) -> None:
     """The rows are written as they are read, so the file has to be sortable.
 
-    ``sort -t, -k1,1 images.csv`` is the whole of what an operator has to do to
-    put the export in key order, and it only works while the key the rows are
-    told apart by leads the row.
+    Sorting the export on field 1, with the header line held out of the sort, is
+    the whole of what an operator has to do to put it in key order, and it only
+    works while the key the rows are told apart by leads the row.
     """
     out = tmp_path / 'report'
     build_report(standard, out, csv_export=True)
