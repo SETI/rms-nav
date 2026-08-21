@@ -15,6 +15,8 @@ reduces to a minimum, or sorts what it prints on a key that includes the pair
 that identifies an image -- an image name alone is not unique across roots.
 """
 
+from __future__ import annotations
+
 import argparse
 import statistics
 import sys

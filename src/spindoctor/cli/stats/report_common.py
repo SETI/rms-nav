@@ -15,6 +15,8 @@ come from whichever storage answered the seam, so one report is written over a
 results tree and over an index ingested from it.
 """
 
+from __future__ import annotations
+
 import heapq
 import math
 import re
@@ -192,7 +194,7 @@ class TimedImage:
         """
         return (-self.elapsed_s, self.image_name, self.root_url, self.results_path_stub)
 
-    def __lt__(self, other: 'TimedImage') -> bool:
+    def __lt__(self, other: TimedImage) -> bool:
         """Compare two images the opposite way round from how they are listed.
 
         A heap hands back its smallest element, and what a bounded slowest-N

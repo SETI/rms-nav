@@ -11,6 +11,8 @@ here rather than beside the pass because what a column of it holds is a decision
 about the export, and the pass has no opinion about any of them.
 """
 
+from __future__ import annotations
+
 import contextlib
 import csv
 import heapq
@@ -679,7 +681,7 @@ class CsvExport:
         self._stack = contextlib.ExitStack()
         self._writer: Any = None
 
-    def __enter__(self) -> 'CsvExport':
+    def __enter__(self) -> CsvExport:
         """Open the file and write its header.
 
         Returns:
