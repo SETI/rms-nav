@@ -62,7 +62,7 @@ def plot_subpixel() -> None:
     ax.set_ylabel('|limb-fit error| (px)')
     ax.set_title('Limb-fit error vs sub-pixel offset phase')
     ax.axhline(0.0, color='0.8', lw=0.5)
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, loc='best')
     fig.tight_layout()
     fig.savefig(_HERE / 'bias_vs_subpixel.png', dpi=90)
     plt.close(fig)

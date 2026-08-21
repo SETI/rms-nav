@@ -1,7 +1,30 @@
 {
-  "confidence": 0.91,
+  "status": "success",
+  "observation": {
+    "image_path": "/holdings/N1294561202_1_CALIB.IMG",
+    "image_name": "N1294561202_1_CALIB.IMG",
+    "instrument": "coiss",
+    "camera": "NAC",
+    "shutter_mode": "BOTSIM",
+    "image_shape": [
+      1024,
+      1024
+    ]
+  },
   "navigation_result": {
+    "status": "success",
+    "status_reason": "ok",
+    "offset_px": [
+      3.25,
+      -1.5
+    ],
+    "sigma_px": [
+      0.31,
+      0.28
+    ],
+    "sigma_along_unobservable_px": null,
     "confidence": 0.91,
+    "confidence_provisional": true,
     "confidence_rank": "high",
     "covariance_px2": [
       [
@@ -13,160 +36,363 @@
         0.0784
       ]
     ],
+    "techniques_used": [
+      "BodyLimbNav",
+      "StarFieldFromCatalogNav"
+    ],
     "excluded_from_consensus": [],
-    "feature_inventory": [
-      {
-        "feature_id": "star:UCAC4:100000",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100001",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100002",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100003",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100004",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100005",
-        "feature_type": "STAR",
-        "gated": false,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "star:UCAC4:100099",
-        "feature_type": "STAR",
-        "gated": true,
-        "source_model": "stars:UCAC4"
-      },
-      {
-        "feature_id": "body_disc:IAPETUS",
-        "feature_type": "BODY_DISC",
-        "gated": false,
-        "source_model": "body:IAPETUS"
-      },
-      {
-        "feature_id": "body_limb:IAPETUS",
-        "feature_type": "BODY_LIMB",
-        "gated": false,
-        "source_model": "body:IAPETUS"
-      }
-    ],
-    "image_classifier": {
-      "class": "clean",
-      "noise_sigma": 0.75
+    "feature_count_by_type": {
+      "STAR": 6,
+      "BODY_DISC": 1,
+      "LIMB_ARC": 1
     },
-    "offset_px": [
-      3.25,
-      -1.5
-    ],
     "per_technique": [
       {
-        "at_edge": false,
-        "confidence": 0.93,
-        "covariance_px2": [
-          [
-            0.25,
-            0.0
-          ],
-          [
-            0.0,
-            0.25
-          ]
-        ],
-        "diagnostics": {
-          "converged": true,
-          "n_iterations": 4
-        },
+        "technique_name": "StarFieldFromCatalogNav",
         "feature_ids": [
-          "star:UCAC4:100000"
+          "star:UCAC4:100000",
+          "star:UCAC4:100001",
+          "star:UCAC4:100002",
+          "star:UCAC4:100003",
+          "star:UCAC4:100004",
+          "star:UCAC4:100005"
         ],
         "offset_px": [
           3.3,
           -1.45
         ],
-        "spurious": false,
-        "technique_name": "StarFieldFromCatalogNav"
-      },
-      {
-        "at_edge": false,
-        "confidence": 0.84,
         "covariance_px2": [
           [
-            0.25,
+            0.1444,
             0.0
           ],
           [
             0.0,
-            0.25
+            0.1156
           ]
         ],
+        "confidence": 0.93,
+        "spurious": false,
+        "at_edge": false,
         "diagnostics": {
-          "converged": true,
-          "n_iterations": 4
-        },
+          "n_inliers": 6,
+          "median_residual_px": 0.184,
+          "n_detected_sources": 11,
+          "n_catalog_predicted": 7,
+          "n_triplets_evaluated": 35,
+          "rotation_below_separability_floor": false,
+          "wide_offset_lock": false,
+          "wide_offset_false_lock_expectation": 0.002
+        }
+      },
+      {
+        "technique_name": "BodyLimbNav",
         "feature_ids": [
-          "body_limb:IAPETUS"
+          "limb_arc:IAPETUS"
         ],
         "offset_px": [
           3.1,
           -1.62
         ],
+        "covariance_px2": [
+          [
+            0.2916,
+            0.0
+          ],
+          [
+            0.0,
+            0.2401
+          ]
+        ],
+        "confidence": 0.84,
         "spurious": false,
-        "technique_name": "BodyLimbNav"
+        "at_edge": false,
+        "diagnostics": {
+          "visible_limb_arc_fraction": 0.986,
+          "visible_arc_px": 277.0,
+          "dt_fit_rms_px": 0.278,
+          "lm_iterations": 12,
+          "tukey_inlier_count": 269,
+          "lm_converged": true,
+          "polarity_rejection_fraction": 0.0,
+          "coarse_peak_fraction": 0.625
+        }
       }
     ],
-    "provenance": {
-      "config_hash": "0f1e2d3c4b5a6978",
-      "image_et": 170000000.0,
-      "pipeline_run_iso8601": "2026-05-04T11:22:33",
-      "spindoctor_git_sha": "abc1234",
-      "spindoctor_version": "1.0.0"
+    "feature_inventory": [
+      {
+        "feature_id": "star:UCAC4:100000",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.91,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          142,
+          611,
+          153,
+          622
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.91,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:100001",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.84,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          268,
+          344,
+          279,
+          355
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.84,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:100002",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.77,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          401,
+          802,
+          412,
+          813
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.77,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:100003",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.69,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          556,
+          178,
+          567,
+          189
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.69,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:100004",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.55,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          704,
+          923,
+          715,
+          934
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.55,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:100005",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.41,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          881,
+          466,
+          892,
+          477
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.41,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "star:UCAC4:100099",
+        "feature_type": "STAR",
+        "source_model": "stars",
+        "reliability": 0.12,
+        "gated": true,
+        "gate_reason": "reliability_0.120_below_threshold_0.200",
+        "bbox_extfov_vu": [
+          933,
+          705,
+          944,
+          716
+        ],
+        "reliability_reasons": {
+          "predicted_snr": 0.12,
+          "in_body_silhouette": false,
+          "in_saturation_or_cosmic": false,
+          "smear_length_ok": true
+        }
+      },
+      {
+        "feature_id": "body_disc:IAPETUS",
+        "feature_type": "BODY_DISC",
+        "source_model": "body:IAPETUS",
+        "reliability": 0.62,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          388,
+          402,
+          636,
+          650
+        ],
+        "reliability_reasons": {
+          "visible_lit_fraction": 0.62,
+          "overflow_fraction": 0.0
+        }
+      },
+      {
+        "feature_id": "limb_arc:IAPETUS",
+        "feature_type": "LIMB_ARC",
+        "source_model": "body:IAPETUS",
+        "reliability": 0.814,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          388,
+          402,
+          636,
+          650
+        ],
+        "reliability_reasons": {
+          "visible_arc_fraction": 1.0,
+          "incidence_factor": 0.93
+        }
+      }
+    ],
+    "image_classifier": {
+      "class": "clean",
+      "saturation_frac": 0.0,
+      "missing_frac": 0.0,
+      "noise_sigma": 0.75,
+      "max_dn": 0.42,
+      "background_gradient_score": 1.732,
+      "flags": []
     },
-    "sigma_along_unobservable_px": null,
-    "sigma_px": [
-      0.31,
-      0.28
-    ],
-    "status": "success",
-    "status_reason": "ok"
+    "provenance": {
+      "spindoctor_version": "0.0.0",
+      "spindoctor_git_sha": "719cde5",
+      "spice_kernels": [
+        "05138_05159ra.bc",
+        "cas00172.tsc",
+        "cpck15Dec2017.tpc",
+        "naif0012.tls",
+        "sat428.bsp"
+      ],
+      "spice_kernel_count": 5,
+      "static_data_hashes": {
+        "config_220_body_shape.yaml": "ac10e82c9c141c0e449dcfc92d8c4f341400ffa51976f53c94c98eaabac7a52a",
+        "config_310_saturn_rings.yaml": "5f5f0b8f9a3b4d8c6e2a1c7d9b0e4f3a2d6c8b1e7f0a9d3c5b2e8f1a4d7c0b63",
+        "config_400_inst_coiss.yaml": "8c20d352ed0b5b690f7fc573f505f062551966c3305a01ae0e6fba63a8400f17"
+      },
+      "technique_names": [
+        "BodyBlobNav",
+        "BodyDiscCorrelateNav",
+        "BodyLimbNav",
+        "BodyTerminatorNav",
+        "RingAnnulusNav",
+        "RingEdgeNav",
+        "StarFieldFromCatalogNav",
+        "StarRefineNav",
+        "StarUniqueMatchNav",
+        "TitanHazeNav"
+      ],
+      "extractor_names": [
+        "body:IAPETUS",
+        "stars"
+      ],
+      "config_hash": "3ca76ec39b1fb875a86bed2793adc4430785242e07d705f2d65581963040a6b6",
+      "config_overrides": [],
+      "star_catalogs": {
+        "tycho2": "/resources/SPICE/Stars",
+        "ucac4": "/star-catalogs/UCAC4",
+        "ybsc": "/star-catalogs/YBSC"
+      },
+      "image_et": 170000000.0,
+      "pipeline_run_iso8601": "2026-08-08T16:46:29Z"
+    },
+    "pointing": {
+      "cmatrix": [
+        0.7340207836334689,
+        -0.19565969714102596,
+        0.6503312787409123,
+        0.6427676771783004,
+        -0.10897561975030234,
+        -0.7582704184358307,
+        0.2192332145659512,
+        0.9745981721790369,
+        0.04577335924268715
+      ],
+      "cmatrix_original": [
+        0.734074290948707,
+        -0.19565161004534604,
+        0.6502733139648412,
+        0.6427239921283785,
+        -0.10890187393762274,
+        -0.7583180413226591,
+        0.21918212817361082,
+        0.9746080388235765,
+        0.04580791798094368
+      ],
+      "camera_frame": "CASSINI_ISS_NAC",
+      "camera_frame_id": -82360,
+      "ck_frame_id": -82000
+    },
+    "times": {
+      "start_et": 169999999.77,
+      "stop_et": 170000000.23,
+      "midtime_et": 170000000.0,
+      "exposure_s": 0.46,
+      "sclk_start": "1/1294561202.077",
+      "sclk_midtime": "1/1294561202.136",
+      "sclk_stop": "1/1294561202.195"
+    }
   },
-  "observation": {
-    "camera": "NAC",
-    "image_name": "N1294561202_1_CALIB.IMG",
-    "image_path": "/holdings/N1294561202_1_CALIB.IMG",
-    "image_shape": [
-      1024,
-      1024
-    ],
-    "instrument": "coiss"
+  "timing": {
+    "start_iso8601": "2026-08-08T16:46:25.933806Z",
+    "end_iso8601": "2026-08-08T16:46:38.433806Z",
+    "elapsed_s": 12.5
   },
   "offset": [
     3.25,
     -1.5
   ],
-  "status": "success",
-  "timing": {
-    "elapsed_s": 12.5,
-    "end_iso8601": "2026-05-04T11:22:45",
-    "start_iso8601": "2026-05-04T11:22:33"
-  }
+  "confidence": 0.91
 }

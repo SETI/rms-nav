@@ -102,7 +102,7 @@ def _hist_overlay(
     ax.set_xlabel(xlabel, fontsize=8)
     ax.set_ylabel('density', fontsize=8)
     ax.tick_params(labelsize=7)
-    ax.legend(fontsize=7)
+    ax.legend(fontsize=7, loc='best')
     ax.grid(alpha=0.2)
 
 
@@ -148,7 +148,7 @@ def _curve_overlay(
     ax.set_xlabel(xlabel, fontsize=8)
     ax.set_ylabel(ylabel, fontsize=8)
     ax.tick_params(labelsize=7)
-    ax.legend(fontsize=7)
+    ax.legend(fontsize=7, loc='best')
     ax.grid(alpha=0.2)
 
 
@@ -364,7 +364,7 @@ def _figure_artifacts(comparison: InstrumentComparison, out: Path) -> bool:
             lw=1.0,
             label=f'catalog hot_pixel_fraction {hot_default:g}',
         )
-        axes[1].legend(fontsize=7)
+        axes[1].legend(fontsize=7, loc='best')
     fig.suptitle(f'{comparison.instrument}: FOM 6 artifact incidence', fontsize=11)
     fig.tight_layout()
     fig.savefig(out, dpi=110)

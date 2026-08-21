@@ -1,0 +1,289 @@
+"""The stored fixture tree is what the writer emits, and says what it claims to.
+
+``data/results_tree`` is the input the statistics ingest is measured over and
+the frozen report output is derived from, so a document there that no writer
+could have produced puts the whole measurement outside the schema: key sets,
+vocabularies and value shapes the ingest and the report then read from nothing
+the pipeline writes.  Nothing held these documents against the writer before,
+which is how they came to diverge without anyone noticing.
+
+This is what holds them.  The ``results_tree_documents`` package builds each
+document through the writer itself, and the first test here compares the bytes
+it produces against the bytes on disk, so the stored tree is writer output by
+construction.  A writer change is then reported here, and the fix is to run
+that package and re-ratify the frozen report output against what it wrote.
+
+The rest are the properties the tree is relied on for that the frozen report
+cannot see: the shutter modes that make a BOTSIM pair a pair, the attitude and
+exposure blocks a host with SPICE frames always records, and the internal
+agreements a hand-authored document is free to break -- a technique citing a
+feature the inventory does not hold, a spurious result reported as excluded
+from consensus, a recorded midtime that is not the recorded epoch, a spacecraft
+clock triple that spans a fraction of the exposure it was read over.
+"""
+
+from typing import Any
+
+import pytest
+
+from spindoctor.support.file import json_as_string
+
+from .results_tree_documents import (
+    RESULTS_TREE,
+    results_tree_documents,
+    stored_documents,
+)
+
+_BOTSIM_PAIR = (
+    'COISS_2001/data/1294561143_1295221348/N1294561202_1_CALIB',
+    'COISS_2001/data/1294561143_1295221348/W1294561202_1_CALIB',
+)
+"""The two stubs of the pair whose cameras were shuttered together."""
+
+_SINGLE_CAMERA = {
+    'COISS_2001/data/1294561143_1295221348/N1294562000_1_CALIB': 'NACONLY',
+    'COISS_2001/data/1294561143_1295221348/N1294564000_1_CALIB': 'NACONLY',
+}
+"""The Cassini stubs whose labels record one camera, and which mode they record."""
+
+_LOAD_ERROR = 'COISS_2001/data/1294561143_1295221348/N1294563000_1_CALIB'
+"""The stub of the image whose load failed before an observation existed."""
+
+_SIMULATED = 'sim_scene_000042'
+"""The stub of the simulated scene, the one host with no SPICE camera frame."""
+
+_SCLK_TICK_S = {'coiss': 1.0 / 256.0, 'vgiss': 0.06}
+"""How long one tick of each host's spacecraft clock is.
+
+Written out here rather than taken from the builders, which is the point: a
+test that asks the code what its own clock counts in agrees with every answer
+the code gives.  These are the ticks the mission clock kernels record -- a
+256th of a second on Cassini, a Voyager line of 0.06 seconds -- so a triple
+that disagrees with its own epochs by more than one of them is a triple the
+epoch-to-clock conversion could not have returned.
+"""
+
+_VOYAGER_MINORS_PER_FRAME = 60
+"""Minor frames in one Voyager FDS frame."""
+
+_VOYAGER_LINES_PER_MINOR = 800
+"""Lines in one Voyager minor frame; the line field counts from one."""
+
+
+def _sclk_seconds(instrument: str, reading: str) -> float:
+    """Read a spacecraft clock string back as a number of seconds on that clock.
+
+    Parameters:
+        instrument: Which host recorded the reading.
+        reading: The clock string, partition and all.
+
+    Returns:
+        The reading in seconds, on that clock's own origin.  Only differences
+        between two readings of one clock mean anything.
+    """
+    count = reading.split('/', 1)[1]
+    if instrument == 'coiss':
+        seconds, fraction = count.split('.')
+        return int(seconds) + int(fraction) * _SCLK_TICK_S['coiss']
+    frame, minor, line = count.split(':')
+    lines = (int(frame) * _VOYAGER_MINORS_PER_FRAME + int(minor)) * _VOYAGER_LINES_PER_MINOR
+    return (lines + int(line) - 1) * _SCLK_TICK_S['vgiss']
+
+
+@pytest.fixture(scope='module')
+def built() -> dict[str, dict[str, Any]]:
+    """Build every document once for the whole module.
+
+    Returns:
+        Stub to the document the writer produces for it.
+    """
+    return results_tree_documents()
+
+
+@pytest.fixture(scope='module')
+def stored() -> dict[str, dict[str, Any]]:
+    """Read every document the tree holds, once for the whole module.
+
+    Returns:
+        Stub to the parsed document.
+    """
+    return stored_documents()
+
+
+def test_the_tree_holds_exactly_the_documents_the_corpus_names(
+    built: dict[str, dict[str, Any]], stored: dict[str, dict[str, Any]]
+) -> None:
+    """A document nobody builds, or one nobody wrote, is a tree out of step."""
+    assert sorted(stored) == sorted(built)
+
+
+def test_every_stored_document_is_byte_for_byte_what_the_writer_emits(
+    built: dict[str, dict[str, Any]],
+) -> None:
+    """The bytes on disk are the writer's own serialization of its own output."""
+    differing = [
+        stub
+        for stub, document in built.items()
+        if (RESULTS_TREE / f'{stub}_metadata.json').read_text(encoding='utf-8')
+        != json_as_string(document)
+    ]
+    assert differing == []
+
+
+def test_the_botsim_pair_records_the_mode_that_makes_it_a_pair(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """Without the shutter mode the pair is only two images sharing a number."""
+    modes = [stored[stub]['observation']['shutter_mode'] for stub in _BOTSIM_PAIR]
+    assert modes == ['BOTSIM', 'BOTSIM']
+
+
+def test_the_botsim_pair_shares_one_shutter(stored: dict[str, dict[str, Any]]) -> None:
+    """One shutter is one epoch and one clock reading, on both cameras."""
+    times = [stored[stub]['navigation_result']['times'] for stub in _BOTSIM_PAIR]
+    assert times[0]['midtime_et'] == times[1]['midtime_et']
+    assert times[0]['sclk_midtime'] == times[1]['sclk_midtime']
+
+
+def test_the_single_camera_images_record_their_own_shutter_mode(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """A column that only ever held one value would not tell the modes apart."""
+    found = {stub: stored[stub]['observation']['shutter_mode'] for stub in _SINGLE_CAMERA}
+    assert found == _SINGLE_CAMERA
+
+
+def test_the_hosts_whose_labels_carry_no_shutter_mode_record_none(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """Voyager, the simulated scene, and an image that never loaded record none."""
+    carrying = sorted(
+        stub
+        for stub, document in stored.items()
+        if str(document['observation']['instrument']) != 'coiss'
+        and 'shutter_mode' in document['observation']
+    )
+    assert carrying == []
+    assert 'shutter_mode' not in stored[_LOAD_ERROR]['observation']
+
+
+def test_every_navigated_image_with_spice_frames_records_its_attitude_and_times(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """Both blocks are stamped for every result of such a host, failures included."""
+    missing = sorted(
+        stub
+        for stub, document in stored.items()
+        if stub not in (_LOAD_ERROR, _SIMULATED)
+        if not {'pointing', 'times'} <= set(document['navigation_result'])
+    )
+    assert missing == []
+
+
+def test_only_a_navigation_that_produced_an_offset_records_a_corrected_attitude(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """A failed navigation has no offset, so it has no correction to record."""
+    wrong = sorted(
+        stub
+        for stub, document in stored.items()
+        if 'pointing' in document.get('navigation_result', {})
+        if ('cmatrix' in document['navigation_result']['pointing'])
+        != (document['status'] == 'success')
+    )
+    assert wrong == []
+
+
+def test_the_simulated_scene_records_no_attitude_and_no_times(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """It has no spacecraft and no furnished camera frame, so it records neither."""
+    navigation_result = stored[_SIMULATED]['navigation_result']
+    assert 'pointing' not in navigation_result
+    assert 'times' not in navigation_result
+
+
+def test_every_recorded_midtime_is_the_recorded_epoch(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """An image's epoch is its observation's midtime, and a reader gates on it."""
+    disagreeing = sorted(
+        stub
+        for stub, document in stored.items()
+        if 'times' in document.get('navigation_result', {})
+        if document['navigation_result']['times']['midtime_et']
+        != document['navigation_result']['provenance']['image_et']
+    )
+    assert disagreeing == []
+
+
+def test_every_clock_triple_spans_the_exposure_it_was_read_over(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """A triple narrower than its own epochs is one no clock conversion returns.
+
+    The readings come from the epochs beside them, so the interval between two
+    of them is the interval between those epochs, to within the tick the clock
+    counts in.  A triple that says the shutter was open for a fifth of the time
+    the epochs say is a hand-authored one, and every reader that subtracts two
+    of its readings measures that fifth.
+    """
+    disagreeing: list[str] = []
+    for stub, document in stored.items():
+        times = document.get('navigation_result', {}).get('times')
+        if times is None:
+            continue
+        instrument = str(document['observation']['instrument'])
+        tick_s = _SCLK_TICK_S[instrument]
+        opened = _sclk_seconds(instrument, str(times['sclk_start']))
+        for reading, epoch in (('sclk_midtime', 'midtime_et'), ('sclk_stop', 'stop_et')):
+            on_the_clock = _sclk_seconds(instrument, str(times[reading])) - opened
+            between_the_epochs = float(times[epoch]) - float(times['start_et'])
+            if abs(on_the_clock - between_the_epochs) > tick_s:
+                disagreeing.append(
+                    f'{stub}: {reading} is {on_the_clock} s after sclk_start, against '
+                    f'{between_the_epochs} s between the epochs'
+                )
+    assert disagreeing == []
+
+
+def test_every_technique_cites_features_the_inventory_holds(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """A technique consumes features that were extracted and survived the gate."""
+    unknown: list[str] = []
+    for stub, document in stored.items():
+        navigation_result = document.get('navigation_result', {})
+        kept = {
+            str(entry['feature_id'])
+            for entry in navigation_result.get('feature_inventory', [])
+            if not entry['gated']
+        }
+        for entry in navigation_result.get('per_technique', []):
+            unknown += [
+                f'{stub}: {entry["technique_name"]} cites {feature_id}'
+                for feature_id in entry['feature_ids']
+                if feature_id not in kept
+            ]
+    assert unknown == []
+
+
+def test_no_spurious_result_is_reported_as_excluded_from_consensus(
+    stored: dict[str, dict[str, Any]],
+) -> None:
+    """The ensemble drops a spurious result before it selects a consensus.
+
+    So a spurious technique is never one the consensus left out, and a document
+    naming it in both places describes an ensemble run that cannot happen.
+    """
+    both: list[str] = []
+    for stub, document in stored.items():
+        navigation_result = document.get('navigation_result', {})
+        excluded = set(navigation_result.get('excluded_from_consensus', []))
+        both += [
+            f'{stub}: {entry["technique_name"]}'
+            for entry in navigation_result.get('per_technique', [])
+            if entry['spurious']
+            if str(entry['technique_name']) in excluded
+        ]
+    assert both == []
