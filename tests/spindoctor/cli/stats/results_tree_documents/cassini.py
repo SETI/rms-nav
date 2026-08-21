@@ -103,7 +103,7 @@ def cassini_star_and_limb() -> dict[str, Any]:
     per_technique = [
         NavTechniqueResult(
             technique_name='StarFieldFromCatalogNav',
-            feature_ids=tuple(star.feature_id for star in stars),
+            feature_ids=tuple(summary.feature_id for summary in stars),
             offset_px=(3.3, -1.45),
             covariance_px2=np.diag([0.1444, 0.1156]),
             confidence=0.93,
