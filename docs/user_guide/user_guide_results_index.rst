@@ -26,9 +26,8 @@ reachable.
 
 This chapter is the index: when to build one, how programs are pointed at it,
 what it does and does not promise, how to build, share, rebuild and query one,
-and the tables it holds. :doc:`user_guide_statistics` documents the one
-program that reads an index and nothing else, ``sd_stats_report``, which turns
-one into the navigation statistics report.
+and the tables it holds. :doc:`user_guide_statistics` documents
+``sd_stats_report``, which turns one into the navigation statistics report.
 
 Nothing requires an index
 =========================
@@ -37,9 +36,12 @@ Every program runs with no index at all, and that is the default. A run that
 names no index reads the results tree exactly as it always has; there is no
 fallback path to get wrong, because reading files *is* the ordinary path.
 
-``sd_stats_report`` is the one exception in the other direction: it has no
-file-reading mode, and it fails naming ``--results-db`` when no index is
-resolved.
+``sd_stats_report`` is the one worth a word before it is pointed at a tree. It
+reads every document under every root it is given, on every run --- which is
+exactly the cost an index exists to remove. For a local tree and a single
+report that is the right trade; for a cloud root, or a report you will run
+again, build an index first. :doc:`user_guide_statistics` says so beside the
+option.
 
 **A program becomes index-backed by declaring** ``--results-db``, never by
 inheriting an exported ``NAV_RESULTS_DB``. A program whose selection is meant
@@ -102,7 +104,8 @@ Which programs read it
    * - ``sd_stats_ingest_cloud_tasks``
      - Writes one share of it, as a queue worker.
    * - ``sd_stats_report``
-     - Reads it and nothing else; the one program an index is not optional for.
+     - Every section of the report. Given no index it reads the results tree
+       instead, and the report is the same either way.
    * - ``sd_offset``
      - The results-based selection filters (``--has-offset-file``,
        ``--has-no-offset-file``, the error filters), which otherwise walk the
@@ -264,7 +267,10 @@ Absence of a row would otherwise read as "this image was never navigated", so
 a consumer pointed at an index that has never covered its root fails with a
 message naming the root and the roots the index does hold. A pass that is
 still running, or one that stopped, leaves its root in exactly that state until
-it is completed.
+it is completed. A consumer that names no root of its own -- the statistics
+report is the one that may -- is bound to the roots that do have a completed
+ingest and names the others as roots it covered nothing of, which is the same
+rule stated about a set of roots rather than about one.
 
 **Ingestion is never automatic.** No batch driver runs it as a side effect. The
 index is a snapshot of the tree as of the last ingest: there is no staleness
@@ -282,6 +288,14 @@ navigation documents at all; each is counted as an error for its own file, the
 run continues, and the closing summary tallies the failures by reason and names
 one file per reason, so several hundred files that were never navigation results
 read as exactly that rather than as a broken ingest.
+
+A file that could not be retrieved at all is the one failure the pass records
+nowhere. It is counted in the pass's own tally and no ``failed_files`` row is
+written for it, deliberately: a retrieval that failed once is worth trying again
+on the next pass, where a file that was read and refused will be refused again
+for as long as it does not change. So a report over the documents counts such a
+file among the files that yielded no record and a report from an index does not,
+and running the ingest again is what closes the gap.
 
 That tally is what this pass read, and not what the root holds. A refused file
 is recorded in ``failed_files``, and every pass after it skips the file

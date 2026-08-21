@@ -125,19 +125,23 @@ so a source holding more than one root refuses it, naming them.
 
 :meth:`~spindoctor.nav_records.RecordSource.records` takes a selection and
 yields the records it covers, one at a time. It is what a program that
-summarizes or sweeps asks once per run: the kernel writer reading a mission, the
-statistics report reading a root. It also takes an explicit list of stubs, which
-is what a queue task carries --- a worker must read exactly the files it was
-given, and read them in batches, so looping the per-image call would cost it a
-round trip apiece on the storage that batching exists for.
+summarizes or sweeps asks once per run --- the kernel writer reading a
+mission. It also takes an explicit list of stubs, which is what a queue task
+carries --- a worker must read exactly the files it was given, and read them in
+batches, so looping the per-image call would cost it a round trip apiece on the
+storage that batching exists for.
 
 :meth:`~spindoctor.nav_records.RecordSource.facts` takes a selection and yields
 what every image it covers says about itself --- the image's own values, one
 entry per technique that reported, and the aggregated inventory of the features
-the models offered. It is what a program reading every field of every image asks
-for, because a record cannot carry that: a record is defined as looking like the
-document it stands for, so the index rebuilds one out of the columns its consumer
-selected and invents no field the document did not have, and no record carries a
+the models offered. It is what the statistics report asks for, being the one
+program that reads every field of every image: it makes a single pass of
+accumulators over this stream and formats every section of its output from
+them, so a report over a tree and a report over an index are one
+implementation of every statistic rather than two obliged to agree forever. A
+record cannot carry those fields: it is defined as looking like the document it
+stands for, so the index rebuilds one out of the columns its consumer selected
+and invents no field the document did not have, and no record carries a
 per-technique or per-feature row at all. The facts are the whole row --- what
 the index column set holds about an image, in the shape both storages hold it
 in --- so the columns a consumer named narrow its records and never its facts.
@@ -171,11 +175,13 @@ records, says what that order is, and a caller needing a total order calls
 
 **A failure arrives from** ``next()``. A file that could not be read is yielded
 into the stream as an :class:`~spindoctor.nav_records.UnreadableFile` rather
-than raised, so one of them costs itself and not the rest of the pass. A
-refusal that ends a pass --- a
-directory nobody can list, an index that stops answering --- surfaces in the
-middle of the caller's loop, so a program using the stream finishes its pass
-before it writes its output.
+than raised, so one of them costs itself and not the rest of the pass. What
+becomes of it is the caller's: the ingest records it in ``failed_files``, and
+the statistics report counts them and prints the count, so a summary says how
+much of a root it could not read rather than quietly covering less. A refusal
+that ends a pass --- a directory nobody can list, an index that stops
+answering --- surfaces in the middle of the caller's loop, so a program using
+the stream finishes its pass before it writes its output.
 
 Two backends, and why the package is split
 ------------------------------------------
@@ -267,6 +273,19 @@ consumer is caught rather than read as absent by everything.
 **A record read from a document carries every field it has; one rebuilt from a
 row carries what its consumer selected.** That is the one difference a consumer
 has to know about, and it is why the columns are pinned rather than assumed.
+
+**A stream of records narrows on the document; a stream of facts narrows on the
+facts.** A record is the document, so a walk reads the mission and the exposure
+midtime out of the document it has just parsed: one it can attribute to another
+mission, or place outside the span, is passed over, and one it cannot place at
+all is reported rather than dropped from every run there is. The facts are the
+row an ingest of the same file writes, so a walk narrowing them compares the
+fields the row holds, which are the fields a query narrows on --- and a file
+that yields no facts is an unreadable file under every selection, because
+nothing was read out of it for a filter to compare. That is what makes the two
+storages cover the same images under one filter by construction rather than by
+testing: under a filter on the facts there is no value one of them reads and the
+other does not.
 
 **A key is checked where it is written, not where it is read.** A results root
 is normalized to one absolute, resolved spelling by

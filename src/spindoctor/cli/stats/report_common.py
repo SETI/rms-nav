@@ -1,52 +1,55 @@
-"""Shared context, query, formatting, and chart helpers for the statistics report.
+"""Shared state, accumulators, formatting, and chart helpers for the statistics report.
 
-Every query the report issues goes through :func:`rows`, which runs textual SQL
-with named bind parameters against a SQLAlchemy Core connection.  Named binds
-rather than positional ones because the same filter fragment is spliced into
-statements that already carry binds of their own, and a filter that had to know
-how many came before it would be a filter that broke whenever a section grew a
-condition.
+The report is one pass over the record seam followed by a formatting run over
+what that pass accumulated, and this module holds the join between the two
+halves.  :class:`ReportStatistics` is what a section's numbers are read off, and
+:class:`ReportContext` is what carries it to each section builder alongside the
+output directory and the drill-down options.
 
-Nothing here is dialect-specific.  The filters compare columns -- including
-``image_number``, which is ingested rather than computed by a function
-registered on one connection -- so the same statement runs on SQLite and on
-PostgreSQL and means the same thing on both.
+The accumulators are declared here rather than beside the pass that fills them
+because :class:`ReportContext` names one and the section builders name a
+context, so the pass is written on top of this module rather than under it.
+
+Every number a section prints comes from the accumulators, and the accumulators
+come from whichever storage answered the seam, so one report is written over a
+results tree and over an index ingested from it.
 """
 
+import heapq
 import math
 import re
 import statistics
-from collections.abc import Callable
+from array import array
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Any
 
-import sqlalchemy
 from filecache import FCPath
 
 __all__ = [
-    'IMAGE_JOIN',
+    'BotsimFrame',
     'ReportContext',
+    'ReportStatistics',
+    'SlowestImages',
+    'SuspectOffset',
+    'TimedImage',
     'add_drilldown',
     'add_instrument_count_table',
-    'connector',
     'count_pct',
     'fmt',
     'image_name_from_filename',
-    'image_order',
     'instrument_color',
     'offset_stats',
     'percentile',
-    'rows',
     'safe_filename',
-    'where_clause',
     'write_offset_hist',
     'write_stacked_bar_chart',
     'write_stacked_value_hist',
 ]
 
 
-# The database records ``observation.image_name``, which is the source file's
+# A record carries ``observation.image_name``, which is the source file's
 # basename (``N1454725799_1_CALIB.IMG``).  The dataset layer's notion of an
 # image name is the shorter token its ``--image-filelist`` selection matches
 # against (``N1454725799``), so every name the report prints or writes to a
@@ -68,11 +71,11 @@ def image_name_from_filename(instrument: str, filename: str) -> str:
     """The dataset-level image name for a recorded image filename.
 
     Parameters:
-        instrument: Registered instrument name from the database
+        instrument: Registered instrument name the record carries
             (``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri``); an
             unregistered name only has its extension stripped.
-        filename: The recorded ``images.image_name`` value (a basename,
-            possibly with a directory prefix).
+        filename: The recorded image name (a basename, possibly with a
+            directory prefix).
 
     Returns:
         The image name in the form ``--image-filelist`` selects on, e.g.
@@ -87,33 +90,310 @@ def image_name_from_filename(instrument: str, filename: str) -> str:
     return rule(stem) if rule is not None else stem
 
 
-def image_order(alias: str = '') -> str:
-    """A total ordering over images, for a query that lists them by name.
-
-    Image name alone is not unique: two volumes may hold images with the same
-    basename, and the pair that keys the row breaks the tie.  Without it two
-    rows with one name would come back in whatever order the backend liked, and
-    the report would not be the same twice.
+@dataclass(frozen=True)
+class SuspectOffset:
+    """One successful image whose fused offset reaches near the search limit.
 
     Parameters:
-        alias: Table alias prefix (e.g. ``'i.'``) qualifying the column names.
-
-    Returns:
-        The ``ORDER BY`` column list.
+        ratio: How far into the search box the offset reaches, as a fraction of
+            the per-axis limit, over whichever axis reaches further.
+        image_name: The recorded image filename.
+        instrument: The image's instrument.
+        offset_dv: The fused V-axis offset, in pixels.
+        offset_du: The fused U-axis offset, in pixels.
+        magnitude: The offset's length, in pixels.
+        limit_text: The per-axis limit, rendered as the table cell shows it.
+        root_url: The results root the image was read under.
+        results_path_stub: The image's key under that root.
     """
-    return f'{alias}image_name, {alias}root_url, {alias}results_path_stub'
+
+    ratio: float
+    image_name: str
+    instrument: str
+    offset_dv: float
+    offset_du: float
+    magnitude: float
+    limit_text: str
+    root_url: str
+    results_path_stub: str
+
+    @property
+    def rank(self) -> tuple[float, str, str, str]:
+        """Where this image sorts in the suspect table.
+
+        Returns:
+            Worst ratio first, then the image name, then the pair that keys the
+            image.  The pair is part of the key because an image name is not
+            unique across roots: two roots holding one basename would otherwise
+            be separated by whatever order the records arrived in, which is an
+            order no source promises.
+        """
+        return (-self.ratio, self.image_name, self.root_url, self.results_path_stub)
 
 
-IMAGE_JOIN = (
-    'JOIN images i ON i.root_url = {alias}root_url '
-    'AND i.results_path_stub = {alias}results_path_stub'
-)
-"""How a child table joins to the image it belongs to.
+@dataclass(frozen=True)
+class BotsimFrame:
+    """One frame of a possible BOTSIM pair, as the pair check reads it.
 
-An image is keyed by the pair, so a child row is matched on the pair.  Joining
-on the image name alone would merge two volumes' images of the same name into
-one, which is precisely the confusion the pair exists to prevent.
-"""
+    Parameters:
+        image_name: The recorded image filename.
+        root_url: The results root the image was read under.
+        results_path_stub: The image's key under that root.
+        status: The image's navigation status.
+        offset_dv: The fused V-axis offset, or None when none was recorded.
+        offset_du: The fused U-axis offset, or None when none was recorded.
+    """
+
+    image_name: str
+    root_url: str
+    results_path_stub: str
+    status: str
+    offset_dv: float | None
+    offset_du: float | None
+
+    @property
+    def identity(self) -> tuple[str, str, str]:
+        """What decides which frame stands for a clock count and a camera.
+
+        Returns:
+            The image name and the pair that keys the image.  Two images of one
+            camera sharing a clock count is a tree nobody expects, and the one
+            with the smallest identity is taken, so the answer does not depend
+            on which of them the source happened to yield first.
+        """
+        return (self.image_name, self.root_url, self.results_path_stub)
+
+
+@dataclass(frozen=True)
+class TimedImage:
+    """One image's run time, ordered as the slowest-image list orders it.
+
+    Parameters:
+        elapsed_s: What the run recorded for this image, in seconds.
+        image_name: The recorded image filename.
+        instrument: The image's instrument.
+        root_url: The results root the image was read under.
+        results_path_stub: The image's key under that root.
+    """
+
+    elapsed_s: float
+    image_name: str
+    instrument: str
+    root_url: str
+    results_path_stub: str
+
+    @property
+    def rank(self) -> tuple[float, str, str, str]:
+        """Where this image sorts in the slowest-image list.
+
+        Returns:
+            Slowest first, then the image name, then the pair that keys the
+            image, for the reason :attr:`SuspectOffset.rank` carries the pair.
+        """
+        return (-self.elapsed_s, self.image_name, self.root_url, self.results_path_stub)
+
+    def __lt__(self, other: 'TimedImage') -> bool:
+        """Compare two images the opposite way round from how they are listed.
+
+        A heap hands back its smallest element, and what a bounded slowest-N
+        wants to hand back is the one it would print last, so the comparison is
+        inverted here rather than at every use of the heap.
+
+        Parameters:
+            other: The image to compare against.
+
+        Returns:
+            True when this image sorts *later* in the printed list.
+        """
+        return self.rank > other.rank
+
+
+class SlowestImages:
+    """The slowest images of a pass, kept without holding the rest.
+
+    A list of every image's run time is retained anyway, packed, because the
+    quantiles and the histogram need every value.  The names are not: the
+    slowest list is the only thing that wants them, it is bounded by ``--top-n``,
+    and a name is the expensive half of a per-image retention.
+
+    Parameters:
+        limit: How many to keep.  Zero keeps none, which is what the default
+            ``--top-n 0`` asks for, and the section then prints no list at all.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = max(0, limit)
+        self._held: list[TimedImage] = []
+
+    def add(self, image: TimedImage) -> None:
+        """Offer one image to the list, keeping it only if it belongs there.
+
+        Parameters:
+            image: The image and what it took.
+        """
+        if self._limit == 0:
+            return
+        if len(self._held) < self._limit:
+            heapq.heappush(self._held, image)
+            return
+        heapq.heappushpop(self._held, image)
+
+    @property
+    def entries(self) -> list[TimedImage]:
+        """The images kept, in the order the report lists them.
+
+        Returns:
+            Slowest first, ties broken by name and then by the pair that keys
+            the image.
+        """
+        return sorted(self._held, key=lambda image: image.rank)
+
+
+@dataclass
+class ReportStatistics:
+    """Every number the report prints, accumulated in one pass over the records.
+
+    Each field is keyed exactly as the section that reads it groups: a counter
+    where the section counts, a packed array where it needs every value for a
+    mean, a median, a percentile or a histogram, and a bounded structure where
+    it prints a top-N list.  Two retentions grow with the images rather than
+    with a fixed space of keys, and each is described where it is declared: the
+    suspect list, which is the one always-on section printing a row per image
+    and which ``--top-n 0`` leaves uncapped, and the Cassini frame held per
+    spacecraft-clock count for the BOTSIM pairing.  Everything else that names
+    an image -- the four drill-down lists and the filelists -- is held only
+    where one of those was asked for.
+
+    The two-level counters carry the section's key and then the instrument,
+    because every count table has one column per instrument and a total.
+
+    Parameters:
+        top_n: How many rows the capped tables print, and how many names a
+            drill-down shows.
+        retain_names: Whether any section will name images, which is true when
+            examples or filelists were asked for.  Off, the four drill-down
+            lists retain nothing at all.
+        suspect_fraction: Fraction of the per-axis search limit at or beyond
+            which a fused offset is screened as suspect.
+        images_by_instrument: Selected images per instrument.
+        unreadable_files: Files under the selected roots named like a
+            navigation document that no record could be read out of.  Root
+            scoped rather than selection scoped: such a file records no
+            instrument, date or image number, so no filter can be applied to it.
+        failed_images: Selected images whose status is not ``success``.
+        csv_rows: Rows the CSV export wrote, for the line naming the file.
+        first_image: Per instrument, the lowest ``(image_number, image_name,
+            root_url, results_path_stub)`` of the images that carry a number.
+        last_image: The same, with the number negated, so the entry held is the
+            highest-numbered image and the lowest name among any that tie.
+        first_et: Per instrument, the earliest recorded epoch.
+        last_et: Per instrument, the latest recorded epoch.
+        status_counts: Images per status.
+        reason_counts: Images per ``(status, failure reason)``.
+        failure_names: Per failure reason, the images that carried it; retained
+            only under ``retain_names``.
+        content_counts: Failed images per scene-content category.
+        content_reason_counts: Failed images per ``(content, failure reason)``.
+        content_names: Per content category, the failed images in it; retained
+            only under ``retain_names``.
+        body_failed: Failed images naming each ``(body, instrument)``.
+        body_success: Successful images naming each ``(body, instrument)``.
+        body_failed_names: Per ``(body, instrument)``, the failed images naming
+            it; retained only under ``retain_names``.
+        technique_images: Images each ``(technique, instrument)`` ran on.
+        technique_good: How many of those the technique did not call spurious.
+        technique_confidence: Per ``(technique, instrument)``, every confidence
+            it reported, packed.  A confidence that was never recorded is no
+            part of the population, so the mean skips it and a group that
+            reported none has no mean rather than a zero.  The values are held
+            rather than folded into a running total so that the mean is one
+            call over the population, whose answer is the same whatever order
+            the records arrived in.  An exact running total would be order-free
+            too -- the non-overlapping partials an exact sum is made of are a
+            couple of floats however many values go by -- but that is a small
+            algorithm to write and a smaller one to get quietly wrong, against
+            a packed array costing a few percent of the pass's peak.
+        source_images: Images each ``(model, source, instrument)`` appears in,
+            counted once per image however many feature types it supplied.
+        source_features: The features and gated features it supplied, summed.
+        offsets: Per ``(instrument, camera, image size)``, the fused offsets of
+            the successful images, packed per axis.  The per-camera section
+            pools these over the sizes rather than keeping a second copy.
+        pair_deltas: Per ``(instrument, technique, technique)``, the distances
+            between the two techniques' offsets on the images where both
+            reported non-spuriously.
+        rank_disagreement: Per ``(instrument, confidence tier)``, each image's
+            largest such distance.
+        tier_counts: Images per confidence tier.
+        exclusion_counts: Images per set of techniques the ensemble excluded.
+        exclusion_names: The images in each such set; retained only under
+            ``retain_names``.
+        screened: Successful images whose search limit could be resolved.
+        suspect_counts: How many of those reached the limit.
+        unresolved: Per reason, the images whose limit could not be resolved.
+        suspects: Every suspect image, uncapped.
+        botsim: Cassini images that name a clock count, by clock count and then
+            by camera letter.
+        elapsed_by_instrument: Per instrument, every recorded run time.
+        slowest: The slowest images, bounded by ``top_n``.
+    """
+
+    top_n: int = 0
+    retain_names: bool = False
+    suspect_fraction: float = 0.9
+
+    images_by_instrument: dict[str, int] = field(default_factory=dict)
+    unreadable_files: int = 0
+    failed_images: int = 0
+    csv_rows: int = 0
+
+    first_image: dict[str, tuple[int, str, str, str]] = field(default_factory=dict)
+    last_image: dict[str, tuple[int, str, str, str]] = field(default_factory=dict)
+    first_et: dict[str, float] = field(default_factory=dict)
+    last_et: dict[str, float] = field(default_factory=dict)
+
+    status_counts: dict[str, dict[str, int]] = field(default_factory=dict)
+    reason_counts: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+    failure_names: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+
+    content_counts: dict[str, dict[str, int]] = field(default_factory=dict)
+    content_reason_counts: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+    content_names: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    body_failed: dict[tuple[str, str], int] = field(default_factory=dict)
+    body_success: dict[tuple[str, str], int] = field(default_factory=dict)
+    body_failed_names: dict[tuple[str, str], list[str]] = field(default_factory=dict)
+
+    technique_images: dict[tuple[str, str], int] = field(default_factory=dict)
+    technique_good: dict[tuple[str, str], int] = field(default_factory=dict)
+    technique_confidence: dict[tuple[str, str], array[float]] = field(default_factory=dict)
+
+    source_images: dict[tuple[str, str, str], int] = field(default_factory=dict)
+    source_features: dict[tuple[str, str, str], list[int]] = field(default_factory=dict)
+
+    offsets: dict[tuple[str, str, str], tuple[array[float], array[float]]] = field(
+        default_factory=dict
+    )
+
+    pair_deltas: dict[tuple[str, str, str], array[float]] = field(default_factory=dict)
+    rank_disagreement: dict[tuple[str, str], array[float]] = field(default_factory=dict)
+    tier_counts: dict[str, dict[str, int]] = field(default_factory=dict)
+
+    exclusion_counts: dict[str, dict[str, int]] = field(default_factory=dict)
+    exclusion_names: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+
+    screened: dict[str, int] = field(default_factory=dict)
+    suspect_counts: dict[str, int] = field(default_factory=dict)
+    unresolved: dict[str, int] = field(default_factory=dict)
+    suspects: list[SuspectOffset] = field(default_factory=list)
+
+    botsim: dict[str, dict[str, BotsimFrame]] = field(default_factory=dict)
+
+    elapsed_by_instrument: dict[str, array[float]] = field(default_factory=dict)
+    slowest: SlowestImages = field(default_factory=lambda: SlowestImages(0))
+
+    def __post_init__(self) -> None:
+        """Size the two structures that are bounded by an option rather than by the data."""
+        self.slowest = SlowestImages(self.top_n)
 
 
 @dataclass
@@ -121,16 +401,11 @@ class ReportContext:
     """Mutable state threaded through every report section builder.
 
     Parameters:
-        connection: Open connection to the results index.
         output_dir: Directory receiving ``report.md``, charts, and the
             optional ``filelists/`` subdirectory; a local directory or
             any URL the ``filecache`` layer accepts.
-        where: Images-table filter from :func:`where_clause` (empty string
-            or a leading-space ``' WHERE ...'`` fragment).
-        params: Bind values matching ``where``, by name.
-        where_i: The same filter built with ``alias='i.'`` for queries
-            that join the ``images`` table as ``i``.
-        params_i: Bind values matching ``where_i``, by name.
+        stats: What the pass over the records accumulated.  Every number a
+            section prints is read off this and nothing else.
         lines: Markdown lines accumulated so far.
         top_n: When positive, categorical sections list up to this many
             example image names per category.
@@ -139,17 +414,13 @@ class ReportContext:
         suspect_fraction: Fraction of the per-axis search limit at or
             beyond which a fused offset is flagged as suspect.
         images_by_instrument: Selected image count per instrument, in
-            instrument-name order; filled in from the database.
+            instrument-name order; read off the accumulators.
         instruments: The selected instrument names, in name order.
         total_images: Total selected images across all instruments.
     """
 
-    connection: sqlalchemy.Connection
     output_dir: FCPath
-    where: str
-    params: dict[str, Any]
-    where_i: str
-    params_i: dict[str, Any]
+    stats: ReportStatistics
     lines: list[str] = field(default_factory=list)
     top_n: int = 0
     filelists: bool = False
@@ -159,14 +430,13 @@ class ReportContext:
     total_images: int = 0
 
     def __post_init__(self) -> None:
-        """Load the per-instrument image counts the whole report reports against."""
-        counts = rows(
-            self.connection,
-            f'SELECT instrument, COUNT(*) FROM images{self.where} '
-            'GROUP BY instrument ORDER BY instrument',
-            self.params,
-        )
-        self.images_by_instrument = {str(name): int(count) for name, count in counts}
+        """Read the per-instrument image counts the whole report reports against.
+
+        In instrument-name order, because that is the order every count table
+        lays its columns out in and the order the charts stack their segments
+        in, and a pass over records promises no order of its own.
+        """
+        self.images_by_instrument = dict(sorted(self.stats.images_by_instrument.items()))
         self.instruments = list(self.images_by_instrument)
         self.total_images = sum(self.images_by_instrument.values())
 
@@ -189,100 +459,6 @@ class ReportContext:
         body = f'# {stub} ({len(names)} image(s))\n' + ''.join(f'{name}\n' for name in names)
         (self.output_dir / relative).write_text(body, encoding='utf-8')
         return relative
-
-
-def where_clause(
-    *,
-    instrument: str | None,
-    start_date: str | None,
-    end_date: str | None,
-    min_image_num: int | None = None,
-    max_image_num: int | None = None,
-    roots: list[str] | None = None,
-    alias: str = '',
-) -> tuple[str, dict[str, Any]]:
-    """Build the images-table filter shared by every query.
-
-    The binds are named rather than positional because the fragment is spliced
-    into statements that carry binds of their own; a positional fragment would
-    have to know how many came before it.
-
-    ``image_number`` is a column, so the range filter is an ordinary comparison
-    on any backend rather than a call into a function registered on whichever
-    connection happened to be open.
-
-    Parameters:
-        instrument: Optional instrument filter value.
-        start_date: Optional inclusive UTC start date (``YYYY-MM-DD``).
-        end_date: Optional inclusive UTC end date (``YYYY-MM-DD``).
-        min_image_num: Optional inclusive lower bound on the numeric
-            portion of the image name.
-        max_image_num: Optional inclusive upper bound on the numeric
-            portion of the image name.
-        roots: Optional normalized results-root URLs to restrict to; None or
-            an empty list reports over every root the index holds.
-        alias: Table alias prefix (e.g. ``'i.'``) qualifying the column
-            names, for queries that join the ``images`` table.
-
-    Returns:
-        ``(where, params)`` where ``where`` is ``''`` or a leading-space
-        ``' WHERE ...'`` fragment and ``params`` the bound values by name.
-    """
-    clauses: list[str] = []
-    params: dict[str, Any] = {}
-    if instrument is not None:
-        clauses.append(f'{alias}instrument = :instrument')
-        params['instrument'] = instrument
-    if start_date is not None:
-        clauses.append(f'{alias}image_date >= :start_date')
-        params['start_date'] = start_date
-    if end_date is not None:
-        clauses.append(f'{alias}image_date <= :end_date')
-        params['end_date'] = end_date
-    if min_image_num is not None:
-        clauses.append(f'{alias}image_number >= :min_image_num')
-        params['min_image_num'] = min_image_num
-    if max_image_num is not None:
-        clauses.append(f'{alias}image_number <= :max_image_num')
-        params['max_image_num'] = max_image_num
-    if roots:
-        names = [f'root_{index}' for index in range(len(roots))]
-        placeholders = ', '.join(f':{name}' for name in names)
-        clauses.append(f'{alias}root_url IN ({placeholders})')
-        params.update(zip(names, roots, strict=True))
-    if len(clauses) == 0:
-        return '', {}
-    return ' WHERE ' + ' AND '.join(clauses), params
-
-
-def connector(where: str) -> str:
-    """The keyword joining an extra condition onto a ``where_clause`` result.
-
-    Parameters:
-        where: A filter fragment from :func:`where_clause` (empty string
-            or a leading-space ``' WHERE ...'`` fragment).
-
-    Returns:
-        ``' AND '`` when ``where`` already has conditions, else
-        ``' WHERE '``.
-    """
-    return ' AND ' if len(where) > 0 else ' WHERE '
-
-
-def rows(
-    connection: sqlalchemy.Connection, sql: str, params: dict[str, Any]
-) -> list[tuple[Any, ...]]:
-    """Execute a query and return all result rows as a list.
-
-    Parameters:
-        connection: Open connection to the results index.
-        sql: SQL statement with ``:name`` bind placeholders.
-        params: Bind values by name.
-
-    Returns:
-        All result rows, in query order, as plain tuples.
-    """
-    return [tuple(row) for row in connection.execute(sqlalchemy.text(sql), params)]
 
 
 def fmt(value: float | None, digits: int = 3) -> str:
@@ -350,7 +526,7 @@ def add_instrument_count_table(
     ctx.lines.append('')
 
 
-def offset_stats(values: list[float]) -> dict[str, float] | None:
+def offset_stats(values: Sequence[float]) -> dict[str, float] | None:
     """Mean / median / stdev / min / max summary of a value list.
 
     Parameters:
@@ -372,7 +548,7 @@ def offset_stats(values: list[float]) -> dict[str, float] | None:
     }
 
 
-def percentile(values: list[float], fraction: float) -> float:
+def percentile(values: Sequence[float], fraction: float) -> float:
     """Nearest-rank percentile of a non-empty value list.
 
     Parameters:
@@ -571,7 +747,7 @@ def write_stacked_bar_chart(
 
 def write_stacked_value_hist(
     path: FCPath,
-    values_by_instrument: dict[str, list[float]],
+    values_by_instrument: Mapping[str, Sequence[float]],
     instruments: list[str],
     *,
     title: str,
@@ -606,7 +782,9 @@ def write_stacked_value_hist(
     _save_figure(fig, plt, path)
 
 
-def write_offset_hist(path: FCPath, dv: list[float], du: list[float], *, title: str) -> None:
+def write_offset_hist(
+    path: FCPath, dv: Sequence[float], du: Sequence[float], *, title: str
+) -> None:
     """Write a two-panel V/U offset histogram PNG for one instrument.
 
     Parameters:

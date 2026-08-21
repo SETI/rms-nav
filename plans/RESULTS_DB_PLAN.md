@@ -43,10 +43,9 @@ index when it is given.
 - Replacing the JSON documents. They remain the authoritative record. The
   index is derived and disposable; deleting it costs nothing but the time to
   rebuild.
-- Making any pipeline program require a database. Every program except
-  `sd_stats_report` (which has no file-reading mode today and reads only a
-  database by construction) must run correctly with no index at all, and
-  that path stays the default.
+- Making any program require a database. Every program, `sd_stats_report`
+  included, must run correctly with no index at all, and that path stays the
+  default.
 - Writing the index from the navigation pipeline. Navigation writes JSON;
   ingest reads it. Nothing in the navigation path gains a database
   dependency.
@@ -77,9 +76,9 @@ index when it is given.
 A database whose rows are derived from the results tree by a separate ingest
 step. A consumer given `--results-db` answers its questions with SQL instead
 of file reads. A consumer given no such option behaves exactly as it does
-today, reading files. (`sd_stats_report` is the one exception in both
-directions: it reads only a database today and after this work, and it is
-the one program for which the index is not optional.)
+today, reading files. `sd_stats_report` is answered by whichever storage it
+is pointed at: one pass of accumulators over the per-image facts the record
+seam yields, so an index makes the same report cheaper rather than possible.
 
 The index is a **snapshot**. It reflects the tree as of the last ingest over
 the roots it covers. Consumers trust its contents as given: there is no
@@ -131,8 +130,9 @@ simulated dataset) -- and `image_number`, computed by the existing
 `image_number_from_name` logic at ingest time. `results_path_stub` alone
 carries a non-unique index. Every consumer lookup filters on
 `root_url = <its normalized root>`; `sd_stats_report` gains `--root`
-(repeatable, default: all ingested roots), since a report legitimately spans
-roots where a pipeline lookup never does.
+(repeatable, default: every root the index holds a completed ingest of, and
+refused when no index was named to hold it against), since a report
+legitimately spans roots where a pipeline lookup never does.
 
 `images` carries two further non-unique indexes, `image_date` and
 `instrument`, which the statistics report groups and filters on across a whole
@@ -554,13 +554,14 @@ something, and an operator who writes an empty option is not asking for whatever
 the machine exports. It is not silent: the level that carries it is named in a
 warning saying that the value names no index, and how to ask for that on
 purpose. The warning stops there. What follows from having no index is the
-caller's, because one resolver serves `sd_offset`, which then reads files, and
-the two statistics programs, which have no file-reading mode and refuse; a
-warning that stated either would be false for the others and would arrive one
-line before their own message said the opposite. The caller supplies the sink as
-well as the meaning, so a program whose output is terminal text for a person
-prints the line where its other diagnostics go rather than having a run-log line
-routed into its report. Passing it on instead is what an unset variable
+caller's, because one resolver serves the programs that then read the tree --
+`sd_offset` and the report among them -- and `sd_stats_ingest`, which writes an
+index and has nowhere to put its rows without one; a warning that stated either
+meaning would be false for the other, and would arrive one line before their
+own message said the opposite. The caller supplies the sink as well as the
+meaning, so a program whose output is terminal text for a person prints the
+line where its other diagnostics go rather than having a run-log line routed
+into its report. Passing it on instead is what an unset variable
 expanded in a wrapper script produces, and it reaches the URL parser as a name
 that is not there, whose refusal begins with the colon after nothing and stops
 every run on the machine.
@@ -956,6 +957,24 @@ invocations in `docs/user_guide/user_guide_statistics.rst` change with it,
 and that page's "plain SQLite" framing is rewritten around the URL scheme
 with each direct-SQL example shown in both dialect spellings where they
 differ (`json_each` vs `jsonb_array_elements_text`).
+
+It reads through the record seam rather than the database. One pass of
+accumulators over `facts(selection)` answers every section, so the report runs
+over a results tree or an index and needs no database at all; no SQL, no
+connection and no `where_clause` survives in the report modules, whose only
+remaining database reader is the ingest package beside them.
+`--nav-results-root` and its ladder name the trees to read; `--root` selects
+among the roots one index holds, and is refused rather than read as a second
+spelling of it. With
+no `--root`, an index-backed report covers the roots whose newest ingest run
+completed rather than every row `images` happens to hold, since under a
+half-ingested root a report reads absence it has no licence to read.
+`images.csv` is written a row at a time and is therefore unsorted, with
+`results_path_stub` as its first column so an operator sorts it in the shell.
+A file that yielded no record is counted and the count is printed whether it
+is zero or not; it is scoped to the whole of every selected root rather than
+to the selection, because a refused file carries no instrument, date or image
+number for a filter to compare.
 
 **`sd_backplanes`.** Reads `status`, `status_error`, and the top-level
 `offset` for one stub. With an index it reads one row. A stub absent from
@@ -1435,8 +1454,11 @@ record types, the document rules, root identity, `Selection`, the
 `spindoctor/support/nav_document.py` and `spindoctor/cli/stats/ingest/walk.py`
 are gone. What has *not* moved onto the seam is the enumeration
 (`spindoctor/dataset/results_filter.py` still carries its own walk, its own
-parser, its own batching and its own copy of the suffix), the statistics
-report, and the ingest's retrieve-and-parse loop.
+parser, its own batching and its own copy of the suffix) and the ingest's
+retrieve-and-parse loop. The statistics report has moved:
+`spindoctor/cli/stats/report_accumulate.py` fills one set of accumulators from
+`facts(selection)`, and `report.py` and `report_sections.py` format every
+section out of those rather than issuing a statement apiece.
 
 The flattening the second paragraph above describes has moved as well.
 **`spindoctor/nav_records/facts.py`** holds `facts_from_document`, which turns

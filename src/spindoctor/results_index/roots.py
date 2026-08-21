@@ -36,12 +36,25 @@ from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.schema import INGEST_RUNS
 
 __all__ = [
+    'RootNotIngestedError',
     'ingested_roots',
     'newest_finish_time',
     'normalize_root_url',
     'open_index_for_roots',
     'require_ingested_roots',
+    'unfinished_roots',
 ]
+
+
+class RootNotIngestedError(ValueError):
+    """A root the index holds no completed ingest of.
+
+    A ``ValueError`` like every other refusal this layer raises, so a caller
+    that reports them all alike is unaffected.  It is a type of its own because
+    two callers report it differently from the refusals beside it: it names a
+    value the operator typed, and a program with a usage convention reports a
+    bad value as a usage error rather than as a failed run.
+    """
 
 
 def ingested_roots(connection: sqlalchemy.Connection) -> list[str]:
@@ -73,6 +86,38 @@ def ingested_roots(connection: sqlalchemy.Connection) -> list[str]:
         .order_by(INGEST_RUNS.c.root_url)
     )
     return [str(row.root_url) for row in connection.execute(completed)]
+
+
+def unfinished_roots(connection: sqlalchemy.Connection) -> list[str]:
+    """Return every root the index knows of whose newest ingest run did not complete.
+
+    The other half of :func:`ingested_roots` over the same table, and the half a
+    consumer needs to be able to say what it left out.  A run that reads only
+    the roots with a completed run covers less than the index holds rows for,
+    and a narrowing nobody can name is one an operator reads as an answer about
+    the whole index.
+
+    Parameters:
+        connection: An open connection to the index.
+
+    Returns:
+        The normalized root URLs, in name order.
+    """
+    newest = (
+        sqlalchemy.select(
+            INGEST_RUNS.c.root_url,
+            sqlalchemy.func.max(INGEST_RUNS.c.run_id).label('run_id'),
+        )
+        .group_by(INGEST_RUNS.c.root_url)
+        .subquery()
+    )
+    unfinished = (
+        sqlalchemy.select(INGEST_RUNS.c.root_url)
+        .join(newest, INGEST_RUNS.c.run_id == newest.c.run_id)
+        .where(INGEST_RUNS.c.finished_utc.is_(None))
+        .order_by(INGEST_RUNS.c.root_url)
+    )
+    return [str(row.root_url) for row in connection.execute(unfinished)]
 
 
 def newest_finish_time(connection: sqlalchemy.Connection, root_url: str) -> str | None:
@@ -124,19 +169,19 @@ def require_ingested_roots(
         url: The index URL, so the message says which index was asked.
 
     Raises:
-        ValueError: If any named root has no completed ingest run, naming the
-            roots that are missing and the roots the index does hold.  Under
-            such a root, absence of a row must never be read as "nothing was
-            navigated".  Under an ingested one it may be, but only once the
-            refusal table has been asked too: a completed run makes absence
-            from both tables meaningful, not absence from ``images`` alone.
+        RootNotIngestedError: If any named root has no completed ingest run,
+            naming the roots that are missing and the roots the index does hold.
+            Under such a root, absence of a row must never be read as "nothing
+            was navigated".  Under an ingested one it may be, but only once the
+            refusal table has been asked too: a completed run makes absence from
+            both tables meaningful, not absence from ``images`` alone.
     """
     available = ingested_roots(connection)
     missing = [root for root in roots if root not in available]
     if not missing:
         return
     held = ', '.join(available) if available else '(none)'
-    raise ValueError(
+    raise RootNotIngestedError(
         f'{masked_url(url)}: the results index has no completed ingest of {", ".join(missing)}. '
         f'It holds: {held}. Run sd_stats_ingest over that root first; until then the '
         f'index cannot say whether an image under it was navigated.'
@@ -171,11 +216,14 @@ def open_index_for_roots(url: str, roots: Sequence[str]) -> Engine:
         The open index, which the caller closes when it is done with it.
 
     Raises:
+        RootNotIngestedError: If any named root has no completed ingest run in
+            the index.  A caller that reports a value the operator typed
+            differently from a run that failed catches this one first; the rest
+            catch the ``ValueError`` it is a kind of.
         ValueError: If the URL cannot be opened, does not name an index, or names
-            one written by another version of the schema; if the index cannot be
-            read; or if any named root has no completed ingest run in it.  The
-            engine is disposed of before the refusal leaves here, so a refused
-            caller has nothing to close.
+            one written by another version of the schema, or if the index cannot
+            be read.  The engine is disposed of before any refusal leaves here,
+            so a refused caller has nothing to close.
     """
     engine = open_index(url, create=False)
     try:

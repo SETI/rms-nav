@@ -1,18 +1,15 @@
 """Tests for the pure helpers the report is assembled from.
 
-None of these reads a database. They cover the values the report derives from an
-image name or an epoch, the search limit it resolves from configuration, the
-filter fragment every query splices in -- which carries named binds and its
-values beside it, because the fragment is spliced into statements that carry
-binds of their own and an inlined literal is a quoting bug waiting for a value
-that carries a quote -- and how one column value is rendered into a CSV cell.
+None of these reads a record. They cover the values the report derives from an
+image name or an epoch, the search limit it resolves from configuration, and how
+one column value is rendered into a CSV cell.
 """
 
 from typing import Any
 
 import pytest
 
-from spindoctor.cli.stats.report_common import count_pct, image_name_from_filename, where_clause
+from spindoctor.cli.stats.report_common import count_pct, image_name_from_filename
 from spindoctor.cli.stats.report_sections import _csv_value, resolve_offset_limit
 from spindoctor.nav_records.derived import (
     date_from_image_et,
@@ -117,7 +114,7 @@ def test_resolve_offset_limit_coiss_wac() -> None:
 def test_resolve_offset_limit_requires_shape_for_size_tables() -> None:
     """A size-keyed margin table cannot resolve without a recorded shape."""
     result = resolve_offset_limit('coiss', 'N1454725799_1_CALIB.IMG', None)
-    assert result == 'image shape not recorded in the database'
+    assert result == 'image shape not recorded'
 
 
 def test_resolve_offset_limit_unknown_instrument() -> None:
@@ -130,21 +127,6 @@ def test_resolve_offset_limit_missing_size_entry() -> None:
     """A size with no margin entry reports the failure instead of guessing."""
     result = resolve_offset_limit('vgiss', 'C3250013_GEOMED.IMG', 1024)
     assert 'no extfov_margin_vu entry for image size 1024' in str(result)
-
-
-# ---------------------------------------------------------------------------
-# The filter fragment
-# ---------------------------------------------------------------------------
-
-
-def test_a_filter_is_a_named_bind_carrying_its_value_beside_it() -> None:
-    """An inlined literal is a quoting bug waiting for a value that carries a quote.
-
-    The fragment is only half of it; the value travels beside it as a parameter.
-    """
-    where, params = where_clause(instrument='coiss', start_date=None, end_date=None)
-    assert where == ' WHERE instrument = :instrument'
-    assert params == {'instrument': 'coiss'}
 
 
 # ---------------------------------------------------------------------------
@@ -180,13 +162,13 @@ def test_a_json_container_is_written_as_json_text_and_nothing_else_is_touched(
 ) -> None:
     """A cell holding a Python container's repr is a cell nothing can read back.
 
-    Driven directly rather than through an export, because which backend hands
-    this function a container is the driver's decision: the export reads through
-    raw SQL, so only a backend that decodes JSON on the way out reaches the
-    container branch at all.
+    Driven directly rather than through an export, so that every shape a column
+    can hold is covered rather than the few the fixture documents happen to
+    carry.  A structured column reaches the export as the container it holds,
+    whichever storage answered, so this is what a reader of the file gets.
 
     Parameters:
-        value: The value as a driver would return it.
+        value: The value the facts carry for a column.
         expected: The cell it becomes.
     """
     assert _csv_value(value) == expected

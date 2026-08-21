@@ -24,10 +24,12 @@ from spindoctor import nav_records
 from spindoctor.results_index import (
     INGEST_RUNS,
     SCHEMA_VERSION,
+    ingested_roots,
     newest_finish_time,
     normalize_root_url,
     open_index,
     require_ingested_roots,
+    unfinished_roots,
 )
 
 PASSWORD = 'sup3rs3cr3t'
@@ -195,3 +197,82 @@ def test_a_run_that_never_finished_has_no_finish_time(tmp_path: Path) -> None:
         )
     with opened(url) as engine, engine.connect() as connection:
         assert newest_finish_time(connection, FIRST_ROOT) is None
+
+
+def _index_with_one_unfinished_root(tmp_path: Path) -> str:
+    """Build an index whose first root was walked to the end and whose second was not.
+
+    The second root's run is the newest in the table and carries no finish time,
+    which is what an ingest that started and died leaves behind.  The two roots
+    therefore differ in exactly the value the two queries below divide them on.
+
+    Parameters:
+        tmp_path: Directory the index file is written into.
+
+    Returns:
+        The connection URL of the index.
+    """
+    url = sqlite_url_for(tmp_path / 'index.sqlite3')
+    with opened(url, create=True) as engine, engine.begin() as connection:
+        connection.execute(
+            INGEST_RUNS.insert(),
+            [
+                {
+                    'root_url': root_url,
+                    'started_utc': FIRST_FINISHED,
+                    'finished_utc': finished,
+                    'schema_version': SCHEMA_VERSION,
+                }
+                for root_url, finished in (
+                    (FIRST_ROOT, FIRST_FINISHED),
+                    (SECOND_ROOT, None),
+                )
+            ],
+        )
+    return url
+
+
+def test_a_root_whose_newest_run_never_finished_is_named_as_unfinished(
+    tmp_path: Path,
+) -> None:
+    """A consumer bound to the roots it may read has to be able to name the rest.
+
+    A narrowing nobody can name reads as an answer about the whole index, so the
+    roots left out are asked for by name rather than inferred from the ones that
+    were kept.
+    """
+    url = _index_with_one_unfinished_root(tmp_path)
+    with opened(url) as engine, engine.connect() as connection:
+        assert unfinished_roots(connection) == [SECOND_ROOT]
+
+
+def test_a_root_whose_newest_run_finished_is_not_named_as_unfinished(
+    tmp_path: Path,
+) -> None:
+    """The two queries divide the index between them, so neither may claim both roots."""
+    url = _index_with_one_unfinished_root(tmp_path)
+    with opened(url) as engine, engine.connect() as connection:
+        assert ingested_roots(connection) == [FIRST_ROOT]
+
+
+def test_a_root_walked_to_the_end_after_a_run_that_died_is_not_unfinished(
+    tmp_path: Path,
+) -> None:
+    """The newest run decides, in both directions, and a later good pass repairs a root.
+
+    A root with a dead run followed by a completed one is a root a consumer may
+    read absence under, so it is named by neither this query nor a consumer's
+    report of what it left out.
+    """
+    url = _index_with_one_unfinished_root(tmp_path)
+    with opened(url, create=False) as engine, engine.begin() as connection:
+        connection.execute(
+            INGEST_RUNS.insert().values(
+                root_url=SECOND_ROOT,
+                started_utc=SECOND_FINISHED,
+                finished_utc=SECOND_FINISHED,
+                schema_version=SCHEMA_VERSION,
+            )
+        )
+    with opened(url) as engine, engine.connect() as connection:
+        assert unfinished_roots(connection) == []

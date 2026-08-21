@@ -76,7 +76,7 @@ Navigation Phase
   results index (see :doc:`/user_guide/user_guide_results_index`).
 
 * ``sd_stats_report`` - Generate success/failure, technique-usage, offset, and
-  agreement reports from the results index (see
+  agreement reports from a navigation results tree or the results index (see
   :doc:`/user_guide/user_guide_statistics`).
 
 Reprojection and Mosaic Phase

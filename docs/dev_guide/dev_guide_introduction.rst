@@ -150,8 +150,9 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
        over a queue of workers. ``sd_stats_ingest --drop-index`` empties the
        index instead. See :doc:`/user_guide/user_guide_results_index`.
    * - ``sd_stats_report``
-     - Write the navigation statistics report and its charts from the index.
-       See :doc:`/user_guide/user_guide_statistics`.
+     - Write the navigation statistics report and its charts, over a
+       navigation-results tree or over the index. See
+       :doc:`/user_guide/user_guide_statistics`.
    * - ``sd_consolidate_metadata``
      - Copy each image's metadata JSON and summary PNG into one flat directory.
        See :doc:`/user_guide/user_guide_navigation`.

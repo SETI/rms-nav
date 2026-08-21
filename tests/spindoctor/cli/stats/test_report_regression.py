@@ -1,54 +1,43 @@
-"""The report must still say what it said before its queries moved.
+"""The report says what the frozen output says, whichever storage answered.
 
-Every query the statistics user guide documents changed in the move onto the
-results index: the reason tables read two columns through a ``COALESCE``, the
-joins match a column pair instead of an image name, the boolean columns are used
-as booleans, and the image-number filter compares a column instead of calling a
-Python function registered on the connection.  A change in *how* a number is
-computed must not change the number.
-
-``data/golden`` holds ``report.md`` and ``images.csv`` as the statistics code
-produced them from ``data/results_tree`` before any of that moved.  The tree
-covers every section: two volumes and a bare-basename stub, successes, a
-failure, a fatal error with no navigation result at all, a BOTSIM pair, a
-suspect offset, an ensemble exclusion, a spurious technique, gated features, and
-an image whose search limit cannot be resolved.  A diff here is a defect, not
-drift.
+``data/golden`` holds ``report.md``, ``images.csv`` and the drill-down filelists
+as the statistics code produces them from ``data/results_tree``.  The tree covers
+every section: two volumes, a simulated scene and a bare-basename stub,
+successes, a failure, a fatal error with no navigation result at all, a BOTSIM
+pair, a suspect offset, an ensemble exclusion, a spurious technique, gated
+features, and an image whose search limit cannot be resolved.  A diff here is a
+defect, not drift.
 
 The fatal error is the one image of the tree that records no epoch: an epoch is
 the midtime of an observation, and that image's load failed before one existed.
 So its ``image_et`` and ``image_date`` cells are empty, and the ``filtered``
 variant's coiss time span ends at the image before it rather than at it.
 
-Two documented differences are the point of the change rather than a regression
-in it, and each is asserted for rather than waved past:
+The frozen ``images.csv`` is a hand-curated subset of the export's columns, and
+the comparison walks the *frozen* row's columns: a column the export gains, and
+an export that writes the same columns in another order, are both invisible to
+it.  A column the export drops is not: the produced row has no such key and the
+comparison raises a ``KeyError`` where it looks the value up.  Which columns the
+export writes, and in which order, is pinned instead by ``_CSV_HEADER`` below.
 
-- ``images.csv`` gains the columns the schema gained, in schema order, and its
-  ``status_reason`` column no longer carries a fatal error -- ``status_error``
-  is its own column now, and merging the two vocabularies is what the report
-  stopped doing.  Which columns it has is pinned against a list written out in
-  this file: the field-by-field comparison walks the *frozen* row's columns, so
-  a column the export gains, and an export that writes the same columns in
-  another order, are both invisible to it.  A column the export drops is not:
-  the produced row has no such key and the comparison raises a ``KeyError``
-  where it looks the value up.
-- The two feature-count aggregates come back as integers.  They are counts, and
-  the aggregate that produced a floating-point zero for an image with no
-  features was a SQLite spelling.
+Two differences between the frozen subset and the export are asserted for rather
+than waved past:
 
-One byte-level difference is disclosed rather than compared away.  The frozen
-``images.csv`` files carry LF line endings; the implementation that produced
-them left ``csv.writer`` at its CRLF default, and the committed blobs were
-normalized when they were frozen.  The export now states its line terminator
-instead of inheriting one, and states LF, so what it writes matches the frozen
-bytes.  The comparisons here read fields rather than lines and would not have
-noticed either way, so the terminator is pinned by a test of its own.
+- ``status_reason`` in the frozen subset carries a fatal error, and the export
+  keeps the two vocabularies in the two columns that hold them, so the pair is
+  compared against the one.
+- The two feature-count aggregates are integers, where the frozen subset renders
+  them as floating-point counts.
+
+Row order is deliberately not compared.  The export writes each row where it
+reads it rather than collecting and sorting them, so the file says which images
+were exported and not in what sequence; the rows are matched by image name here
+and the export leads with the column an operator sorts on.
 """
 
 import csv
 import uuid
 from pathlib import Path
-from typing import Any
 
 import pdslogger
 import pytest
@@ -58,24 +47,13 @@ from tests.spindoctor.conftest import (
 
 from .conftest import (
     GOLDEN_DIR,
+    GOLDEN_VARIANTS,
     RESULTS_TREE,
-    report_from_tree,
+    report_from_the_index,
 )
 
 _TREE_PLACEHOLDER = '{results_tree}'
 """What the frozen CSV holds in place of the tree's absolute path."""
-
-_VARIANTS: dict[str, dict[str, Any]] = {
-    'full': {'top_n': 5, 'filelists': True, 'csv_export': True},
-    'filtered': {
-        'instrument': 'coiss',
-        'min_image': '1294561202',
-        'max_image': '1294563000',
-        'top_n': 3,
-        'csv_export': True,
-    },
-}
-"""The two report invocations the frozen output was produced by."""
 
 _MERGED_REASON_COLUMN = 'status_reason'
 """The column the frozen CSV merged both reason vocabularies into."""
@@ -84,15 +62,15 @@ _COUNT_COLUMNS = ('n_features', 'n_gated')
 """Aggregates the frozen CSV rendered as floating-point counts."""
 
 
-@pytest.fixture(scope='module', params=sorted(_VARIANTS))
+@pytest.fixture(scope='module', params=sorted(GOLDEN_VARIANTS))
 def report_variant(
     request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
 ) -> tuple[str, Path]:
     """Build one report variant once for the whole module.
 
-    Six comparisons are made against each variant and every one of them only
-    reads, so building the variant per test ingests the same tree twelve times
-    to produce two outputs.
+    Several comparisons are made against each variant and every one of them
+    only reads, so building the variant per test would ingest the same tree
+    once per comparison to produce two outputs.
 
     Parameters:
         request: The fixture request, carrying the variant name.
@@ -105,8 +83,8 @@ def report_variant(
     logger = pdslogger.PdsLogger(f'stats_regression_{uuid.uuid4().hex}')
     logger.set_level('ERROR')
     root = tmp_path_factory.mktemp('regression')
-    out = report_from_tree(
-        index_url(root / 'index.sqlite3'), root / variant, logger=logger, **_VARIANTS[variant]
+    out = report_from_the_index(
+        index_url(root / 'index.sqlite3'), root / variant, logger=logger, **GOLDEN_VARIANTS[variant]
     )
     return variant, out
 
@@ -127,7 +105,7 @@ def _frozen_csv_rows(variant: str) -> list[dict[str, str]]:
     """Read a frozen CSV export, restoring the tree's absolute path.
 
     Parameters:
-        variant: Which entry of :data:`_VARIANTS` to read.
+        variant: Which entry of :data:`GOLDEN_VARIANTS` to read.
 
     Returns:
         One mapping per data row, keyed by column name.
@@ -135,6 +113,30 @@ def _frozen_csv_rows(variant: str) -> list[dict[str, str]]:
     text = (GOLDEN_DIR / variant / 'images.csv').read_text(encoding='utf-8')
     text = text.replace(_TREE_PLACEHOLDER, RESULTS_TREE.as_posix())
     return list(csv.DictReader(text.splitlines()))
+
+
+def _paired_rows(variant: str, out: Path) -> list[tuple[dict[str, str], dict[str, str]]]:
+    """Pair each produced row with the frozen row for the same image.
+
+    Paired by image name rather than by position.  The export writes each row
+    where it reads it, so the file's line order is the order the storage found
+    the images in and is not a contract; the frozen subset carries no key
+    columns, and the fixture tree names each of its images once, so the name is
+    what the two files can be matched on.
+
+    Parameters:
+        variant: Which entry of :data:`GOLDEN_VARIANTS` to read.
+        out: The directory the report was written into.
+
+    Returns:
+        One ``(produced, frozen)`` pair per image, in frozen-file order.
+
+    Raises:
+        KeyError: If the export holds no row for an image the frozen file
+            names, which is a dropped image rather than a reordered one.
+    """
+    produced = {row['image_name']: row for row in _csv_rows(out / 'images.csv')}
+    return [(produced[row['image_name']], row) for row in _frozen_csv_rows(variant)]
 
 
 def test_the_report_is_byte_identical(report_variant: tuple[str, Path]) -> None:
@@ -149,15 +151,30 @@ def test_the_report_is_byte_identical(report_variant: tuple[str, Path]) -> None:
 
 
 def test_the_csv_holds_the_same_images(report_variant: tuple[str, Path]) -> None:
-    """The export covers the same images in the same order.
+    """The export covers the same images.
+
+    Compared as sorted names, because line order is not a contract: the export
+    writes a row where it reads it rather than collecting and sorting every one
+    of them, and the two storages find the same images in two orders.
 
     Parameters:
         report_variant: The variant name and the report it wrote.
     """
     variant, out = report_variant
-    produced = [row['image_name'] for row in _csv_rows(out / 'images.csv')]
-    frozen = [row['image_name'] for row in _frozen_csv_rows(variant)]
+    produced = sorted(row['image_name'] for row in _csv_rows(out / 'images.csv'))
+    frozen = sorted(row['image_name'] for row in _frozen_csv_rows(variant))
     assert produced == frozen
+
+
+def test_the_frozen_csv_names_each_image_once(report_variant: tuple[str, Path]) -> None:
+    """Otherwise matching the two files by image name silently drops a row.
+
+    Parameters:
+        report_variant: The variant name and the report it wrote.
+    """
+    variant, _out = report_variant
+    names = [row['image_name'] for row in _frozen_csv_rows(variant)]
+    assert len(set(names)) == len(names)
 
 
 def test_every_carried_over_csv_column_is_unchanged(report_variant: tuple[str, Path]) -> None:
@@ -170,11 +187,9 @@ def test_every_carried_over_csv_column_is_unchanged(report_variant: tuple[str, P
         report_variant: The variant name and the report it wrote.
     """
     variant, out = report_variant
-    produced = _csv_rows(out / 'images.csv')
-    frozen = _frozen_csv_rows(variant)
     differences = [
         f'{row["image_name"]}.{column}: {value!r} became {row[column]!r}'
-        for row, frozen_row in zip(produced, frozen, strict=True)
+        for row, frozen_row in _paired_rows(variant, out)
         for column, value in frozen_row.items()
         if column not in (_MERGED_REASON_COLUMN, *_COUNT_COLUMNS)
         if row[column] != value
@@ -191,12 +206,10 @@ def test_the_merged_reason_column_is_reproduced_by_the_pair(
         report_variant: The variant name and the report it wrote.
     """
     variant, out = report_variant
-    produced = _csv_rows(out / 'images.csv')
-    frozen = _frozen_csv_rows(variant)
     differences = [
         f'{row["image_name"]}: {frozen_row[_MERGED_REASON_COLUMN]!r} became '
         f'{row["status_reason"]!r} / {row["status_error"]!r}'
-        for row, frozen_row in zip(produced, frozen, strict=True)
+        for row, frozen_row in _paired_rows(variant, out)
         if (row['status_reason'] or row['status_error']) != frozen_row[_MERGED_REASON_COLUMN]
     ]
     assert differences == []
@@ -209,11 +222,9 @@ def test_the_count_aggregates_are_the_same_numbers(report_variant: tuple[str, Pa
         report_variant: The variant name and the report it wrote.
     """
     variant, out = report_variant
-    produced = _csv_rows(out / 'images.csv')
-    frozen = _frozen_csv_rows(variant)
     differences = [
         f'{row["image_name"]}.{column}: {frozen_row[column]!r} became {row[column]!r}'
-        for row, frozen_row in zip(produced, frozen, strict=True)
+        for row, frozen_row in _paired_rows(variant, out)
         for column in _COUNT_COLUMNS
         if float(row[column]) != float(frozen_row[column])
     ]
@@ -221,8 +232,8 @@ def test_the_count_aggregates_are_the_same_numbers(report_variant: tuple[str, Pa
 
 
 _CSV_HEADER = (
-    'root_url',
     'results_path_stub',
+    'root_url',
     'subtree',
     'image_name',
     'instrument',
@@ -293,9 +304,11 @@ Editing this list is therefore the deliberate act of ratifying a changed export,
 and it is worth the deliberation.  A CSV is read by position as often as by
 name -- by a spreadsheet, by a downstream script, by whoever cut a column out of
 it with ``cut -f`` -- so a column inserted in the middle silently re-points
-every reader that counts.  The first two are the key of the row, naming the root
-and the stub each one came from, and a reader joining the export back to a
-results tree needs them where they are.
+every reader that counts.  The first two are the key of the row, naming the stub
+and the root each one came from, and a reader joining the export back to a
+results tree needs them where they are.  The stub leads, because the rows are
+written where they are read and ``sort -t, -k1,1 images.csv`` is then all an
+operator has to type to put the file in key order.
 """
 
 
@@ -342,6 +355,7 @@ def test_the_frozen_report_covers_every_section() -> None:
         heading
         for heading in (
             '## Images selected',
+            '## Files that yielded no record',
             '## Success / failure',
             '### Failure reasons',
             '## Failure taxonomy by image content',

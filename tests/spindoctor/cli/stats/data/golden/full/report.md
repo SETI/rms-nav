@@ -1,6 +1,6 @@
 # Navigation statistics report
 
-Filters: none (full database)
+Filters: none (every image read)
 
 ## Images selected
 
@@ -11,6 +11,17 @@ Filters: none (full database)
 | vgiss | 2 (25.0%) | C1385455 | C1385460 | 1979-02-01T14:39:10 | 1979-02-01T14:55:50 |
 
 Total images: 8
+
+## Files that yielded no record
+
+A file named like a navigation document that no record could be read out of is counted here and
+nowhere else: it records no instrument, no date and no image number, so this count covers the whole
+of every selected root and none of the filters above narrows it. One kind of such file is counted
+by a report over the documents and by no report from an index: one the storage could not deliver at
+all. An ingest records no refusal for that, because a retrieval that failed once is worth trying
+again rather than being remembered as a file that will not read.
+
+Files that yielded no record: 0
 
 ## Success / failure
 

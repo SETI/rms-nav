@@ -1,11 +1,14 @@
-"""Tests for the ``sd_stats_report`` command line.
+"""Tests for the ``sd_stats_report`` command line, reading an index it was named.
 
-This program is the one consumer that requires an index, so most of what its
-driver does is refuse: no index named, an index that is not there, an index it
-must not create, and a root the index holds no completed ingest of. The last is
-the load-bearing one -- absence of rows under a root is not evidence that
-nothing was navigated -- and it is decided by the root's newest ingest run
+What the driver does with an index is mostly refuse: an index that is not there,
+an index it must not create, and a root the index holds no completed ingest of.
+The last is the load-bearing one -- absence of rows under a root is not evidence
+that nothing was navigated -- and it is decided by the root's newest ingest run
 alone, however many earlier ones finished.
+
+Naming no index is not a refusal: it reads the results tree, which is
+``test_report_over_a_tree.py``. What is refused here is naming neither, which is
+a run with nothing to report on.
 """
 
 from pathlib import Path
@@ -136,22 +139,34 @@ def test_main_report_names_the_roots_it_does_hold(
     assert root.as_posix() in capsys.readouterr().err
 
 
-def test_main_report_without_an_index_says_so(
+def test_main_report_with_neither_an_index_nor_a_tree_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """This program has no file-reading mode, and the message says which flag."""
+    """Naming no index reads a tree, and naming no tree either leaves nothing."""
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     exit_code = main_report(['--output-dir', str(tmp_path / 'report')])
     assert exit_code == 1
 
 
-def test_main_report_without_an_index_names_the_flag(
+def test_main_report_with_neither_names_the_index_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A refusal that does not say what to type is a refusal nobody can act on."""
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     main_report(['--output-dir', str(tmp_path / 'report')])
     assert '--results-db' in capsys.readouterr().err
+
+
+def test_main_report_with_neither_names_the_tree_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both ways forward are named, since either would let the run proceed."""
+    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
+    main_report(['--output-dir', str(tmp_path / 'report')])
+    assert '--nav-results-root' in capsys.readouterr().err
 
 
 def test_main_report_says_an_empty_index_variable_named_nothing(
@@ -206,14 +221,29 @@ def test_main_report_leaves_no_database_behind(
 def test_main_report_honors_the_none_sentinel(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An exported index URL can be overridden on the command line."""
+    """An exported index URL can be overridden on the command line.
+
+    The sentinel means here what it means everywhere: read the tree.  So it is
+    the tree that answers, and the exported index is not read at all -- which is
+    what a machine with an index configured says to ask for a report over the
+    documents as they are now.
+    """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
     monkeypatch.setenv('NAV_RESULTS_DB', url)
-    exit_code = main_report(['--results-db', 'none', '--output-dir', str(tmp_path / 'report')])
-    assert exit_code == 1
+    exit_code = main_report(
+        [
+            '--results-db',
+            'none',
+            '--nav-results-root',
+            str(root),
+            '--output-dir',
+            str(tmp_path / 'report'),
+        ]
+    )
+    assert exit_code == 0
 
 
 def test_main_report_reads_the_environment_variable(

@@ -33,8 +33,10 @@ Public API:
     normalize_root_url    -- the one spelling of a results root
     ingested_roots        -- the roots a completed ingest covered
     require_ingested_roots -- refuse to read absence from a root nobody ingested
+    RootNotIngestedError  -- what that refusal is, for a caller that reports it its own way
     open_index_for_roots  -- open an index, refusing a root it has not ingested
     newest_finish_time    -- when the newest pass over a root finished
+    unfinished_roots      -- the roots whose newest pass never finished
     FATAL_STATUS          -- the status the error selection filters match
     SPICE_STATUS_ERROR    -- the status_error the SPICE selection filters match
     ResultStubs           -- what a root holds, as a selection filter asks it
@@ -68,11 +70,13 @@ from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.rebuild import RECORD_FIELDS, RecordField, record_from_row
 from spindoctor.results_index.record_source import IndexRecordSource, open_record_source
 from spindoctor.results_index.roots import (
+    RootNotIngestedError,
     ingested_roots,
     newest_finish_time,
     normalize_root_url,
     open_index_for_roots,
     require_ingested_roots,
+    unfinished_roots,
 )
 from spindoctor.results_index.schema import (
     FAILED_FILES,
@@ -109,6 +113,7 @@ __all__ = [
     'IndexRecordSource',
     'RecordField',
     'ResultStubs',
+    'RootNotIngestedError',
     'TableContents',
     'drop_index_tables',
     'index_contents',
@@ -125,4 +130,5 @@ __all__ = [
     'record_from_row',
     'reporting_a_failed_read',
     'require_ingested_roots',
+    'unfinished_roots',
 ]
