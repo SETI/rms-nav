@@ -28,17 +28,15 @@ refusal is skipped for as long as the file does not change.
 Two families of reason
 ----------------------
 
-A reason says which of two things happened, and the two are read apart rather
-than added up.  :data:`~spindoctor.nav_records.document.UNREADABLE`,
+A reason says which of two things happened.
+:data:`~spindoctor.nav_records.document.UNREADABLE`,
 :data:`~spindoctor.nav_records.document.NOT_VALID_JSON` and
 :data:`~spindoctor.nav_records.document.NOT_A_JSON_OBJECT` are the file yielding
-no JSON object at all, and the tree path excludes such a file from every error
-filter for the same reason this one records no status for it, so the two agree
-about it.  :data:`~spindoctor.nav_records.facts.NOT_A_NAVIGATION_DOCUMENT` is a
-JSON object this schema will not accept, and the tree path reads a ``status``
-out of any object it can parse: those are the documents the two answer
-differently about, and counting them is what
-:func:`~spindoctor.cli.stats.ingest.store._report_refusals` reports.
+no JSON object at all; :data:`~spindoctor.nav_records.facts.NOT_A_NAVIGATION_DOCUMENT`
+is a JSON object this schema will not accept.  A selection answers no error
+filter for either family whichever storage it reads, because a reader of
+documents narrows on the facts a document yields and neither family yields any,
+so the reason says what to fix rather than what a consumer will be short by.
 
 Neither family is decided here.  The first is
 :func:`~spindoctor.nav_records.document.document_or_refusal`'s, which is what

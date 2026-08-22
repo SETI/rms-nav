@@ -36,11 +36,8 @@ Public API:
     RootNotIngestedError  -- what that refusal is, for a caller that reports it its own way
     open_index_for_roots  -- open an index, refusing a root it has not ingested
     newest_finish_time    -- when the newest pass over a root finished
+    snapshot_finish_time  -- the same, for a caller holding no connection
     unfinished_roots      -- the roots whose newest pass never finished
-    FATAL_STATUS          -- the status the error selection filters match
-    SPICE_STATUS_ERROR    -- the status_error the SPICE selection filters match
-    ResultStubs           -- what a root holds, as a selection filter asks it
-    read_result_stubs     -- one query answering an enumeration's selection filters
     reporting_a_failed_read -- the one translation of a database failure into a refusal
     RECORD_FIELDS         -- the one correspondence between columns and record fields
     RecordField           -- one column's place in the record a row is rebuilt into
@@ -76,6 +73,7 @@ from spindoctor.results_index.roots import (
     normalize_root_url,
     open_index_for_roots,
     require_ingested_roots,
+    snapshot_finish_time,
     unfinished_roots,
 )
 from spindoctor.results_index.schema import (
@@ -89,16 +87,9 @@ from spindoctor.results_index.schema import (
     TECHNIQUES,
     UNKNOWN_STATUS,
 )
-from spindoctor.results_index.selection import (
-    FATAL_STATUS,
-    SPICE_STATUS_ERROR,
-    ResultStubs,
-    read_result_stubs,
-)
 
 __all__ = [
     'FAILED_FILES',
-    'FATAL_STATUS',
     'FEATURE_SOURCES',
     'IMAGES',
     'INGEST_RUNS',
@@ -106,13 +97,11 @@ __all__ = [
     'RECORD_FIELDS',
     'SCHEMA_META',
     'SCHEMA_VERSION',
-    'SPICE_STATUS_ERROR',
     'TECHNIQUES',
     'UNKNOWN_STATUS',
     'IndexContents',
     'IndexRecordSource',
     'RecordField',
-    'ResultStubs',
     'RootNotIngestedError',
     'TableContents',
     'drop_index_tables',
@@ -126,9 +115,9 @@ __all__ = [
     'open_index',
     'open_index_for_roots',
     'open_record_source',
-    'read_result_stubs',
     'record_from_row',
     'reporting_a_failed_read',
     'require_ingested_roots',
+    'snapshot_finish_time',
     'unfinished_roots',
 ]

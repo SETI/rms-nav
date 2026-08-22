@@ -7,10 +7,13 @@ from typing import Any
 import pdslogger
 import pytest
 from filecache import FCPath
+from tests.spindoctor.conftest import metadata_document
 
 from spindoctor.cli.stats.ingest import ingest_metadata_files
+from spindoctor.dataset.dataset_pds3 import DataSetPDS3
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.results_filter import ResultsFilter
+from spindoctor.nav_records import UnlistableDirectoryError
 from spindoctor.results_index import open_index
 
 
@@ -510,14 +513,36 @@ def test_has_no_offset_file_excludes_navigated(
     ]
 
 
+def _error_document(num: int, **fields: Any) -> str:
+    """Serialize one navigation document for a NAC frame of the filter volume.
+
+    Parameters:
+        num: The frame's image number.
+        fields: What the document records, passed on to
+            :func:`~tests.spindoctor.conftest.metadata_document`.
+
+    Returns:
+        The document as JSON text.
+    """
+    return json.dumps(metadata_document(image_name=f'N{num:010d}_1_CALIB.IMG', **fields))
+
+
 def _write_error_metadata(tmp_path: Path) -> None:
-    """Write metadata files: one success, one SPICE error, one non-SPICE error."""
+    """Write metadata files: one success, one SPICE error, one non-SPICE error.
+
+    Parameters:
+        tmp_path: Directory the results root is written under.
+    """
     contents = {
-        1000000100: {'status': 'success'},
-        1000000101: {'status': 'error', 'status_error': 'missing_spice_data'},
-        1000000102: {'status': 'error', 'status_error': 'image_read_error'},
+        1000000100: _error_document(1000000100),
+        1000000101: _error_document(
+            1000000101, status='error', status_error='missing_spice_data', offset=None
+        ),
+        1000000102: _error_document(
+            1000000102, status='error', status_error='image_read_error', offset=None
+        ),
     }
-    for num, metadata in contents.items():
+    for num, document in contents.items():
         _write_result_file(
             tmp_path,
             'COISS_2001',
@@ -525,7 +550,7 @@ def _write_error_metadata(tmp_path: Path) -> None:
             'N',
             num,
             '_metadata.json',
-            json.dumps(metadata),
+            document,
         )
 
 
@@ -644,7 +669,7 @@ def test_has_offset_error_excludes_malformed_metadata(
         'N',
         1000000100,
         '_metadata.json',
-        json.dumps({'status': 'error'}),
+        _error_document(1000000100, status='error', offset=None),
     )
     _write_result_file_bytes(
         tmp_path, 'COISS_2001', _FILTER_NUMS, 'N', 1000000101, '_metadata.json', bad_content
@@ -659,24 +684,150 @@ def test_has_offset_error_excludes_malformed_metadata(
     assert _yielded_names(groups) == ['N1000000100']
 
 
+_NOT_A_NAVIGATION_DOCUMENT = json.dumps({'status': 'error', 'status_error': 'missing_spice_data'})
+"""A JSON object that reads perfectly and is no navigation result of any schema.
+
+It carries the two fields the error filters name and nothing else a document has
+-- no image, no mission, no navigation result -- so a filter that read those two
+fields out of whatever it could parse would select it, and one that reads what a
+document records about its image finds nothing recorded.
+"""
+
+
+def test_an_object_that_is_no_navigation_document_has_an_offset_file(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Presence is a question about the file, so whatever is in it, it is there.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index is installed through.
+        tmp_path: Directory the results root is written under.
+    """
+    _install_two_camera_index(ds, monkeypatch)
+    _write_result_file(
+        tmp_path,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'N',
+        1000000100,
+        '_metadata.json',
+        _NOT_A_NAVIGATION_DOCUMENT,
+    )
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], has_offset_file=True, nav_results_root=str(tmp_path)
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000100']
+
+
+@pytest.mark.parametrize(
+    'flag',
+    [
+        'has_offset_error',
+        'has_no_offset_error',
+        'has_offset_spice_error',
+        'has_offset_nonspice_error',
+    ],
+)
+def test_an_object_that_is_no_navigation_document_matches_no_error_filter(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flag: str
+) -> None:
+    """What such a file records is unknown, which is neither an error nor the lack of one.
+
+    The filter phrased in the negative is one of the four for exactly that
+    reason: selecting this image would claim its navigation ran to an outcome,
+    and nothing in the file says an image was navigated at all.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index is installed through.
+        tmp_path: Directory the results root is written under.
+        flag: The error filter, one per flag that reads a document.
+    """
+    _install_two_camera_index(ds, monkeypatch)
+    _write_result_file(
+        tmp_path,
+        'COISS_2001',
+        _FILTER_NUMS,
+        'N',
+        1000000100,
+        '_metadata.json',
+        _NOT_A_NAVIGATION_DOCUMENT,
+    )
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], nav_results_root=str(tmp_path), **{flag: True}
+        )
+    )
+
+    assert _yielded_names(groups) == []
+
+
 def test_results_scan_propagates_non_missing_oserror(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # A missing results directory is expected and swallowed, but any other
-    # OSError (permission denied, cloud-backend failure) must surface rather
-    # than silently yielding an empty, incorrect filter result.
+    """A directory that is there and will not be read is not an empty directory.
+
+    Permission denied, a share that has gone away, a backend that stopped
+    answering: under every one of them there may be documents the filter cannot
+    see, and answering from what it did see selects images it has no evidence
+    about.  The volume's directory is written first, so the refusal is about
+    reading it rather than about its absence.
+
+    Parameters:
+        monkeypatch: Fixture the directory listing is replaced through.
+        tmp_path: Directory the results root is written under.
+    """
+    (tmp_path / 'COISS_2001').mkdir()
+
     def boom(_self: FCPath) -> object:
         raise PermissionError('results scan denied')
 
-    monkeypatch.setattr(FCPath, 'walk', boom)
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', boom)
 
-    with pytest.raises(PermissionError, match='results scan denied'):
+    with pytest.raises(UnlistableDirectoryError, match='results scan denied'):
         ResultsFilter(
             ['COISS_2001'],
             str(tmp_path),
             has_offset_file=True,
             logger=pdslogger.NullLogger(),
         )
+
+
+def test_results_scan_passes_over_a_volume_with_no_results_directory(tmp_path: Path) -> None:
+    """A volume nobody has navigated has no directory, which ends no enumeration.
+
+    It is the ordinary state of a results root part way through a campaign, and
+    the volumes after it are the ones a run is about: a refusal here would leave
+    an operator unable to select against a root until every volume they named had
+    been navigated at least once.
+
+    Parameters:
+        tmp_path: Directory the results root is written under.
+    """
+    _write_result_file(
+        tmp_path,
+        'COISS_2002',
+        _FILTER_NUMS,
+        'N',
+        1000000100,
+        '_metadata.json',
+        _error_document(1000000100),
+    )
+
+    results_filter = ResultsFilter(
+        ['COISS_2001', 'COISS_2002'],
+        str(tmp_path),
+        has_offset_file=True,
+        logger=pdslogger.NullLogger(),
+    )
+
+    assert results_filter.passes('COISS_2002/data/1000000100_1000000102/N1000000100_1_CALIB')
 
 
 CONTRADICTION_REFUSAL = r'mutually exclusive|cannot be combined with'
@@ -872,3 +1023,106 @@ def test_yielded_imagefile_carries_label_resolver(
 
     assert len(groups) == 1
     assert groups[0].image_files[0].image_url_resolver is not None
+
+
+def _closes_counted(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Count every time an enumeration closes the results filter it built.
+
+    Parameters:
+        monkeypatch: Fixture the count is installed through.
+
+    Returns:
+        A one-element list holding the count, which the caller reads after the
+        enumeration it is watching has ended.
+    """
+    closes = [0]
+    original = ResultsFilter.close
+
+    def counting(self: ResultsFilter) -> None:
+        closes[0] += 1
+        original(self)
+
+    monkeypatch.setattr(ResultsFilter, 'close', counting)
+    return closes
+
+
+def test_an_enumeration_that_runs_to_the_end_closes_its_results_filter(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An error filter holds a storage open between batches and must give it back.
+
+    Over a results index that storage is a connection pool, and a long run makes
+    one enumeration after another, so a filter nobody closes is a pool per
+    enumeration held until the interpreter collects it.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index and the count are installed through.
+        tmp_path: Directory the results root is written under.
+    """
+    _install_two_camera_index(ds, monkeypatch)
+    _write_error_metadata(tmp_path)
+    closes = _closes_counted(monkeypatch)
+
+    list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001'], has_offset_error=True, nav_results_root=str(tmp_path)
+        )
+    )
+
+    assert closes[0] == 1
+
+
+def test_an_enumeration_abandoned_part_way_closes_its_results_filter(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A caller is free to stop reading, and stopping must not leak the storage.
+
+    Taking the first image of a selection and walking away is what every run
+    with a result limit does, and a generator closed part way is the case a
+    filter released only at the end of the loop would leak.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index and the count are installed through.
+        tmp_path: Directory the results root is written under.
+    """
+    _install_two_camera_index(ds, monkeypatch)
+    _write_error_metadata(tmp_path)
+    closes = _closes_counted(monkeypatch)
+
+    groups = ds.yield_image_files_index(
+        volumes=['COISS_2001'], has_offset_error=True, nav_results_root=str(tmp_path)
+    )
+    next(groups)
+    groups.close()
+
+    assert closes[0] == 1
+
+
+def test_the_shared_enumeration_abandoned_part_way_closes_its_results_filter(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every dataset without a grouping of its own gets this one, so it is tested.
+
+    The instrument that groups its frames overrides the enumeration, so a test
+    that only ever runs the override leaves the implementation every other
+    dataset inherits uncovered.  This one drives the shared implementation
+    directly.
+
+    Parameters:
+        ds: The dataset under test, driven through the shared enumeration.
+        monkeypatch: Fixture the index and the count are installed through.
+        tmp_path: Directory the results root is written under.
+    """
+    _install_two_camera_index(ds, monkeypatch)
+    _write_error_metadata(tmp_path)
+    closes = _closes_counted(monkeypatch)
+
+    groups = DataSetPDS3.yield_image_files_index(
+        ds, volumes=['COISS_2001'], has_offset_error=True, nav_results_root=str(tmp_path)
+    )
+    next(groups)
+    groups.close()
+
+    assert closes[0] == 1

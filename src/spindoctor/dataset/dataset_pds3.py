@@ -4,7 +4,8 @@ import os
 import random
 import re
 from abc import abstractmethod
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -594,7 +595,7 @@ class DataSetPDS3(DataSet):
 
         return PdsTable(fn, columns=columns, label_method='fast')
 
-    def _yield_image_files_index(self, **kwargs: Any) -> Iterator[ImageFile]:
+    def _yield_image_files_index(self, **kwargs: Any) -> Generator[ImageFile, None, None]:
         """Yield filenames given search criteria using index files.
 
         This function assumes that the dataset is in a set of PDS3 volumes laid out like
@@ -631,8 +632,8 @@ class DataSetPDS3(DataSet):
                 arguments, configuration, or NAV_RESULTS_ROOT environment variable.
             results_db_url: str | None = None,
                 Results index answering the filters above, so that an
-                enumeration costs one query instead of a walk per volume and a
-                metadata read per candidate.  None resolves via the arguments,
+                enumeration reads rows instead of walking the results tree and
+                reading its documents.  None resolves via the arguments,
                 configuration, or NAV_RESULTS_DB environment variable when the
                 arguments carry a ``results_db`` attribute, which is what a
                 program that declares ``--results-db`` supplies; a caller whose
@@ -750,10 +751,10 @@ class DataSetPDS3(DataSet):
             )
         ]
 
-        # Build the results-based filter, if any of its flags is active. Presence
-        # filters walk the results tree once per selected volume (at construction);
-        # absence and error filters are applied in batches as images are accepted.
-        # A resolved results index replaces all of that with one query.
+        # Build the results-based filter, if any of its flags is active. It lists
+        # the selected volumes once, at construction, so testing an image for
+        # presence or absence afterwards is a set lookup; an error filter then
+        # asks what a batch of candidates' documents record.
         results_filter: ResultsFilter | None = None
         if any(results_filter_flags.values()):
             resolved_arguments = arguments if arguments is not None else argparse.Namespace()
@@ -770,7 +771,7 @@ class DataSetPDS3(DataSet):
                 # at all is asking for the tree.
                 results_db_url = get_results_db_url(resolved_arguments, self.config)
             # ResultsFilter accepts the str | Path | FCPath union and normalizes
-            # at its boundary, preserving an existing FCPath's file cache.
+            # at its boundary.
             results_filter = ResultsFilter(
                 valid_volumes,
                 nav_results_root,
@@ -779,182 +780,245 @@ class DataSetPDS3(DataSet):
                 **results_filter_flags,
             )
 
-        # URLs to the volume raw directory and index directory
-        volume_raw_dir_url = self.pds3_holdings_root / volumes_dir_name
-        index_dir_url = self.pds3_holdings_root / 'metadata'
+        # Closed when the enumeration is done with it, however it ends: an error
+        # filter holds its storage open between batches, and a caller that walks
+        # away part way through a generator must not leak it.
+        try:
+            # URLs to the volume raw directory and index directory
+            volume_raw_dir_url = self.pds3_holdings_root / volumes_dir_name
+            index_dir_url = self.pds3_holdings_root / 'metadata'
 
-        # Validate the image_name_list and img_name_filter_list (from img_filespec_list kwarg)
-        if img_name_list:
-            for explicit_img_name in img_name_list:
-                if not self._img_name_valid(explicit_img_name):
-                    raise ValueError(f'Invalid image name "{explicit_img_name}"')
-        if img_name_filter_list:
-            new_img_name_filter_list: list[str] = []
-            for explicit_img_filespec in img_name_filter_list:
-                try:
-                    new_img_name = self._get_img_name_from_label_filespec(explicit_img_filespec)
-                except ValueError as exc:
-                    logger.warning(
-                        'Skipping explicit image filespec %r: %s',
-                        explicit_img_filespec,
-                        exc,
-                    )
-                    continue
-                if new_img_name is None:
-                    continue
-                new_img_name_filter_list.append(new_img_name)
-            img_name_filter_list = new_img_name_filter_list
-
-        # Optimize the first and last image number based on image_name_list and img_name_filter_list
-        # This is just to improve performance
-        if img_name_list:
-            img_start_num = max(
-                0 if img_start_num is None else img_start_num,
-                min([self._extract_img_number(x) for x in img_name_list]),
-            )
-            img_end_num = min(
-                999999999999 if img_end_num is None else img_end_num,
-                max([self._extract_img_number(x) for x in img_name_list]),
-            )
-
-        if img_name_filter_list:
-            img_start_num = max(
-                0 if img_start_num is None else img_start_num,
-                min([self._extract_img_number(x) for x in img_name_filter_list]),
-            )
-            img_end_num = min(
-                999999999999 if img_end_num is None else img_end_num,
-                max([self._extract_img_number(x) for x in img_name_filter_list]),
-            )
-
-        # Limit the number of returned yields from this method if necessary
-        limit_yields = choose_random_images if choose_random_images else None
-        if max_filenames is not None:
-            if limit_yields is None:
-                limit_yields = max_filenames
-            else:
-                limit_yields = min(limit_yields, max_filenames)
-
-        def _read_index_rows(search_vol: str) -> tuple[list[dict[str, Any]], FCPath]:
-            """Retrieve and read the index table for a volume.
-
-            Returns:
-                The list of index rows and the index ``.tab`` URL (used only for
-                error messages).
-            """
-            index_label_url = index_dir_url / self._volume_to_index(search_vol)
-            index_tab_url = index_label_url.with_suffix('.tab')
-            # This will raise a FileNotFoundError if the index file label or table
-            # can't be found
-            # TODO Implement actual error handling
-            # We have to convert the FCPaths to Posix strings here so that
-            # FileCache.retrieve() can use them. Note that if for some reason there was a
-            # specific FileCache given for pds3_holdings_root, it will be overriden by
-            # self._index_filecache.
-            # TODO Needs to return exceptions instead of a single FileNotFoundError
-            # so we can tell the user what's actually going on.
-            ret = self._index_filecache.retrieve(
-                [index_label_url.as_posix(), index_tab_url.as_posix()]
-            )
-            index_label_localpath, _ = cast(list[Path], ret)
-            index_tab = self._read_pds_table(index_label_localpath, columns=index_columns)
-            return index_tab.dicts_by_row(), index_tab_url
-
-        def _row_to_imagefile(
-            row: dict[str, Any], search_vol: str, index_tab_url: FCPath
-        ) -> tuple[ImageFile | None, bool]:
-            """Apply all active filters to one index row.
-
-            Returns:
-                A tuple ``(imagefile, past_end)``. ``imagefile`` is the constructed
-                ``ImageFile`` if the row passes every filter, or None if it is filtered
-                out. ``past_end`` is True if ``img_num`` exceeds ``img_end_num``. Index
-                rows are time-ordered but not strictly monotonic in image number:
-                measured over the full COISS archive (2026-07-12), 16 of 126 volumes
-                contain a few local inversions -- mostly simultaneous NAC/WAC exposure
-                pairs where the wide-angle row appears one count after its narrow-angle
-                partner, plus out-of-order runs of up to ~500 counts in the early
-                cruise volumes (COISS_1001-1003) -- so a True value means only that
-                *this row* is past the end of the range, not that the scan as a whole
-                can stop.
-            """
-            label_filespec = self._get_label_filespec_from_index(row)
-            img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
-
-            # Get the image name
-            try:
-                img_name = self._get_img_name_from_label_filespec(label_filespec)
-            except ValueError:
-                logger.error(
-                    'IMGNAME: Index file "%s" contains bad Primary File Spec "%s"',
-                    index_tab_url,
-                    label_filespec,
-                )
-                return None, False
-            if img_name is None:
-                return None, False  # Not a name we should process
-
-            # Get the image number and test that it's in range. This runs before the
-            # explicit-list filters so a row rejected by those lists still reports
-            # past_end, letting the caller stop scanning volumes past the range.
-            try:
-                img_num = self._extract_img_number(img_name)
-            except ValueError as err:
-                raise ValueError(
-                    f'IMGNUM: Index file "{index_tab_url}" contains bad path "{label_filespec}"'
-                ) from err
-            if img_end_num is not None and img_num > img_end_num:
-                return None, True
-            if img_start_num is not None and img_num < img_start_num:
-                return None, False
-
-            # Check that the image filespec is in the requested list
-            if img_name_filter_list and img_name not in img_name_filter_list:
-                return None, False
-
-            # Check that the image name is in the requested list
+            # Validate the image_name_list and img_name_filter_list (from img_filespec_list kwarg)
             if img_name_list:
-                for restrict_name in img_name_list:
-                    if img_name.lower().startswith(restrict_name.lower()):
-                        break
+                for explicit_img_name in img_name_list:
+                    if not self._img_name_valid(explicit_img_name):
+                        raise ValueError(f'Invalid image name "{explicit_img_name}"')
+            if img_name_filter_list:
+                new_img_name_filter_list: list[str] = []
+                for explicit_img_filespec in img_name_filter_list:
+                    try:
+                        new_img_name = self._get_img_name_from_label_filespec(explicit_img_filespec)
+                    except ValueError as exc:
+                        logger.warning(
+                            'Skipping explicit image filespec %r: %s',
+                            explicit_img_filespec,
+                            exc,
+                        )
+                        continue
+                    if new_img_name is None:
+                        continue
+                    new_img_name_filter_list.append(new_img_name)
+                img_name_filter_list = new_img_name_filter_list
+
+            # Optimize the first and last image number based on image_name_list
+            # and img_name_filter_list. This is just to improve performance
+            if img_name_list:
+                img_start_num = max(
+                    0 if img_start_num is None else img_start_num,
+                    min([self._extract_img_number(x) for x in img_name_list]),
+                )
+                img_end_num = min(
+                    999999999999 if img_end_num is None else img_end_num,
+                    max([self._extract_img_number(x) for x in img_name_list]),
+                )
+
+            if img_name_filter_list:
+                img_start_num = max(
+                    0 if img_start_num is None else img_start_num,
+                    min([self._extract_img_number(x) for x in img_name_filter_list]),
+                )
+                img_end_num = min(
+                    999999999999 if img_end_num is None else img_end_num,
+                    max([self._extract_img_number(x) for x in img_name_filter_list]),
+                )
+
+            # Limit the number of returned yields from this method if necessary
+            limit_yields = choose_random_images if choose_random_images else None
+            if max_filenames is not None:
+                if limit_yields is None:
+                    limit_yields = max_filenames
                 else:
+                    limit_yields = min(limit_yields, max_filenames)
+
+            def _read_index_rows(search_vol: str) -> tuple[list[dict[str, Any]], FCPath]:
+                """Retrieve and read the index table for a volume.
+
+                Returns:
+                    The list of index rows and the index ``.tab`` URL (used only for
+                    error messages).
+                """
+                index_label_url = index_dir_url / self._volume_to_index(search_vol)
+                index_tab_url = index_label_url.with_suffix('.tab')
+                # This will raise a FileNotFoundError if the index file label or table
+                # can't be found
+                # TODO Implement actual error handling
+                # We have to convert the FCPaths to Posix strings here so that
+                # FileCache.retrieve() can use them. Note that if for some reason there was a
+                # specific FileCache given for pds3_holdings_root, it will be overriden by
+                # self._index_filecache.
+                # TODO Needs to return exceptions instead of a single FileNotFoundError
+                # so we can tell the user what's actually going on.
+                ret = self._index_filecache.retrieve(
+                    [index_label_url.as_posix(), index_tab_url.as_posix()]
+                )
+                index_label_localpath, _ = cast(list[Path], ret)
+                index_tab = self._read_pds_table(index_label_localpath, columns=index_columns)
+                return index_tab.dicts_by_row(), index_tab_url
+
+            def _row_to_imagefile(
+                row: dict[str, Any], search_vol: str, index_tab_url: FCPath
+            ) -> tuple[ImageFile | None, bool]:
+                """Apply all active filters to one index row.
+
+                Returns:
+                    A tuple ``(imagefile, past_end)``. ``imagefile`` is the constructed
+                    ``ImageFile`` if the row passes every filter, or None if it is filtered
+                    out. ``past_end`` is True if ``img_num`` exceeds ``img_end_num``. Index
+                    rows are time-ordered but not strictly monotonic in image number:
+                    measured over the full COISS archive (2026-07-12), 16 of 126 volumes
+                    contain a few local inversions -- mostly simultaneous NAC/WAC exposure
+                    pairs where the wide-angle row appears one count after its narrow-angle
+                    partner, plus out-of-order runs of up to ~500 counts in the early
+                    cruise volumes (COISS_1001-1003) -- so a True value means only that
+                    *this row* is past the end of the range, not that the scan as a whole
+                    can stop.
+                """
+                label_filespec = self._get_label_filespec_from_index(row)
+                img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
+
+                # Get the image name
+                try:
+                    img_name = self._get_img_name_from_label_filespec(label_filespec)
+                except ValueError:
+                    logger.error(
+                        'IMGNAME: Index file "%s" contains bad Primary File Spec "%s"',
+                        index_tab_url,
+                        label_filespec,
+                    )
+                    return None, False
+                if img_name is None:
+                    return None, False  # Not a name we should process
+
+                # Get the image number and test that it's in range. This runs before the
+                # explicit-list filters so a row rejected by those lists still reports
+                # past_end, letting the caller stop scanning volumes past the range.
+                try:
+                    img_num = self._extract_img_number(img_name)
+                except ValueError as err:
+                    raise ValueError(
+                        f'IMGNUM: Index file "{index_tab_url}" contains bad path "{label_filespec}"'
+                    ) from err
+                if img_end_num is not None and img_num > img_end_num:
+                    return None, True
+                if img_start_num is not None and img_num < img_start_num:
                     return None, False
 
-            # Check that the image meets any additional selection criteria specific
-            # to this dataset
-            label_url = volume_raw_dir_url / self._volset_and_volume(search_vol) / label_filespec
-            img_url = volume_raw_dir_url / self._volset_and_volume(search_vol) / img_filespec
-            if not self._check_additional_image_selection_criteria(
-                img_url.as_posix(), img_name, img_num, arguments
-            ):
-                return None, False
+                # Check that the image filespec is in the requested list
+                if img_name_filter_list and img_name not in img_name_filter_list:
+                    return None, False
 
-            # Check the filters answerable from the walked results sets (set
-            # lookups, no round trips)
-            results_path_stub = self._results_path_stub(search_vol, label_filespec)
-            if results_filter is not None and not results_filter.passes_presence(results_path_stub):
-                return None, False
+                # Check that the image name is in the requested list
+                if img_name_list:
+                    for restrict_name in img_name_list:
+                        if img_name.lower().startswith(restrict_name.lower()):
+                            break
+                    else:
+                        return None, False
 
-            imagefile = ImageFile(
-                image_file_url=img_url,
-                label_file_url=label_url,
-                index_file_row=row,
-                camera=self.camera_from_index_row(row),
-                results_path_stub=results_path_stub,
-                image_url_resolver=self._image_url_from_label,
+                # Check that the image meets any additional selection criteria specific
+                # to this dataset
+                volume_dir_url = volume_raw_dir_url / self._volset_and_volume(search_vol)
+                label_url = volume_dir_url / label_filespec
+                img_url = volume_dir_url / img_filespec
+                if not self._check_additional_image_selection_criteria(
+                    img_url.as_posix(), img_name, img_num, arguments
+                ):
+                    return None, False
+
+                # Check the filters the listing settles (a set lookup, no round trips)
+                results_path_stub = self._results_path_stub(search_vol, label_filespec)
+                if results_filter is not None and not results_filter.passes(results_path_stub):
+                    return None, False
+
+                imagefile = ImageFile(
+                    image_file_url=img_url,
+                    label_file_url=label_url,
+                    index_file_row=row,
+                    camera=self.camera_from_index_row(row),
+                    results_path_stub=results_path_stub,
+                    image_url_resolver=self._image_url_from_label,
+                )
+                return imagefile, False
+
+            if choose_random_images:
+                # Uniform random sampling across every selected volume: collect every row
+                # passing the cheap filters (index-derived criteria plus the listed
+                # results sets) into one pool, shuffle it, then rejection-sample through
+                # the batched error filter until the requested count is reached. Reading
+                # every volume's index is required for cross-volume uniformity (the
+                # indexes are cached locally, so repeat runs are cheap); the pool holds
+                # one ImageFile per qualifying image, so an unconstrained sample costs
+                # memory proportional to the archive's image count.
+                pool: list[ImageFile] = []
+                for search_vol in valid_volumes:
+                    rows, index_tab_url = _read_index_rows(search_vol)
+                    all_rows_past_end = bool(rows)
+                    for row in rows:
+                        imagefile, past_end = _row_to_imagefile(row, search_vol, index_tab_url)
+                        if not past_end:
+                            all_rows_past_end = False
+                        if imagefile is not None:
+                            pool.append(imagefile)
+                    if all_rows_past_end and self._IMG_NUM_MONOTONIC_ACROSS_VOLUMES:
+                        break
+                random.shuffle(pool)
+                num_yields = 0
+                for batch_start in range(0, len(pool), RESULTS_FILTER_BATCH_SIZE):
+                    batch = pool[batch_start : batch_start + RESULTS_FILTER_BATCH_SIZE]
+                    if results_filter is not None:
+                        batch = results_filter.filter_batch(batch)
+                    for imagefile in batch:
+                        yield imagefile
+                        num_yields += 1
+                        if limit_yields is not None and num_yields >= limit_yields:
+                            return
+                return
+
+            # Sequential scanning over the requested volumes in order. Index rows are
+            # time-ordered but not strictly monotonic in image number (COISS volumes
+            # carry rare local inversions: simultaneous NAC/WAC exposure pairs whose
+            # wide-angle row sorts one count late, and out-of-order runs in the early
+            # cruise volumes), so a single past-the-end row must not stop the scan;
+            # every row is range-filtered individually. When image numbers are
+            # monotonic across volumes, the scan stops after the first volume in which
+            # every row is past the end of the requested range; otherwise (Voyager,
+            # whose FDS counts roll over between encounter volume sets) no
+            # image-number-based stop applies and every requested volume is scanned,
+            # though a requested result limit can still end the scan early. Accepted
+            # images pass through the batched error filter in buffered chunks (so one
+            # question covers many candidates) while preserving enumeration order; with
+            # no error filter active the buffer flushes immediately.
+            num_yields = 0
+            pending: list[ImageFile] = []
+            pending_flush_size = (
+                RESULTS_FILTER_BATCH_SIZE
+                if results_filter is not None and results_filter.needs_batch_filtering
+                else 1
             )
-            return imagefile, False
 
-        if choose_random_images:
-            # Uniform random sampling across every selected volume: collect every row
-            # passing the cheap filters (index-derived criteria plus the walked
-            # results-presence sets) into one pool, shuffle it, then rejection-sample
-            # through the batched absence/error filters until the requested count is
-            # reached. Reading every volume's index is required for cross-volume
-            # uniformity (the indexes are cached locally, so repeat runs are cheap);
-            # the pool holds one ImageFile per qualifying image, so an unconstrained
-            # sample costs memory proportional to the archive's image count.
-            pool: list[ImageFile] = []
+            def _flush_pending() -> list[ImageFile]:
+                """Run the pending buffer through the batched error filter.
+
+                Returns:
+                    The images of the buffer that the error filters keep, in the
+                    order the enumeration accepted them.
+                """
+                nonlocal pending
+                batch, pending = pending, []
+                if results_filter is not None:
+                    batch = results_filter.filter_batch(batch)
+                return batch
+
             for search_vol in valid_volumes:
                 rows, index_tab_url = _read_index_rows(search_vol)
                 all_rows_past_end = bool(rows)
@@ -962,77 +1026,26 @@ class DataSetPDS3(DataSet):
                     imagefile, past_end = _row_to_imagefile(row, search_vol, index_tab_url)
                     if not past_end:
                         all_rows_past_end = False
-                    if imagefile is not None:
-                        pool.append(imagefile)
+                    if imagefile is None:
+                        continue
+                    pending.append(imagefile)
+                    if len(pending) < pending_flush_size:
+                        continue
+                    for filtered in _flush_pending():
+                        yield filtered
+                        num_yields += 1
+                        if limit_yields is not None and num_yields >= limit_yields:
+                            return
                 if all_rows_past_end and self._IMG_NUM_MONOTONIC_ACROSS_VOLUMES:
                     break
-            random.shuffle(pool)
-            num_yields = 0
-            for batch_start in range(0, len(pool), RESULTS_FILTER_BATCH_SIZE):
-                batch = pool[batch_start : batch_start + RESULTS_FILTER_BATCH_SIZE]
-                if results_filter is not None:
-                    batch = results_filter.filter_batch(batch)
-                for imagefile in batch:
-                    yield imagefile
-                    num_yields += 1
-                    if limit_yields is not None and num_yields >= limit_yields:
-                        return
-            return
-
-        # Sequential scanning over the requested volumes in order. Index rows are
-        # time-ordered but not strictly monotonic in image number (COISS volumes
-        # carry rare local inversions: simultaneous NAC/WAC exposure pairs whose
-        # wide-angle row sorts one count late, and out-of-order runs in the early
-        # cruise volumes), so a single past-the-end row must not stop the scan;
-        # every row is range-filtered individually. When image numbers are
-        # monotonic across volumes, the scan stops after the first volume in which
-        # every row is past the end of the requested range; otherwise (Voyager,
-        # whose FDS counts roll over between encounter volume sets) no
-        # image-number-based stop applies and every requested volume is scanned,
-        # though a requested result limit can still end the scan early. Accepted
-        # images pass through the batched absence/error filters in buffered chunks
-        # (amortizing the per-batch cloud round trips) while preserving enumeration
-        # order; with no batch filtering active the buffer flushes immediately.
-        num_yields = 0
-        pending: list[ImageFile] = []
-        pending_flush_size = (
-            RESULTS_FILTER_BATCH_SIZE
-            if results_filter is not None and results_filter.needs_batch_filtering
-            else 1
-        )
-
-        def _flush_pending() -> list[ImageFile]:
-            """Run the pending buffer through the batched results filters."""
-            nonlocal pending
-            batch, pending = pending, []
+            for filtered in _flush_pending():
+                yield filtered
+                num_yields += 1
+                if limit_yields is not None and num_yields >= limit_yields:
+                    return
+        finally:
             if results_filter is not None:
-                batch = results_filter.filter_batch(batch)
-            return batch
-
-        for search_vol in valid_volumes:
-            rows, index_tab_url = _read_index_rows(search_vol)
-            all_rows_past_end = bool(rows)
-            for row in rows:
-                imagefile, past_end = _row_to_imagefile(row, search_vol, index_tab_url)
-                if not past_end:
-                    all_rows_past_end = False
-                if imagefile is None:
-                    continue
-                pending.append(imagefile)
-                if len(pending) < pending_flush_size:
-                    continue
-                for filtered in _flush_pending():
-                    yield filtered
-                    num_yields += 1
-                    if limit_yields is not None and num_yields >= limit_yields:
-                        return
-            if all_rows_past_end and self._IMG_NUM_MONOTONIC_ACROSS_VOLUMES:
-                break
-        for filtered in _flush_pending():
-            yield filtered
-            num_yields += 1
-            if limit_yields is not None and num_yields >= limit_yields:
-                return
+                results_filter.close()
 
     def _check_additional_image_selection_criteria(
         self,
@@ -1055,7 +1068,7 @@ class DataSetPDS3(DataSet):
 
         return True
 
-    def yield_image_files_index(self, **kwargs: Any) -> Iterator[ImageFiles]:
+    def yield_image_files_index(self, **kwargs: Any) -> Generator[ImageFiles, None, None]:
         """Yield filenames given search criteria using index files. Overridden by subclasses.
 
         Parameters:
@@ -1066,8 +1079,13 @@ class DataSetPDS3(DataSet):
             image files.
         """
 
-        for imagefile in self._yield_image_files_index(**kwargs):
-            yield ImageFiles(image_files=[imagefile])
+        # closing(): the inner generator holds the results filter, and a caller
+        # that stops reading part way leaves this one to be collected rather
+        # than closed, so the storage the filter holds open would be released
+        # whenever the interpreter got round to it.
+        with closing(self._yield_image_files_index(**kwargs)) as imagefiles:
+            for imagefile in imagefiles:
+                yield ImageFiles(image_files=[imagefile])
 
     @staticmethod
     def supported_grouping() -> list[str]:

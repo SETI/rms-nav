@@ -5,8 +5,7 @@ index that could not be opened, a run log recording the command line a program
 was given -- and one part of it is a password.  The rule that hides it is stated
 here, once, so that everything putting a URL in front of a person hides the same
 characters: the opener in :mod:`spindoctor.results_index.engine`, the refusals
-of :mod:`spindoctor.results_index.roots` and
-:mod:`spindoctor.results_index.selection`, and
+of :mod:`spindoctor.results_index.roots`, and
 :func:`spindoctor.support.command_line.masked_command_line`, which decides which
 words of a command line are URLs and applies this rule to each of them.
 

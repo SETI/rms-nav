@@ -2,7 +2,7 @@
 
 The answers a results index gives differently from the results tree are stated
 in four places: the module docstring of
-:mod:`spindoctor.results_index.selection`, the navigation guide's account of
+:mod:`spindoctor.dataset.results_filter`, the navigation guide's account of
 ``--results-db``, and the plan twice, in its Phase 5 entry and in acceptance
 criterion 1.  The guide is one of them because an operator reading it is the
 person a silently short selection is served to, and the list has twice been
@@ -10,8 +10,8 @@ lost from there while every other copy of it stayed intact.
 
 So the four are read out of their files and compared against each other here.
 What is under test is documentation rather than behavior, which is unusual for a
-test module and is the point: each member has a behavioral test of its own next
-door in ``test_selection``, and none of those notices when the sentence that
+test module and is the point: each member has a behavioral test of its own among
+the selection filters' tests, and none of those notices when the sentence that
 tells an operator about the member is deleted.
 """
 
@@ -22,10 +22,9 @@ from pathlib import Path
 import pytest
 from filecache import FCPath
 
-from spindoctor.results_index import selection
+from spindoctor.dataset import results_filter
 
 ENUMERATION_MEMBERS = {
-    'a document the ingest refused': 'the ingest refused',
     'a file with no row': 'has no row at all',
     'a document rewritten in place': 'rewritten in place',
 }
@@ -40,9 +39,10 @@ member is deleted and an unrelated paragraph is emphasized in its place.
 The phrase is chosen to be the one wording every statement of that member shares
 and no other member's carries.  Adding a member means adding it here, to the
 module docstring, to the navigation guide and to the plan's two lists, in one
-commit; so does removing one that has stopped being a divergence, which is how
-the row of a document the tree no longer holds left this list when an ingest
-that cannot list a directory began to stop rather than complete.
+commit; so does removing one, which is what a member that has stopped being a
+divergence asks for.  A member stops being one when the two storages are made to
+answer it alike, and the test that proved the difference then moves to the
+parity tests and asserts the agreement.
 
 What this can and cannot check
 ------------------------------
@@ -187,7 +187,7 @@ def _docstring_members() -> list[str]:
     Returns:
         One entry per member.
     """
-    docstring = selection.__doc__ or ''
+    docstring = results_filter.__doc__ or ''
     return _lead_paragraphs(docstring.splitlines(), re.compile(r'^- \*\*'), closes=None)
 
 

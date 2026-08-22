@@ -45,15 +45,14 @@ operator runs rather than an API a consumer calls.
        and the opener that checks it. Root normalization is a rule about
        identity rather than about a database, so it lives in
        :mod:`spindoctor.nav_records` and is re-exported from here.
-   * - :mod:`spindoctor.results_index.selection`
-     - The one query answering the results-based selection filters.
    * - :mod:`spindoctor.results_index.rebuild`
      - The one correspondence between a row's columns and a record's fields, and
        the rebuild that reads it.
    * - :mod:`spindoctor.results_index.record_source`
      - The record seam's index-backed half, and
        :func:`~spindoctor.results_index.open_record_source`, which decides
-       which half a run gets.
+       which half a run gets --- including the half that answers an
+       enumeration's selection filters.
    * - :mod:`spindoctor.results_index.drop`
      - Reading what a database holds, and removing the index's own tables.
    * - :mod:`spindoctor.nav_records`
@@ -65,6 +64,12 @@ operator runs rather than an API a consumer calls.
        one document into the per-image shape both storages answer in. Reading a
        document needs no database, so every reader shares it whether or not its
        program can read an index.
+   * - :mod:`spindoctor.dataset.results_filter`
+     - Not part of this package either: the six results-based selection
+       filters, answered through the seam. A listing of the selected subtrees
+       settles which images have a document; the per-image facts of a batch of
+       candidates settle what each one records. One implementation therefore
+       serves both storages.
    * - ``spindoctor.cli.stats.ingest``
      - The pass itself: walk, select, read, write, prune, complete --- in one
        process or divided into queue tasks.
@@ -203,19 +208,28 @@ computed anywhere else.
 returns the first when the run names no index and the second when it names one.
 
 **The seam is split along the database line, and the line is not a matter of
-taste.** ``import spindoctor.dataset`` must not import SQLAlchemy: every
-navigation run imports that package and most of them name no index. The
-enumeration is a reader of documents and lives in that package, so the half of
-the seam that reads documents has to be reachable from it without acquiring a
-database. :mod:`spindoctor.nav_records` --- what a record is, what a document is
+taste.** ``import spindoctor.nav_records`` must not import SQLAlchemy. It is
+the storage-free half of the seam: reading a results tree requires no index, so
+a program that can open none still reads its records through this package, and
+a database layer imported anywhere under it would be acquired by every one of
+them. So :mod:`spindoctor.nav_records` --- what a record is, what a document is
 named and where one lives, what a selection is, the protocol, the implementation
-over the documents, and the per-image shape built from one document ---
-therefore imports no database layer, and a subprocess test pins that. The half
-that reads rows needs SQLAlchemy by definition, so it lives in
-:mod:`spindoctor.results_index` alongside the schema
-it reads, and so does the factory that chooses between the two. That is why a
-consumer on the navigation path resolves its index half through a branch-local
-import rather than at the top of its module.
+over the documents, and the per-image shape built from one document --- imports
+no database layer, and a subprocess test pins that. The half that reads rows
+needs SQLAlchemy by definition, so it lives in :mod:`spindoctor.results_index`
+alongside the schema it reads, and so does the factory that chooses between the
+two.
+
+An inline import could not have arranged this. The rule is about a whole
+package rather than about one call site, so every module under
+:mod:`spindoctor.nav_records` would need the same guard and any one of them
+could defeat it. The subprocess is likewise not a nicety: by the time any test
+in the session runs, something has already imported SQLAlchemy, so the same
+assertion inside the process would pass whatever the packages did. The probe
+imports :mod:`spindoctor.nav_records` in a fresh interpreter, asserts that no
+module of SQLAlchemy loaded, and asserts as well that the walk itself loaded,
+since a guarantee about a package that imported almost nothing is a guarantee
+about nothing.
 
 What a caller asks for
 ----------------------
@@ -387,39 +401,6 @@ cannot be listed **at all** raises
 :exc:`~spindoctor.nav_records.UnlistableRootError` instead, which the ingest
 catches to charge a mistyped root to that root and go on to the next one, and
 which every other consumer lets end its run.
-
-The import exception on the navigation path
-===========================================
-
-``import spindoctor.dataset`` must not import SQLAlchemy. Every navigation run
-imports that package, and most name no index at all, so the database layer has
-no business on that path.
-
-:class:`~spindoctor.dataset.results_filter.ResultsFilter` therefore imports
-:func:`~spindoctor.results_index.read_result_stubs` **inside** the branch that
-has a URL, rather than at the top of the module. The imports-at-the-top rule
-permits an inline import only to keep a heavy optional dependency off a path
-that does not need it, which is what this is and what the GUI toolkit's inline
-imports are; it is not a cycle workaround, and the comment at the import says
-which of the two it is.
-
-The same rule is what puts the record seam's database-free half in
-:mod:`spindoctor.nav_records` rather than here. The enumeration reads documents
-through that seam, so a database layer imported anywhere under it would be
-imported by every navigation run --- and an inline import cannot save a package
-whose whole surface is on that path. The split is the arrangement instead: the
-record types, the document rules, the selection, the protocol, the tree backend
-and the per-image shape acquire no database, and the index-backed half and the
-factory live on this side, where SQLAlchemy is already a dependency.
-
-Both halves of that are pinned in a subprocess, and have to be: by the time any
-test in the session runs, something has already imported SQLAlchemy, so the same
-assertion inside the process would pass whatever the packages did. One probe
-imports :mod:`spindoctor.dataset` and one imports
-:mod:`spindoctor.nav_records`, each asserting that no module of SQLAlchemy
-loaded --- and the second asserts as well that the walk itself loaded, since a
-guarantee about a package that imported almost nothing is a guarantee about
-nothing.
 
 Adding a column
 ===============
