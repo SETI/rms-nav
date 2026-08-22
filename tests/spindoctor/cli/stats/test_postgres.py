@@ -23,13 +23,14 @@ import pytest
 import sqlalchemy
 from tests.spindoctor.cli.stats.conftest import (
     GOLDEN_DIR,
+    GOLDEN_VARIANTS,
     REFUSAL_REPORT_LEAD,
     build_tree,
     complete,
     fan_out,
     recorded_lines,
     refusal_report,
-    report_from_tree,
+    report_from_the_index,
     reported,
     run_rows,
 )
@@ -61,8 +62,15 @@ from spindoctor.results_index import (
 
 pytestmark = pytest.mark.postgres
 
-_FULL_VARIANT: dict[str, Any] = {'top_n': 5, 'filelists': True, 'csv_export': True}
-"""The unfiltered report invocation the frozen output was produced by."""
+_FULL_VARIANT: dict[str, Any] = GOLDEN_VARIANTS['full']
+"""The unfiltered report invocation the frozen ``full`` output was produced by.
+
+Read off the shared definition rather than restated beside it.  Every comparison
+below is against output frozen for that variant, so a restatement that drifted
+from it would have this module produce a report under one set of options and
+measure it against output produced under another, and fail for a reason that has
+nothing to do with the backend it is here to exercise.
+"""
 
 _TWIST_COVARIANCE = [
     [0.0961, 0.0100, 0.0025],
@@ -76,7 +84,9 @@ def test_the_report_is_byte_identical_on_postgresql(
     postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """The same tree, the same report, on the backend the queries were written for."""
-    out = report_from_tree(postgres_url, tmp_path / 'full', logger=quiet_logger, **_FULL_VARIANT)
+    out = report_from_the_index(
+        postgres_url, tmp_path / 'full', logger=quiet_logger, **_FULL_VARIANT
+    )
     frozen = (GOLDEN_DIR / 'full' / 'report.md').read_text(encoding='utf-8')
     assert (out / 'report.md').read_text(encoding='utf-8') == frozen
 
@@ -84,14 +94,21 @@ def test_the_report_is_byte_identical_on_postgresql(
 def test_the_csv_carries_the_same_images_on_postgresql(
     postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The export orders and covers the same images, on the same key."""
-    out = report_from_tree(postgres_url, tmp_path / 'full', logger=quiet_logger, **_FULL_VARIANT)
-    produced = [
+    """The export covers the same images, on the same key.
+
+    Compared as sorted names: the rows are written where they are read, and a
+    server sorts the key under its own collation, so line order is not something
+    two backends are asked to agree on.
+    """
+    out = report_from_the_index(
+        postgres_url, tmp_path / 'full', logger=quiet_logger, **_FULL_VARIANT
+    )
+    produced = sorted(
         row['image_name']
         for row in csv.DictReader((out / 'images.csv').read_text(encoding='utf-8').splitlines())
-    ]
+    )
     frozen_text = (GOLDEN_DIR / 'full' / 'images.csv').read_text(encoding='utf-8')
-    frozen = [row['image_name'] for row in csv.DictReader(frozen_text.splitlines())]
+    frozen = sorted(row['image_name'] for row in csv.DictReader(frozen_text.splitlines()))
     assert produced == frozen
 
 
@@ -99,7 +116,9 @@ def test_the_json_columns_round_trip_on_postgresql(
     postgres_url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
     """A JSONB column decodes to a Python value, and the CSV re-encodes one."""
-    out = report_from_tree(postgres_url, tmp_path / 'full', logger=quiet_logger, **_FULL_VARIANT)
+    out = report_from_the_index(
+        postgres_url, tmp_path / 'full', logger=quiet_logger, **_FULL_VARIANT
+    )
     frozen_text = (GOLDEN_DIR / 'full' / 'images.csv').read_text(encoding='utf-8')
     frozen = {
         row['image_name']: row['excluded_from_consensus']

@@ -1,43 +1,107 @@
-"""Report sections: failure taxonomy, suspect offsets, BOTSIM, run time, CSV export."""
+"""Report sections: failure taxonomy, suspect offsets, BOTSIM, run time, CSV export.
 
+Every section here formats what the pass over the records already counted.  None
+of them reads a record, and none of them holds anything of its own beyond the
+lines it appends, so the cost of a section is the size of its table rather than
+the size of the tree.
+
+The CSV export is the exception, because it is not a section: it writes one row
+per image as the pass reads it, and only its closing line is a section.  It is
+here rather than beside the pass because what a column of it holds is a decision
+about the export, and the pass has no opinion about any of them.
+"""
+
+from __future__ import annotations
+
+import contextlib
 import csv
+import heapq
 import json
 import math
-import re
 import statistics
-from io import StringIO
+from array import array
+from collections.abc import Sequence
+from types import TracebackType
 from typing import Any
 
 from filecache import FCPath
 
 from spindoctor.cli.stats.report_common import (
-    IMAGE_JOIN,
     ReportContext,
     add_drilldown,
     add_instrument_count_table,
-    connector,
     count_pct,
     fmt,
     image_name_from_filename,
-    image_order,
     percentile,
-    rows,
     write_stacked_value_hist,
 )
 from spindoctor.config import DEFAULT_CONFIG, Config
+from spindoctor.nav_records import ImageFacts
 from spindoctor.results_index import IMAGES
 
 __all__ = [
+    'CONTENT_CATEGORIES',
     'CSV_LINE_TERMINATOR',
+    'EXPORT_COLUMNS',
     'IMAGE_COLUMNS',
+    'CsvExport',
     'add_botsim_section',
+    'add_csv_export_section',
     'add_failure_taxonomy_section',
+    'add_narrowing_section',
     'add_offset_by_group_section',
     'add_runtime_section',
     'add_suspect_offset_section',
+    'content_category',
     'resolve_offset_limit',
-    'write_csv_export',
+    'source_kind',
 ]
+
+
+# ---------------------------------------------------------------------------
+# What the report was narrowed to
+# ---------------------------------------------------------------------------
+
+_DROPPED_ROOTS_PROSE = """\
+The index holds no completed ingest of the roots named below, so under one of them the absence of a
+row means nothing at all, and none of them is covered here: neither its images nor the files under
+it that yielded no record. Ingest such a root and it joins the roots the filters above name; name it
+with --root and the run is refused rather than quietly narrowed."""
+"""The paragraph that explains what a root the report could not cover contributes.
+
+Written with the wrapping it is printed with, and naming no root, so that the
+prose is a constant and the roots are a line of its own after it.
+"""
+
+
+def add_narrowing_section(
+    ctx: ReportContext, *, filters: Sequence[str], dropped_roots: Sequence[str]
+) -> None:
+    """Append what the report was narrowed to, and what it could not cover.
+
+    A report that covered fewer roots than it was pointed at has to say so.  The
+    roots it did cover are one of the filters, named as a filter, and the ones it
+    dropped are named under the paragraph that says what dropping one costs.
+
+    Parameters:
+        ctx: Report context.
+        filters: What narrowed the report, already rendered, in the order to
+            print them; empty means nothing narrowed it.
+        dropped_roots: The roots the source could not be bound to, in the order
+            to name them; empty means it was bound to every root it was pointed
+            at.
+    """
+    narrowing = ', '.join(filters) if len(filters) > 0 else 'none (every image read)'
+    ctx.lines += [f'Filters: {narrowing}', '']
+    if len(dropped_roots) == 0:
+        return
+    ctx.lines += [
+        *_DROPPED_ROOTS_PROSE.splitlines(),
+        '',
+        f'Roots dropped: {", ".join(dropped_roots)}',
+        '',
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -71,11 +135,11 @@ def resolve_offset_limit(
     keyed by image size, the recorded ``image_shape_v`` selects the entry).
 
     Parameters:
-        instrument: Registered instrument name from the database.
+        instrument: Registered instrument name the record carries.
         image_name: Image name (used to pick the Cassini ISS detector and
             config block).
         image_shape_v: Recorded V-axis image size, or None when the
-            database row has no shape.
+            record carries no shape.
         config: Configuration to read; None uses ``DEFAULT_CONFIG``.
 
     Returns:
@@ -103,7 +167,7 @@ def resolve_offset_limit(
         return f'config section {source!r} has no extfov_margin_vu'
     if isinstance(entry, dict):
         if image_shape_v is None:
-            return 'image shape not recorded in the database'
+            return 'image shape not recorded'
         if image_shape_v not in entry:
             return f'{source!r} has no extfov_margin_vu entry for image size {image_shape_v}'
         entry = entry[image_shape_v]
@@ -121,16 +185,16 @@ def add_suspect_offset_section(ctx: ReportContext) -> None:
     correlation artifact as a real pointing error, so any image with
     ``|dV|`` or ``|dU|`` at or beyond ``suspect_fraction`` times the
     per-axis limit is listed for operator review.
+
+    This is the one always-on section that prints a row per image, and
+    ``--top-n`` caps it only when it is given: the default lists every suspect,
+    because an operator screening a run needs the whole list rather than the
+    worst few of it.
+
+    Parameters:
+        ctx: Report context.
     """
-    image_rows = rows(
-        ctx.connection,
-        f'SELECT image_name, instrument, offset_dv, offset_du, image_shape_v '
-        f'FROM images{ctx.where}'
-        + connector(ctx.where)
-        + "status = 'success' AND offset_dv IS NOT NULL AND offset_du IS NOT NULL "
-        f'ORDER BY {image_order()}',
-        ctx.params,
-    )
+    stats = ctx.stats
     ctx.lines += [
         '## Suspect offsets (near the search limit)',
         '',
@@ -140,71 +204,43 @@ def add_suspect_offset_section(ctx: ReportContext) -> None:
         'offsets may be correlation artifacts pinned to the search boundary.',
         '',
     ]
-    suspects: list[tuple[float, str, str, float, float, float, str]] = []
-    unresolved: dict[str, int] = {}
-    screened: dict[str, int] = {}
-    suspect_counts: dict[str, int] = {}
-    for image_name, instrument, dv, du, shape_v in image_rows:
-        limit = resolve_offset_limit(str(instrument), str(image_name), shape_v)
-        if isinstance(limit, str):
-            reason = f'{instrument}: {limit}'
-            unresolved[reason] = unresolved.get(reason, 0) + 1
-            continue
-        screened[str(instrument)] = screened.get(str(instrument), 0) + 1
-        limit_v, limit_u = limit
-        ratio = max(abs(float(dv)) / limit_v, abs(float(du)) / limit_u)
-        if ratio >= ctx.suspect_fraction:
-            suspect_counts[str(instrument)] = suspect_counts.get(str(instrument), 0) + 1
-            suspects.append(
-                (
-                    ratio,
-                    str(image_name),
-                    str(instrument),
-                    float(dv),
-                    float(du),
-                    math.hypot(float(dv), float(du)),
-                    f'({fmt(limit_v, 1)}, {fmt(limit_u, 1)})',
-                )
-            )
-    suspects.sort(key=lambda s: (-s[0], s[1]))
-    n_screened = sum(screened.values())
+    suspects = sorted(stats.suspects, key=lambda suspect: suspect.rank)
+    n_screened = sum(stats.screened.values())
     ctx.lines += [
         f'Suspect images: {count_pct(len(suspects), ctx.total_images)} of {n_screened} screened.',
         '',
     ]
-    add_instrument_count_table(ctx, [(['suspect'], suspect_counts)], headers=['category'])
+    add_instrument_count_table(ctx, [(['suspect'], stats.suspect_counts)], headers=['category'])
     if len(suspects) > 0:
         shown = suspects[: ctx.top_n] if ctx.top_n > 0 else suspects
         ctx.lines += [
             '| image | instrument | dV | dU | magnitude | limit (v, u) |',
             '|---|---|---|---|---|---|',
         ]
-        for _ratio, filename, instrument, dv, du, magnitude, limit_text in shown:
-            name = image_name_from_filename(instrument, filename)
+        for suspect in shown:
+            name = image_name_from_filename(suspect.instrument, suspect.image_name)
             ctx.lines.append(
-                f'| {name} | {instrument} | {fmt(dv)} | {fmt(du)} | '
-                f'{fmt(magnitude)} | {limit_text} |'
+                f'| {name} | {suspect.instrument} | {fmt(suspect.offset_dv)} '
+                f'| {fmt(suspect.offset_du)} | {fmt(suspect.magnitude)} | {suspect.limit_text} |'
             )
         ctx.lines.append('')
         add_drilldown(
             ctx,
-            [('suspect', [(s[2], s[1]) for s in suspects])],
+            [('suspect', [(suspect.instrument, suspect.image_name) for suspect in suspects])],
             label='category',
             stub_prefix='suspect_offsets',
         )
-    if len(unresolved) > 0:
+    if len(stats.unresolved) > 0:
         ctx.lines.append('Search limit could not be resolved for some images:')
         ctx.lines.append('')
-        for reason in sorted(unresolved):
-            ctx.lines.append(f'- {reason} ({unresolved[reason]} image(s))')
+        for reason in sorted(stats.unresolved):
+            ctx.lines.append(f'- {reason} ({stats.unresolved[reason]} image(s))')
         ctx.lines.append('')
 
 
 # ---------------------------------------------------------------------------
 # BOTSIM pair consistency (Cassini ISS)
 # ---------------------------------------------------------------------------
-
-_BOTSIM_NAME_RE = re.compile(r'^([NW])(\d{10})')
 
 
 def add_botsim_section(ctx: ReportContext) -> None:
@@ -216,34 +252,32 @@ def add_botsim_section(ctx: ReportContext) -> None:
     ``NAC offset ~= 10 x WAC offset`` per axis, making the per-axis
     residual ``NAC - 10 x WAC`` an end-to-end accuracy check that needs
     no ground truth.
+
+    Parameters:
+        ctx: Report context.
     """
-    image_rows = rows(
-        ctx.connection,
-        f'SELECT image_name, status, offset_dv, offset_du FROM images{ctx.where}'
-        + connector(ctx.where)
-        + f"instrument = 'coiss' ORDER BY {image_order()}",
-        ctx.params,
-    )
-    by_clock: dict[str, dict[str, tuple[str, str, Any, Any]]] = {}
-    for image_name, status, dv, du in image_rows:
-        match = _BOTSIM_NAME_RE.match(str(image_name).rsplit('/', 1)[-1].upper())
-        if match is None:
-            continue
-        camera, clock = match.group(1), match.group(2)
-        by_clock.setdefault(clock, {}).setdefault(camera, (str(image_name), str(status), dv, du))
-    pairs = {clock: entry for clock, entry in by_clock.items() if len(entry) == 2}
+    pairs = {clock: frames for clock, frames in ctx.stats.botsim.items() if len(frames) == 2}
     residuals: list[tuple[float, str, str, str, float, float]] = []
     for clock in sorted(pairs):
         nac = pairs[clock]['N']
         wac = pairs[clock]['W']
-        if nac[1] != 'success' or wac[1] != 'success':
+        if nac.status != 'success' or wac.status != 'success':
             continue
-        if None in (nac[2], nac[3], wac[2], wac[3]):
+        nac_dv, nac_du = nac.offset_dv, nac.offset_du
+        wac_dv, wac_du = wac.offset_dv, wac.offset_du
+        if nac_dv is None or nac_du is None or wac_dv is None or wac_du is None:
             continue
-        residual_dv = float(nac[2]) - 10.0 * float(wac[2])
-        residual_du = float(nac[3]) - 10.0 * float(wac[3])
+        residual_dv = nac_dv - 10.0 * wac_dv
+        residual_du = nac_du - 10.0 * wac_du
         residuals.append(
-            (math.hypot(residual_dv, residual_du), clock, nac[0], wac[0], residual_dv, residual_du)
+            (
+                math.hypot(residual_dv, residual_du),
+                clock,
+                nac.image_name,
+                wac.image_name,
+                residual_dv,
+                residual_du,
+            )
         )
     ctx.lines += [
         '## BOTSIM pair consistency (Cassini ISS)',
@@ -259,23 +293,30 @@ def add_botsim_section(ctx: ReportContext) -> None:
         f'| pairs with both navigated | {len(residuals)} |',
     ]
     if len(residuals) > 0:
-        magnitudes = [r[0] for r in residuals]
+        magnitudes = [residual[0] for residual in residuals]
         ctx.lines += [
             f'| median residual (px) | {fmt(statistics.median(magnitudes))} |',
             f'| p95 residual (px) | {fmt(percentile(magnitudes, 0.95))} |',
         ]
     ctx.lines.append('')
     if len(residuals) > 0 and ctx.top_n > 0:
-        residuals.sort(key=lambda r: (-r[0], r[1]))
+        # A clock count belongs to one pair, so the key is a total order over
+        # the residuals and the worst few come off a bounded heap.  What that
+        # bounds is the selection rather than the section: the residuals above
+        # are built whatever --top-n says, because the median and the
+        # percentile need every one of them.  What it saves is the copy a full
+        # sort makes of them, which over a hundred thousand pairs is a few
+        # kilobytes against ten megabytes.
+        worst = heapq.nsmallest(
+            ctx.top_n, residuals, key=lambda residual: (-residual[0], residual[1])
+        )
         ctx.lines += [
-            f'Worst {min(ctx.top_n, len(residuals))} pair(s):',
+            f'Worst {len(worst)} pair(s):',
             '',
             '| clock | NAC image | WAC image | residual dV | residual dU | residual |',
             '|---|---|---|---|---|---|',
         ]
-        for magnitude, clock, nac_name, wac_name, residual_dv, residual_du in residuals[
-            : ctx.top_n
-        ]:
+        for magnitude, clock, nac_name, wac_name, residual_dv, residual_du in worst:
             nac_image = image_name_from_filename('coiss', nac_name)
             wac_image = image_name_from_filename('coiss', wac_name)
             ctx.lines.append(
@@ -289,7 +330,7 @@ def add_botsim_section(ctx: ReportContext) -> None:
 # Failure taxonomy by image content
 # ---------------------------------------------------------------------------
 
-_CONTENT_CATEGORIES = (
+CONTENT_CATEGORIES = (
     'stars-only',
     'single-body',
     'multi-body',
@@ -297,10 +338,18 @@ _CONTENT_CATEGORIES = (
     'body+rings',
     'no-features',
 )
+"""Scene-content categories a failed image is classified into, in report order."""
 
 
-def _source_kind(source_model: str) -> str:
-    """Coarse feature-source kind (``stars`` / ``rings`` / ``body``) of a model name."""
+def source_kind(source_model: str) -> str:
+    """Coarse feature-source kind of a model name.
+
+    Parameters:
+        source_model: The recorded ``source_model`` of a feature source.
+
+    Returns:
+        ``'stars'``, ``'rings'`` or ``'body'``.
+    """
     kind = source_model.split(':', 1)[0].lower()
     if kind in ('star', 'stars'):
         return 'stars'
@@ -309,12 +358,19 @@ def _source_kind(source_model: str) -> str:
     return 'body'
 
 
-def _content_category(entries: list[tuple[str, str]]) -> str:
-    """Classify an image's ``(source_model, source_name)`` inventory."""
+def content_category(entries: list[tuple[str, str]]) -> str:
+    """Classify an image's ``(source_model, source_name)`` inventory.
+
+    Parameters:
+        entries: The image's feature sources, as model and source name.
+
+    Returns:
+        One of :data:`CONTENT_CATEGORIES`.
+    """
     if len(entries) == 0:
         return 'no-features'
-    body_names = {name for model, name in entries if _source_kind(model) == 'body'}
-    has_rings = any(_source_kind(model) == 'rings' for model, _ in entries)
+    body_names = {name for model, name in entries if source_kind(model) == 'body'}
+    has_rings = any(source_kind(model) == 'rings' for model, _ in entries)
     if len(body_names) > 0 and has_rings:
         return 'body+rings'
     if has_rings:
@@ -332,48 +388,14 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
     Content comes from the ``feature_sources`` inventory recorded per
     image; a body whose failure share is far above its peers points at a
     modeling problem for that body rather than a pipeline-wide issue.
+
+    Parameters:
+        ctx: Report context.
     """
-    failed_rows = rows(
-        ctx.connection,
-        'SELECT root_url, results_path_stub, image_name, instrument, '
-        f'COALESCE(status_reason, status_error) FROM images{ctx.where}'
-        + connector(ctx.where)
-        + f"status != 'success' ORDER BY {image_order()}",
-        ctx.params,
-    )
-    if len(failed_rows) == 0:
+    stats = ctx.stats
+    if stats.failed_images == 0:
         return
-    source_rows = rows(
-        ctx.connection,
-        'SELECT s.root_url, s.results_path_stub, i.image_name, i.instrument, i.status, '
-        's.source_model, s.source_name '
-        'FROM feature_sources s '
-        + IMAGE_JOIN.format(alias='s.')
-        + ctx.where_i
-        + f' ORDER BY {image_order("i.")}, s.source_model, s.source_name',
-        ctx.params_i,
-    )
-    sources_by_image: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    for root_url, stub, _image_name, _instrument, _status, source_model, source_name in source_rows:
-        sources_by_image.setdefault((str(root_url), str(stub)), []).append(
-            (str(source_model), str(source_name))
-        )
-
-    by_category: dict[str, list[tuple[str, str]]] = {
-        category: [] for category in _CONTENT_CATEGORIES
-    }
-    category_counts: dict[str, dict[str, int]] = {category: {} for category in _CONTENT_CATEGORIES}
-    reason_counts: dict[tuple[str, str], dict[str, int]] = {}
-    for root_url, stub, image_name, instrument, status_reason in failed_rows:
-        category = _content_category(sources_by_image.get((str(root_url), str(stub)), []))
-        by_category[category].append((str(instrument), str(image_name)))
-        counts = category_counts[category]
-        counts[str(instrument)] = counts.get(str(instrument), 0) + 1
-        key = (category, str(status_reason or '(none)'))
-        reason_bucket = reason_counts.setdefault(key, {})
-        reason_bucket[str(instrument)] = reason_bucket.get(str(instrument), 0) + 1
-
-    populated = [c for c in _CONTENT_CATEGORIES if len(by_category[c]) > 0]
+    populated = [category for category in CONTENT_CATEGORIES if category in stats.content_counts]
     ctx.lines += [
         '## Failure taxonomy by image content',
         '',
@@ -383,84 +405,94 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
     ]
     add_instrument_count_table(
         ctx,
-        [([category], category_counts[category]) for category in populated],
+        [([category], stats.content_counts[category]) for category in populated],
         headers=['content'],
     )
     ordered_reasons = sorted(
-        reason_counts,
+        stats.content_reason_counts,
         key=lambda key: (
-            _CONTENT_CATEGORIES.index(key[0]),
-            -sum(reason_counts[key].values()),
+            CONTENT_CATEGORIES.index(key[0]),
+            -sum(stats.content_reason_counts[key].values()),
             key[1],
         ),
     )
     add_instrument_count_table(
         ctx,
         [
-            ([category, reason], reason_counts[(category, reason)])
+            ([category, reason], stats.content_reason_counts[(category, reason)])
             for category, reason in ordered_reasons
         ],
         headers=['content', 'reason'],
     )
     add_drilldown(
         ctx,
-        [(category, by_category[category]) for category in _CONTENT_CATEGORIES],
+        [(category, stats.content_names.get(category, [])) for category in CONTENT_CATEGORIES],
         label='content category',
         stub_prefix='failed_content',
     )
+    _add_per_body_shares(ctx)
 
-    # Per-body failure shares over all images (successful and failed).  An
-    # image can contribute several rows for one body, so each bucket holds the
-    # key that identifies an image rather than its name, which two volumes may
-    # share; the name rides along for the drill-down list.
-    body_status: dict[tuple[str, str], dict[str, set[tuple[str, str, str]]]] = {}
-    for root_url, stub, image_name, instrument, status, source_model, source_name in source_rows:
-        if _source_kind(str(source_model)) != 'body' or str(source_name) == '(none)':
-            continue
-        buckets = body_status.setdefault(
-            (str(source_name), str(instrument)), {'failed': set(), 'success': set()}
+
+def _add_per_body_shares(ctx: ReportContext) -> None:
+    """Append the per-body failure shares over all images, failed and successful.
+
+    Parameters:
+        ctx: Report context.
+    """
+    stats = ctx.stats
+    bodies = set(stats.body_failed) | set(stats.body_success)
+    if len(bodies) == 0:
+        return
+    ranked = sorted(
+        bodies,
+        key=lambda key: (-_failure_share(ctx, key), -stats.body_failed.get(key, 0), key),
+    )
+    ctx.lines += [
+        '### Per-body failure shares',
+        '',
+        'How often each named body appears in failed versus successful',
+        'images; a body with a high failure share is a modeling problem.',
+        '',
+        '| body | instrument | failed images | successful images | failure share |',
+        '|---|---|---|---|---|',
+    ]
+    for key in ranked:
+        body, instrument = key
+        n_failed = stats.body_failed.get(key, 0)
+        n_success = stats.body_success.get(key, 0)
+        total = ctx.images_by_instrument[instrument]
+        ctx.lines.append(
+            f'| {body} | {instrument} | {count_pct(n_failed, total)} '
+            f'| {count_pct(n_success, total)} | {_failure_share(ctx, key):.3f} |'
         )
-        bucket = 'success' if str(status) == 'success' else 'failed'
-        buckets[bucket].add((str(image_name), str(root_url), str(stub)))
-    if len(body_status) > 0:
-        ranked = sorted(
-            body_status.items(),
-            key=lambda item: (
-                -len(item[1]['failed']) / (len(item[1]['failed']) + len(item[1]['success'])),
-                -len(item[1]['failed']),
-                item[0],
-            ),
-        )
-        ctx.lines += [
-            '### Per-body failure shares',
-            '',
-            'How often each named body appears in failed versus successful',
-            'images; a body with a high failure share is a modeling problem.',
-            '',
-            '| body | instrument | failed images | successful images | failure share |',
-            '|---|---|---|---|---|',
-        ]
-        for (body, instrument), buckets in ranked:
-            n_failed = len(buckets['failed'])
-            n_success = len(buckets['success'])
-            share = n_failed / (n_failed + n_success)
-            total = ctx.images_by_instrument[instrument]
-            ctx.lines.append(
-                f'| {body} | {instrument} | {count_pct(n_failed, total)} '
-                f'| {count_pct(n_success, total)} | {share:.3f} |'
-            )
-        ctx.lines.append('')
-        by_body: dict[str, list[tuple[str, str]]] = {}
-        for (body, instrument), buckets in ranked:
-            by_body.setdefault(body, []).extend(
-                (instrument, entry[0]) for entry in sorted(buckets['failed'])
-            )
-        add_drilldown(
-            ctx,
-            [(body, entries) for body, entries in by_body.items() if len(entries) > 0],
-            label='body',
-            stub_prefix='failed_body',
-        )
+    ctx.lines.append('')
+    by_body: dict[str, list[tuple[str, str]]] = {}
+    for body, instrument in ranked:
+        names = stats.body_failed_names.get((body, instrument), [])
+        by_body.setdefault(body, []).extend((instrument, name) for name in sorted(names))
+    add_drilldown(
+        ctx,
+        [(body, entries) for body, entries in by_body.items() if len(entries) > 0],
+        label='body',
+        stub_prefix='failed_body',
+    )
+
+
+def _failure_share(ctx: ReportContext, key: tuple[str, str]) -> float:
+    """The fraction of one body's images that failed.
+
+    Parameters:
+        ctx: Report context.
+        key: The body and the instrument.
+
+    Returns:
+        Failed images over all images naming that body under that instrument.
+        The key comes from the union of the two counters, so at least one of
+        them is non-zero and the denominator is never zero.
+    """
+    n_failed = ctx.stats.body_failed.get(key, 0)
+    n_success = ctx.stats.body_success.get(key, 0)
+    return n_failed / (n_failed + n_success)
 
 
 # ---------------------------------------------------------------------------
@@ -469,20 +501,20 @@ def add_failure_taxonomy_section(ctx: ReportContext) -> None:
 
 
 def add_runtime_section(ctx: ReportContext) -> None:
-    """Summarize per-image run times; skipped when no timing data exists."""
-    timing_rows = rows(
-        ctx.connection,
-        f'SELECT image_name, instrument, elapsed_s FROM images{ctx.where}'
-        + connector(ctx.where)
-        + f'elapsed_s IS NOT NULL ORDER BY {image_order()}',
-        ctx.params,
-    )
-    if len(timing_rows) == 0:
+    """Summarize per-image run times; skipped when no timing data exists.
+
+    Every statistic in the table is a function of the set of run times and not
+    of the sequence they arrived in: the total is summed exactly, the mean sums
+    exactly, and the rest are extremes or sort what they are given.  The pooled
+    row is therefore a plain concatenation of the per-instrument arrays.
+
+    Parameters:
+        ctx: Report context.
+    """
+    stats = ctx.stats
+    by_instrument = stats.elapsed_by_instrument
+    if len(by_instrument) == 0:
         return
-    elapsed = [float(r[2]) for r in timing_rows]
-    by_instrument: dict[str, list[float]] = {}
-    for _image_name, instrument, seconds in timing_rows:
-        by_instrument.setdefault(str(instrument), []).append(float(seconds))
     ctx.lines += [
         '## Run-time statistics',
         '',
@@ -490,20 +522,27 @@ def add_runtime_section(ctx: ReportContext) -> None:
         '| stdev (s) |',
         '|---|---|---|---|---|---|---|---|',
     ]
-    series: list[tuple[str, list[float], int]] = [
-        (instrument, by_instrument.get(instrument, []), ctx.images_by_instrument[instrument])
+    series: list[tuple[str, array[float], int]] = [
+        (
+            instrument,
+            by_instrument.get(instrument, array('d')),
+            ctx.images_by_instrument[instrument],
+        )
         for instrument in ctx.instruments
     ]
     # The pooled row only says something new once more than one instrument
     # contributed to it.
     if len(ctx.instruments) > 1:
-        series.append(('(all)', elapsed, ctx.total_images))
+        pooled = array('d')
+        for instrument in ctx.instruments:
+            pooled.extend(by_instrument.get(instrument, array('d')))
+        series.append(('(all)', pooled, ctx.total_images))
     for instrument, values, denominator in series:
         if len(values) == 0:
             continue
         stdev = statistics.stdev(values) if len(values) > 1 else 0.0
         ctx.lines.append(
-            f'| {instrument} | {count_pct(len(values), denominator)} | {fmt(sum(values))} '
+            f'| {instrument} | {count_pct(len(values), denominator)} | {fmt(math.fsum(values))} '
             f'| {fmt(min(values))} | {fmt(max(values))} | {fmt(statistics.fmean(values))} '
             f'| {fmt(statistics.median(values))} | {fmt(stdev)} |'
         )
@@ -516,17 +555,17 @@ def add_runtime_section(ctx: ReportContext) -> None:
         xlabel='elapsed (s)',
     )
     ctx.lines += ['![run time](runtime_hist.png)', '']
-    if ctx.top_n > 0:
-        slowest = sorted(timing_rows, key=lambda r: (-float(r[2]), str(r[0])))[: ctx.top_n]
+    slowest = stats.slowest.entries
+    if ctx.top_n > 0 and len(slowest) > 0:
         ctx.lines += [
             f'Slowest {len(slowest)} image(s):',
             '',
             '| image | instrument | elapsed (s) |',
             '|---|---|---|',
         ]
-        for image_name, instrument, seconds in slowest:
-            name = image_name_from_filename(str(instrument), str(image_name))
-            ctx.lines.append(f'| {name} | {instrument} | {fmt(float(seconds))} |')
+        for image in slowest:
+            name = image_name_from_filename(image.instrument, image.image_name)
+            ctx.lines.append(f'| {name} | {image.instrument} | {fmt(image.elapsed_s)} |')
         ctx.lines.append('')
 
 
@@ -536,21 +575,12 @@ def add_runtime_section(ctx: ReportContext) -> None:
 
 
 def add_offset_by_group_section(ctx: ReportContext) -> None:
-    """Break the fused-offset statistics down by (instrument, camera, image size)."""
-    image_rows = rows(
-        ctx.connection,
-        f'SELECT instrument, camera, image_shape_v, image_shape_u, offset_dv, offset_du '
-        f'FROM images{ctx.where}'
-        + connector(ctx.where)
-        + "status = 'success' AND offset_dv IS NOT NULL AND offset_du IS NOT NULL "
-        'ORDER BY instrument, camera, image_shape_v, image_shape_u',
-        ctx.params,
-    )
-    groups: dict[tuple[str, str, str], list[tuple[float, float]]] = {}
-    for instrument, camera, shape_v, shape_u, dv, du in image_rows:
-        size = f'{shape_v}x{shape_u}' if shape_v is not None and shape_u is not None else '(none)'
-        key = (str(instrument), str(camera or '(unknown)'), size)
-        groups.setdefault(key, []).append((float(dv), float(du)))
+    """Break the fused-offset statistics down by (instrument, camera, image size).
+
+    Parameters:
+        ctx: Report context.
+    """
+    groups = ctx.stats.offsets
     if len(groups) == 0:
         return
     ctx.lines += [
@@ -562,12 +592,10 @@ def add_offset_by_group_section(ctx: ReportContext) -> None:
         '|---|---|---|---|---|---|---|---|---|---|---|---|',
     ]
     for instrument, camera, size in sorted(groups):
-        offsets = groups[(instrument, camera, size)]
-        dv = [o[0] for o in offsets]
-        du = [o[1] for o in offsets]
+        dv, du = groups[(instrument, camera, size)]
         stdev_dv = statistics.stdev(dv) if len(dv) > 1 else 0.0
         stdev_du = statistics.stdev(du) if len(du) > 1 else 0.0
-        images = count_pct(len(offsets), ctx.images_by_instrument[instrument])
+        images = count_pct(len(dv), ctx.images_by_instrument[instrument])
         ctx.lines.append(
             f'| {instrument} | {camera} | {size} | {images} '
             f'| {fmt(statistics.fmean(dv))} | {fmt(stdev_dv)} | {fmt(min(dv))} | {fmt(max(dv))} '
@@ -582,76 +610,132 @@ def add_offset_by_group_section(ctx: ReportContext) -> None:
 
 
 IMAGE_COLUMNS: tuple[str, ...] = tuple(IMAGES.columns.keys())
-"""Every ``images`` column, in schema order, as the CSV export lists them."""
+"""Every column of one image's facts, in the order the column set declares them."""
+
+_SORT_COLUMN = 'results_path_stub'
+"""The column the export leads with, so an operator can sort the file in a shell.
+
+The rows are not sorted.  Sorting them means holding every one of them, which is
+what a streaming write exists not to do, so the file leads with the column an
+operator would sort on -- field 1 of a ``sort -t,``, once the header line has
+been held out of the sort -- and the root each row came from stays a column of
+its own further right.
+"""
+
+_EXPORT_IMAGE_COLUMNS: tuple[str, ...] = (
+    _SORT_COLUMN,
+    *(column for column in IMAGE_COLUMNS if column != _SORT_COLUMN),
+)
+"""The image's own columns, in the order the export writes them."""
+
+_AGGREGATE_COLUMNS: tuple[str, ...] = (
+    'n_technique_rows',
+    'n_feature_sources',
+    'n_features',
+    'n_gated',
+)
+"""What the export adds beside the image's own columns, counted off its children."""
+
+EXPORT_COLUMNS: tuple[str, ...] = (*_EXPORT_IMAGE_COLUMNS, *_AGGREGATE_COLUMNS)
+"""Every column of ``images.csv``, in the order the export writes them."""
 
 CSV_LINE_TERMINATOR = '\n'
 """What ends a row of the CSV export, on every platform."""
-
-_CHILD_KEY = 'WHERE {alias}root_url = i.root_url AND {alias}results_path_stub = i.results_path_stub'
-"""How a correlated subquery finds one image's child rows."""
 
 
 def _csv_value(value: Any) -> Any:
     """Render one column value for the CSV.
 
-    Whether a JSON column arrives as a Python container is the driver's
-    decision rather than the column's: this export reads through raw SQL, so
-    SQLite hands back the JSON text such a column stores and PostgreSQL decodes
-    one into a list or a dict first.  A CSV carrying a Python container's
-    repr is one nothing else can read back, so a container goes out as the JSON
-    text the column holds and everything else goes out as it came.
+    A structured column arrives as the container it holds -- a matrix, a list of
+    names, a mapping of diagnostics -- whichever storage answered, so a CSV
+    carrying a Python container's repr is one nothing else can read back.  Such a
+    value goes out as JSON text and everything else goes out as it came.
 
     Parameters:
-        value: The value as the driver returned it.
+        value: The value the facts carry for this column.
 
     Returns:
-        The value to write: JSON text for a list or a dict, and the value
-        itself for anything else.
+        JSON text for a list or a dict, and the value itself for anything else.
     """
     if isinstance(value, (list, dict)):
         return json.dumps(value)
     return value
 
 
-def write_csv_export(ctx: ReportContext) -> FCPath:
-    """Write a flattened one-row-per-image CSV next to ``report.md``.
+class CsvExport:
+    """The flattened one-row-per-image export, written as the pass reads.
 
-    Columns are the ``images`` table columns (schema order) plus
-    ``n_technique_rows``, ``n_feature_sources``, ``n_features``, and
-    ``n_gated`` aggregates, ordered by image name.
+    Rows are written where they are read rather than collected and written at
+    the end, so a report over an archive-scale root pays for the file rather
+    than for a copy of it in memory.  What that costs is the row order: the seam
+    promises none and the two storages find records in two orders, so the file
+    says which images were exported rather than in what sequence.  The first
+    column is what an operator would sort on, for exactly that reason.
 
-    Returns:
-        The path of the written ``images.csv``.
+    Parameters:
+        path: Where to write, a local path or any URL the ``filecache`` layer
+            accepts.
     """
-    columns = ', '.join(f'i.{column}' for column in IMAGE_COLUMNS)
-    technique_key = _CHILD_KEY.format(alias='t.')
-    source_key = _CHILD_KEY.format(alias='s.')
-    csv_rows = rows(
-        ctx.connection,
-        f'SELECT {columns}, '
-        f'(SELECT COUNT(*) FROM techniques t {technique_key}), '
-        f'(SELECT COUNT(*) FROM feature_sources s {source_key}), '
-        f'(SELECT COALESCE(SUM(s.n_features), 0) FROM feature_sources s {source_key}), '
-        f'(SELECT COALESCE(SUM(s.n_gated), 0) FROM feature_sources s {source_key}) '
-        'FROM images i' + ctx.where_i + f' ORDER BY {image_order("i.")}',
-        ctx.params_i,
-    )
-    csv_path = ctx.output_dir / 'images.csv'
-    buffer = StringIO()
-    # Stated rather than left to the module default, which is CRLF: this file is
-    # read back by the regression comparison and by whatever an operator points
-    # at it, and a line ending that changes with a library default is a diff
-    # nobody asked for.
-    writer = csv.writer(buffer, lineterminator=CSV_LINE_TERMINATOR)
-    writer.writerow(
-        [*IMAGE_COLUMNS, 'n_technique_rows', 'n_feature_sources', 'n_features', 'n_gated']
-    )
-    writer.writerows([_csv_value(value) for value in row] for row in csv_rows)
-    csv_path.write_text(buffer.getvalue(), encoding='utf-8')
+
+    def __init__(self, path: FCPath) -> None:
+        self._path = path
+        self._stack = contextlib.ExitStack()
+        self._writer: Any = None
+
+    def __enter__(self) -> CsvExport:
+        """Open the file and write its header.
+
+        Returns:
+            The export itself, which the pass hands each image to.
+        """
+        # Stated rather than left to the module default, which is CRLF: this
+        # file is read back by whatever an operator points at it, and a line
+        # ending that changes with a library default is a diff nobody asked for.
+        handle = self._stack.enter_context(self._path.open('w', newline='', encoding='utf-8'))
+        self._writer = csv.writer(handle, lineterminator=CSV_LINE_TERMINATOR)
+        self._writer.writerow(EXPORT_COLUMNS)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the file, whether the pass finished or failed.
+
+        Parameters:
+            exc_type: The exception's class, when the pass is leaving on one.
+            exc: The exception, when the pass is leaving on one.
+            traceback: Its traceback, when the pass is leaving on one.
+        """
+        self._stack.close()
+
+    def add(self, facts: ImageFacts) -> None:
+        """Write one image's row.
+
+        Parameters:
+            facts: What the image's record says, in the shape both storages
+                answer in.
+        """
+        image = facts.image
+        row = [_csv_value(image[column]) for column in _EXPORT_IMAGE_COLUMNS]
+        row.append(len(facts.techniques))
+        row.append(len(facts.feature_sources))
+        row.append(sum(int(entry['n_features']) for entry in facts.feature_sources))
+        row.append(sum(int(entry['n_gated']) for entry in facts.feature_sources))
+        self._writer.writerow(row)
+
+
+def add_csv_export_section(ctx: ReportContext) -> None:
+    """Append the line naming the export the pass wrote.
+
+    Parameters:
+        ctx: Report context.
+    """
     ctx.lines += [
         '## CSV export',
         '',
-        f'One row per image: images.csv ({len(csv_rows)} row(s)).',
+        f'One row per image: images.csv ({ctx.stats.csv_rows} row(s)).',
         '',
     ]
-    return csv_path

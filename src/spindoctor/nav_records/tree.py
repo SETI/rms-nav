@@ -63,6 +63,16 @@ flattened into the facts it holds.  The two file metrics the facts carry are the
 listing's own, threaded through from the walk that found the document, so
 nothing here stats a file and nothing walks a root a second time to answer the
 second question about it.
+
+Each of the two narrows on what it read.  A record is the document, so a stream
+of records reads the mission and the exposure midtime out of the document, and a
+document recording neither is reported rather than passed over, which is the
+only thing such a stream can say about one.  The facts are the row an ingest of
+the same file writes, so a stream of facts narrows on the facts: a file that
+yields none is an unreadable file whatever the selection asks for, and a file
+that yields facts is compared on the same two values an index compares its rows
+on.  That is what makes one selection over one tree cover the same images out of
+either storage.
 """
 
 from collections.abc import Iterator, Sequence
@@ -120,20 +130,21 @@ NAMES_NO_INSTRUMENT = 'names no instrument to attribute it to a mission'
 
 Not one of the reasons in :mod:`spindoctor.nav_records.document`, which are the
 ways a file yields no document at all.  This one is a document, read and parsed,
-that no mission-filtered read can place: only a document that *names* a mission
-can be another mission's, so one naming none is reported rather than passed over
-silently, which is how a truncated or corrupted document would otherwise vanish
-from every mission's run without a trace.
+that a mission-filtered stream of records cannot place: only a document that
+*names* a mission can be another mission's, so one naming none is reported
+rather than passed over silently, which is how a truncated or corrupted document
+would otherwise vanish from every mission's run without a trace.
 """
 
 RECORDS_NO_MIDTIME = 'records no exposure midtime to place it in a span of time'
 """Why a document that read perfectly well is still not one span's record.
 
-The time filter's half of :data:`NAMES_NO_INSTRUMENT`, and reported for the same
-reason: only a document that records a usable midtime can be shown to lie outside
-a span, so one recording none is reported rather than passed over.  A truncated
-document, or one whose midtime is a NaN that would otherwise satisfy every bound
-at once, would vanish from every time-bounded run without a trace.
+The time filter's half of :data:`NAMES_NO_INSTRUMENT`, reported by the same
+stream and for the same reason: only a document that records a usable midtime
+can be shown to lie outside a span, so one recording none is reported rather
+than passed over.  A truncated document, or one whose midtime is a NaN that
+would otherwise satisfy every bound at once, would vanish from every
+time-bounded run without a trace.
 """
 
 
@@ -528,7 +539,7 @@ class TreeRecordSource:
                 caller reads, and not at all when the selection names its own
                 stubs, which lists nothing.
         """
-        return (found for _origin, found in self._found(selection))
+        return self._selected_records(self._found(selection), selection)
 
     def facts(self, selection: Selection) -> Iterator[ImageFacts | UnreadableFile]:
         """Return what every document the selection covers says about its image.
@@ -552,7 +563,14 @@ class TreeRecordSource:
             :class:`~spindoctor.nav_records.record.UnreadableFile` per file that
             did not.  A file that is no navigation document is one of those,
             carrying the reason the document reader refuses it by, which is the
-            reason an ingest of the same tree records for it.
+            reason an ingest of the same tree records for it.  The mission
+            filter and the time bounds are then applied to the facts, which are
+            the values an index filters its rows on, so a file that yields no
+            facts is always an unreadable file and a file that yields facts is
+            narrowed on exactly what the other storage narrows on.  An image
+            whose facts record no midtime is therefore not selected under a
+            time bound, in place of being reported: a row recording none
+            satisfies no bound either.
 
         Raises:
             ValueError: If the selection names stubs without resolving to
@@ -561,24 +579,27 @@ class TreeRecordSource:
                 not be listed, or :class:`UnlistableRootError` if a selected
                 root could not be listed at all.
         """
-        return (self._facts_of(origin, found) for origin, found in self._found(selection))
+        return self._selected_facts(self._found(selection), selection)
 
     def _found(
         self, selection: Selection
     ) -> Iterator[tuple[DocumentOrigin, NavRecord | UnreadableFile]]:
-        """Read the documents the selection covers, each with where it came from.
+        """Read the documents the selection names a place for, with where each came from.
 
-        The one stream both public reads are built on.  What the selection asks
-        for is checked here rather than inside the generator, so a selection
-        this source cannot honour is refused where a caller asked rather than
-        partway through its loop.
+        The one stream both public reads are built on, and the reason each of
+        them applies the selection's restrictions itself: the two read different
+        things out of one document, and each narrows on what it read.  What the
+        selection asks for is checked here rather than inside the generator, so
+        a selection this source cannot honour is refused where a caller asked
+        rather than partway through its loop.
 
         Parameters:
-            selection: Which documents to read.
+            selection: Which documents to read, for the roots, the subtrees and
+                the stubs it names.
 
         Returns:
-            One pair per document the selection covers: where it came from, and
-            the record or the unreadable file it produced.
+            One pair per document read: where it came from, and the record or
+            the unreadable file it produced.
 
         Raises:
             ValueError: If the selection names stubs without resolving to
@@ -593,7 +614,48 @@ class TreeRecordSource:
             ListedRecord(stub=stub, path=document_path(root, stub), mtime_ns=None, size_bytes=None)
             for stub in selection.stubs
         )
-        return self._found_of_root(root, root_url, listed, selection)
+        return self._found_of_root(root, root_url, listed)
+
+    def _selected_records(
+        self,
+        found: Iterator[tuple[DocumentOrigin, NavRecord | UnreadableFile]],
+        selection: Selection,
+    ) -> Iterator[NavRecord | UnreadableFile]:
+        """Yield the records of the documents the selection covers.
+
+        Parameters:
+            found: What was read, document by document.
+            selection: The selection, for the restrictions a document answers.
+
+        Yields:
+            One record per document the selection covers, and one unreadable
+            file per document that yielded none or that cannot be placed
+            against a restriction the selection makes.
+        """
+        for _origin, one in found:
+            selected = self._document_selected(one, selection)
+            if selected is not None:
+                yield selected
+
+    def _selected_facts(
+        self,
+        found: Iterator[tuple[DocumentOrigin, NavRecord | UnreadableFile]],
+        selection: Selection,
+    ) -> Iterator[ImageFacts | UnreadableFile]:
+        """Yield the facts of the documents the selection covers.
+
+        Parameters:
+            found: What was read, document by document.
+            selection: The selection, for the restrictions the facts answer.
+
+        Yields:
+            One set of facts per document the selection covers, and one
+            unreadable file per document that yielded none.
+        """
+        for origin, one in found:
+            facts = self._facts_of(origin, one)
+            if isinstance(facts, UnreadableFile) or self._facts_selected(facts, selection):
+                yield facts
 
     @staticmethod
     def _facts_of(
@@ -645,16 +707,15 @@ class TreeRecordSource:
 
         Parameters:
             roots: The normalized roots to read, in the order to read them.
-            selection: The selection, for the subtrees to walk and the
-                restrictions a document has to be opened to answer.
+            selection: The selection, for the subtrees to walk.
 
         Yields:
-            One pair per document the selection covers.
+            One pair per document under those subtrees.
         """
         for root_url in roots:
             root = FCPath(root_url)
             listed = self._listing_of_root(root, selection.subtrees)
-            yield from self._found_of_root(root, root_url, listed, selection)
+            yield from self._found_of_root(root, root_url, listed)
 
     def describe(self) -> str:
         """Return where these records came from, for the run log.
@@ -707,13 +768,13 @@ class TreeRecordSource:
             )
 
     def _found_of_root(
-        self,
-        root: FCPath,
-        root_url: str,
-        listed: Iterator[ListedRecord],
-        selection: Selection,
+        self, root: FCPath, root_url: str, listed: Iterator[ListedRecord]
     ) -> Iterator[tuple[DocumentOrigin, NavRecord | UnreadableFile]]:
         """Retrieve one root's documents in batches and yield them one at a time.
+
+        Every document read is yielded.  What a selection restricts is applied
+        to what was read out of a document, and the two public reads read
+        different things out of one document, so nothing here narrows.
 
         Parameters:
             root: The results root the stubs are keys under.
@@ -721,12 +782,9 @@ class TreeRecordSource:
                 where it came from.
             listed: The documents to read, which arrive lazily when they come
                 from a listing.
-            selection: The selection, for the restrictions a document has to be
-                opened to answer.
 
         Yields:
-            One pair per listed document that survives the selection's
-            restrictions.
+            One pair per listed document, read and unfiltered.
         """
         for batch in in_batches(listed, RETRIEVE_BATCH_SIZE):
             sub_paths: list[str | Path] = [f'{entry.stub}{METADATA_SUFFIX}' for entry in batch]
@@ -737,9 +795,8 @@ class TreeRecordSource:
                 list[Path | Exception], root.retrieve(sub_paths, exception_on_fail=False)
             )
             for entry, local_path in zip(batch, local_paths, strict=True):
-                found = self._record_of(root, entry.stub, local_path, selection)
-                if found is not None:
-                    yield self._origin_of(root_url, entry, found), found
+                found = self._read_of(root, entry.stub, local_path)
+                yield self._origin_of(root_url, entry, found), found
 
     @staticmethod
     def _origin_of(
@@ -766,9 +823,10 @@ class TreeRecordSource:
             size_bytes=listed.size_bytes,
         )
 
-    def _record_of(
-        self, root: FCPath, stub: str, local_path: Path | Exception, selection: Selection
-    ) -> NavRecord | UnreadableFile | None:
+    @staticmethod
+    def _read_of(
+        root: FCPath, stub: str, local_path: Path | Exception
+    ) -> NavRecord | UnreadableFile:
         """Read one retrieved document, or say why it yielded no record.
 
         Parameters:
@@ -776,6 +834,32 @@ class TreeRecordSource:
             stub: The image's results path stub.
             local_path: What the retrieval produced for it: a local file, or the
                 exception that says it never arrived.
+
+        Returns:
+            The record the document holds, or the unreadable file it is instead.
+        """
+        path = document_path(root, stub)
+        if isinstance(local_path, BaseException):
+            return UnreadableFile(path=path, stub=stub, reason=COULD_NOT_RETRIEVE)
+        metadata = document_or_refusal(FCPath(local_path))
+        if isinstance(metadata, str):
+            return UnreadableFile(path=path, stub=stub, reason=metadata)
+        return NavRecord(path=path, stub=stub, metadata=metadata)
+
+    def _document_selected(
+        self, found: NavRecord | UnreadableFile, selection: Selection
+    ) -> NavRecord | UnreadableFile | None:
+        """Apply the selection's restrictions to one document, as a record.
+
+        A record is the document, so the mission and the span are read out of
+        the document itself: what a stream of records hands back is what the
+        file says, and the field a filter compares is the field the file
+        records.
+
+        Parameters:
+            found: The record read out of the document, or the unreadable file
+                it was instead, which no restriction can be applied to and which
+                every run reports.
             selection: The selection, for the restrictions a document has to be
                 opened to answer.
 
@@ -789,26 +873,48 @@ class TreeRecordSource:
             instead: it cannot be shown to be another run's, so passing over it
             would drop it out of every run there is.
         """
-        path = document_path(root, stub)
-        if isinstance(local_path, BaseException):
-            return UnreadableFile(path=path, stub=stub, reason=COULD_NOT_RETRIEVE)
-        metadata = document_or_refusal(FCPath(local_path))
-        if isinstance(metadata, str):
-            return UnreadableFile(path=path, stub=stub, reason=metadata)
+        if isinstance(found, UnreadableFile):
+            return found
+        metadata = found.metadata
         if selection.instrument is not None:
             observation = metadata.get('observation')
             instrument = observation.get('instrument') if isinstance(observation, dict) else None
             if not isinstance(instrument, str):
-                return UnreadableFile(path=path, stub=stub, reason=NAMES_NO_INSTRUMENT)
+                return UnreadableFile(path=found.path, stub=found.stub, reason=NAMES_NO_INSTRUMENT)
             if instrument != selection.instrument:
                 return None
         if selection.bounded_in_time:
             midtime = record_midtime_et(metadata)
             if midtime is None:
-                return UnreadableFile(path=path, stub=stub, reason=RECORDS_NO_MIDTIME)
+                return UnreadableFile(path=found.path, stub=found.stub, reason=RECORDS_NO_MIDTIME)
             if not self._within(midtime, selection):
                 return None
-        return NavRecord(path=path, stub=stub, metadata=metadata)
+        return found
+
+    def _facts_selected(self, facts: ImageFacts, selection: Selection) -> bool:
+        """Whether one document's facts are inside the selection's restrictions.
+
+        The mission and the midtime are read off the facts, which are the values
+        a row carries and the values a query over rows compares, so the two
+        storages narrow one tree to the same images.  A document that carries
+        neither is refused before it gets here -- the facts hold an instrument
+        or they are not a navigation document's -- so the only value that can be
+        absent is the midtime, and an image with none is not selected under a
+        bound, exactly as a row with none satisfies no comparison.
+
+        Parameters:
+            facts: What the document says about its image.
+            selection: The selection, for the mission and the time bounds.
+
+        Returns:
+            True when the image is inside every restriction the selection makes.
+        """
+        if selection.instrument is not None and facts.image['instrument'] != selection.instrument:
+            return False
+        if not selection.bounded_in_time:
+            return True
+        midtime = facts.image['midtime_et']
+        return midtime is not None and self._within(float(midtime), selection)
 
     @staticmethod
     def _within(midtime: float, selection: Selection) -> bool:

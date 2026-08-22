@@ -54,24 +54,25 @@ def directory_naming_no_index(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def no_ambient_results_index_for_the_session(
     directory_naming_no_index: Path,
 ) -> Iterator[None]:
-    """Close both ambient levels for everything a session runs, not only tests.
+    """Close every ambient level for everything a session runs, not only tests.
 
     The per-test fixture below cannot reach a fixture of a broader scope: pytest
     builds a module- or session-scoped one before any function-scoped fixture of
     the test that first asked for it, so a fixture that ingests a tree or runs a
     report would run against the working directory and the environment the suite
-    was started with.  Closing both here as well makes the guarantee one about
+    was started with.  Closing them here as well makes the guarantee one about
     the session rather than about test bodies.
 
     Parameters:
         directory_naming_no_index: The working directory to run under.
 
     Yields:
-        Nothing; both levels are closed for the life of the session.
+        Nothing; every level is closed for the life of the session.
     """
     with pytest.MonkeyPatch.context() as patch:
         patch.chdir(directory_naming_no_index)
         patch.delenv('NAV_RESULTS_DB', raising=False)
+        patch.delenv('NAV_RESULTS_ROOT', raising=False)
         yield
 
 
@@ -79,7 +80,7 @@ def no_ambient_results_index_for_the_session(
 def no_ambient_results_index(
     monkeypatch: pytest.MonkeyPatch, directory_naming_no_index: Path
 ) -> Iterator[None]:
-    """Close both ways a test could reach a results index nobody named.
+    """Close every way a test could reach a results index or tree nobody named.
 
     A results index URL is resolved from three places in order: the argument,
     the ``environment.results_db`` configuration variable, and the
@@ -89,6 +90,13 @@ def no_ambient_results_index(
     against a file an ingest may be holding, and for a report a read of every
     row in it.  Both are closed here rather than in each test, because the level
     an author forgets is the level nothing then tests.
+
+    The navigation results root is closed on the same terms, and for a sharper
+    reason: a program that resolves one *walks* it.  ``sd_stats_report`` with no
+    index reads every document under the tree it resolves, so a test naming
+    neither an index nor a root would read whatever ``NAV_RESULTS_ROOT`` the
+    machine exports -- several hundred thousand documents on a working machine,
+    from a test that means to assert a refusal.
 
     The configuration level is closed by moving the working directory.  The user
     override file is ``nav_default_config.yaml`` beside the process, so a
@@ -112,15 +120,17 @@ def no_ambient_results_index(
         directory_naming_no_index: The working directory to run under.
 
     Yields:
-        Nothing; the test runs with neither ambient level reachable.
+        Nothing; the test runs with no ambient level reachable.
     """
     monkeypatch.chdir(directory_naming_no_index)
     monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     # A configuration merged before this test ran -- by a test that named its own
     # override file, or by one that ran before the working directory moved --
     # outlives it: the merge is into a process-global configuration and nothing
     # takes it back out.
     monkeypatch.delitem(DEFAULT_CONFIG.environment, 'results_db', raising=False)
+    monkeypatch.delitem(DEFAULT_CONFIG.environment, 'nav_results_root', raising=False)
     yield
     left_behind = sorted(entry.name for entry in directory_naming_no_index.iterdir())
     for entry in directory_naming_no_index.iterdir():

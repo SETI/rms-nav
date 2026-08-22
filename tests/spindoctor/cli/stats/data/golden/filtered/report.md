@@ -10,6 +10,17 @@ Filters: instrument = coiss, image number >= 1294561202, image number <= 1294563
 
 Total images: 4
 
+## Files that yielded no record
+
+A file named like a navigation document that no record could be read out of is counted here and
+nowhere else: it records no instrument, no date and no image number, so this count covers the whole
+of every selected root and none of the filters above narrows it. One kind of such file is counted
+by a report over the documents and by no report from an index: one the storage could not deliver at
+all. An ingest records no refusal for that, because a retrieval that failed once is worth trying
+again rather than being remembered as a file that will not read.
+
+Files that yielded no record: 0
+
 ## Success / failure
 
 | status | coiss | total |

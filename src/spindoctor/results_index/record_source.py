@@ -78,24 +78,32 @@ counts it, because a document the ingest refused is a file that exists and a
 listing answers what is there.
 
 **A refused file is reported here under every mission filter and every time
-bound, and by the walk only where the document does not answer the filter.**  A
+bound, and a stream of facts over the documents reports it under both too.**  A
 ``failed_files`` row holds no mission and no epoch, so no filter can exclude it
-and every stream yields it.  The walk has the document rather than a row, and it
-reads the filters out of the document before it decides whether the document is
-a navigation result at all: one it can attribute to another mission, or place
-outside the span, is passed over and never refused, and one it cannot place is
-reported under the walk's own reason for what the filter found rather than under
-the reason an ingest of the same file records.  So the two agree about a refused
-file exactly while the selection places no restriction a document has to be
-opened to answer.  A run that has to compare the two under a filter reads the
-refusals unfiltered from both.
+and every stream yields it.  The walk refuses a file before any filter is
+applied to it and then narrows on the facts it read, which are the values the
+rows here are narrowed on, so the same files are refused and the same images
+selected whichever storage answered.
 
-**A row that cannot be placed is not a refusal here.**  The walk has only the
-document, so one naming no mission or recording no usable midtime is a file it
-can say nothing about, and it reports it.  The index has a row: a row whose
-instrument or midtime is absent satisfies no filter and is simply not selected,
-exactly as a row outside the span is not.  A run that has to account for those
-images reads the documents.
+A stream of *records* is the one that differs, and deliberately: a record is the
+document, so the walk reads the mission and the midtime out of the document
+itself.  A document it can attribute to another mission, or place outside the
+span, is passed over and never refused -- including a file this half holds a
+refusal for -- and one it cannot place at all is reported under the walk's own
+reason for what the filter found rather than under the reason an ingest of the
+same file records.  A run that has to compare the two streams of records under a
+filter reads the refusals unfiltered from both.
+
+**A row that cannot be placed in time is not a refusal here.**  ``instrument``
+is not nullable and a document naming none is refused before an ingest could
+write a row for it, so every row names a mission; ``midtime_et`` is nullable,
+and a row recording none satisfies no bound and is simply not selected, exactly
+as a row outside the span is not.  A stream of facts over the documents reads
+such an image the same way, because the bound is applied to the midtime the
+facts carry.  A stream of records does not: the walk reports a document
+recording no usable midtime, since a record it cannot place cannot be shown to
+be another run's.  A run that has to account for those images reads them under
+no bound.
 
 **A stub both tables record is one file, read as the record it is.**  The ingest
 writes the two tables independently and a pass divided into shares can leave a
@@ -723,8 +731,8 @@ class IndexRecordSource:
         Returns:
             The conditions, empty when the selection restricts neither.  A row
             with no recorded midtime satisfies no bound, since a comparison with
-            NULL is not true -- which is how the walk reads a document
-            recording none.
+            NULL is not true -- which is how a stream of facts over the
+            documents reads one recording none.
         """
         conditions: list[sqlalchemy.ColumnElement[bool]] = []
         if selection.instrument is not None:
