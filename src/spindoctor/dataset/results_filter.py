@@ -39,6 +39,16 @@ answers is settled by
 :func:`spindoctor.results_index.open_record_source`: a run naming a results
 index reads rows, and a run naming none reads the documents themselves.
 
+A candidate whose file yields no facts satisfies no error filter, the one phrased
+in the negative included, because what it records is unknown rather than known to
+be an outcome.  A document written to an earlier metadata schema is one of those,
+so a run over a results root holding nothing else can select no image at all.
+The scan therefore says how many candidates it could read no record out of and
+names one of them with the reason, once, when it is closed: counted rather than
+reported one at a time because a real results root holds hundreds of them, and
+reported at all because a selection that is short for this reason is otherwise
+indistinguishable from a root holding no such image.
+
 Only the subtrees the enumeration selected are listed, one at a time.  A subtree
 the results root does not hold is an ordinary state -- a volume nobody has
 navigated yet has no directory under the results root -- so it contributes no
@@ -177,6 +187,18 @@ def _named_flags(names: Sequence[str]) -> str:
     if len(names) == 1:
         return names[0]
     return f'{", ".join(names[:-1])} and {names[-1]}'
+
+
+def _file_count(count: int) -> str:
+    """Render a number of files so that a line reads for one of them as for many.
+
+    Parameters:
+        count: How many files.
+
+    Returns:
+        The count and the noun agreeing with it.
+    """
+    return f'{count} file' if count == 1 else f'{count} files'
 
 
 def _elapsed_phrase(seconds: float) -> str:
@@ -336,8 +358,9 @@ class ResultsFilter:
                 filter from, or None to read the results tree.  A URL that
                 cannot be used is an error rather than a reason to fall back
                 to the tree.
-            logger: Logger for scan statistics, and for the one line the seam
-                has to say about a directory it declined to descend twice.
+            logger: Logger for scan statistics, for the candidates no record
+                could be read for, and for the one line the seam has to say
+                about a directory it declined to descend twice.
 
         Raises:
             SelectionError: If the flag combination is contradictory, or if the
@@ -427,6 +450,13 @@ class ResultsFilter:
         # over an index holds a connection pool and a run that has nothing left
         # to ask should not.
         self._source: RecordSource | None = None
+        # What the scan owes the operator about the candidates it could read no
+        # record out of.  Kept as a count and one example rather than reported
+        # as they are met: a results root whose documents an error filter can
+        # read nothing out of holds hundreds of them, and a line apiece would
+        # bury the selection the run was asked for.
+        self._unreadable_count = 0
+        self._unreadable_example: UnreadableFile | None = None
         # None where no flag asked anything of the results root, which is a
         # filter that keeps every image it is offered.
         self._stubs: frozenset[str] | None = None
@@ -459,12 +489,14 @@ class ResultsFilter:
         self.close()
 
     def close(self) -> None:
-        """Release the storage this filter reads through.
+        """Report what the scan read nothing out of, and release its storage.
 
-        Called when the enumeration is done with the filter.  A filter with no
-        second question to ask never held one open, and closing twice costs
-        nothing.
+        Called when the enumeration is done with the filter, however it ended,
+        which is the moment the scan is over and its count of unreadable
+        candidates is final.  A filter with no second question to ask never held
+        a storage open, and closing twice costs nothing and says nothing twice.
         """
+        self._report_unreadable()
         if self._source is not None:
             self._source.close()
             self._source = None
@@ -570,17 +602,25 @@ class ResultsFilter:
 
         Raises:
             SelectionError: If the index cannot be opened, cannot be read, or
-                holds no completed ingest of this results root.
+                holds no completed ingest of this results root.  Whatever was
+                opened is released before any failure leaves this method, since
+                a constructor that raises hands the caller no filter to close.
         """
         source = self._open()
         try:
-            # Read inside the same guard as the open, because a source reading
-            # rows runs its query as the caller reads the stream: a storage that
-            # stops answering surfaces here rather than above.
-            stubs = frozenset(listed.stub for listed in self._listed(source, subtrees))
-        except ValueError as exc:
-            source.close()
-            raise SelectionError(str(exc)) from exc
+            try:
+                # Read inside the same guard as the open, because a source
+                # reading rows runs its query as the caller reads the stream: a
+                # storage that stops answering surfaces here rather than above.
+                stubs = frozenset(listed.stub for listed in self._listed(source, subtrees))
+            except ValueError as exc:
+                raise SelectionError(str(exc)) from exc
+            # Reported while this frame is still the only thing holding the
+            # source, and before the filter is given it.  Reporting is a second
+            # question of a results index and can refuse the selection; a
+            # constructor that raises hands the caller no object, so a source
+            # stored on the filter first would be released by nothing.
+            self._report(len(stubs))
         except BaseException:
             source.close()
             raise
@@ -588,7 +628,6 @@ class ResultsFilter:
             self._source = source
         else:
             source.close()
-        self._report(len(stubs))
         return stubs
 
     def _matching_stubs(self, stubs: Sequence[str]) -> frozenset[str]:
@@ -600,7 +639,8 @@ class ResultsFilter:
         Returns:
             Those whose document satisfies the active error filters.  A file no
             per-image facts could be read out of is not among them, for the
-            reason :meth:`_records_a_wanted_error` gives.
+            reason :meth:`_records_a_wanted_error` gives; it is counted instead,
+            so that :meth:`close` can say how much of the batch went that way.
 
         Raises:
             SelectionError: If a results index stops answering while this reads
@@ -613,12 +653,49 @@ class ResultsFilter:
         try:
             for facts in source.facts(Selection(stubs=tuple(stubs))):
                 if isinstance(facts, UnreadableFile):
+                    self._note_unreadable(facts)
                     continue
                 if self._records_a_wanted_error(facts):
                     matching.add(str(facts.image['results_path_stub']))
         except ValueError as exc:
             raise SelectionError(str(exc)) from exc
         return frozenset(matching)
+
+    def _note_unreadable(self, unreadable: UnreadableFile) -> None:
+        """Count a candidate no record came out of, and keep the first as the example.
+
+        The first rather than the last, so that the file named is the same one
+        whichever batch the enumeration stopped in, and so that the count and
+        the example are one file's worth of state rather than a list of every
+        file a mission-wide scan passed over.
+
+        Parameters:
+            unreadable: The file, and why no record came out of it.
+        """
+        self._unreadable_count += 1
+        if self._unreadable_example is None:
+            self._unreadable_example = unreadable
+
+    def _report_unreadable(self) -> None:
+        """Say how many candidates yielded no record, with one of them and its reason.
+
+        Nothing is said by a scan that read a record out of every candidate it
+        was offered, and nothing is said twice: the count and the example are
+        cleared once reported, so a filter closed again reports no second scan.
+        """
+        example = self._unreadable_example
+        if example is None:
+            return
+        self._logger.warning(
+            '*** Results scan: %s under %s yielded no navigation record, which no error '
+            'filter selects; for example %s: %s',
+            _file_count(self._unreadable_count),
+            self._nav_results_root,
+            example.path,
+            example.reason,
+        )
+        self._unreadable_count = 0
+        self._unreadable_example = None
 
     def _report(self, documents: int) -> None:
         """Say what the results root was found to hold, and how current that is.

@@ -10,12 +10,18 @@ instead of tracing back out of an enumeration.
 The flags are checked before anything is opened, which is why the contradictions
 below are asserted with an index URL that names nothing: a refusal that reported
 the database instead would send a user to fix the wrong thing.
+
+Whatever a refusal reaching an operator says, what it leaves behind is a
+storage: a refusal raised after the storage was opened comes out of the
+constructor, so the caller receives no filter and has nothing to close.  The last
+tests here watch the storage rather than the message, because nothing about a
+refusal's wording depends on that.
 """
 
 import itertools
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import sqlalchemy
@@ -27,7 +33,9 @@ from tests.spindoctor.dataset.conftest import (
     one_image_tree,
 )
 
+from spindoctor.dataset import results_filter
 from spindoctor.dataset.results_filter import ResultsFilter, SelectionError
+from spindoctor.nav_records import ImageFacts, ListedRecord, Selection, UnreadableFile
 
 CONTRADICTORY_PAIRS = [
     pytest.param({'has_offset_file': True, 'has_no_offset_file': True}, id='offset-file-pair'),
@@ -407,3 +415,144 @@ def test_a_failure_of_the_bookkeeping_query_names_the_table(tmp_path: Path) -> N
         ResultsFilter(
             VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
         )
+
+
+class _CountingSource:
+    """A record source that holds nothing, notes its closes, and can refuse to list.
+
+    Parameters:
+        refusal: What a listing of this source raises, or None to list nothing.
+    """
+
+    def __init__(self, refusal: BaseException | None = None) -> None:
+        self.closes = 0
+        self._refusal = refusal
+
+    def __enter__(self) -> '_CountingSource':
+        """Return this source, since there is nothing to open.
+
+        Returns:
+            This source.
+        """
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Release nothing, since nothing was opened."""
+
+    def close(self) -> None:
+        """Count this, since being released is what these tests watch."""
+        self.closes += 1
+
+    def listing(self, selection: Selection) -> Iterator[ListedRecord]:
+        """Refuse the way this source was built to, or report no documents.
+
+        Parameters:
+            selection: What the filter asked for.
+
+        Returns:
+            An empty stream, for a source built to refuse nothing.
+
+        Raises:
+            BaseException: Whatever this source was built to refuse with.
+        """
+        if self._refusal is not None:
+            raise self._refusal
+        return iter(())
+
+    def facts(self, selection: Selection) -> Iterator[ImageFacts | UnreadableFile]:
+        """Report no facts, since no test here gets as far as a batch.
+
+        Parameters:
+            selection: What the filter asked for.
+
+        Returns:
+            An empty stream.
+        """
+        return iter(())
+
+
+def _opening(monkeypatch: pytest.MonkeyPatch, source: _CountingSource) -> None:
+    """Give the filter a stand-in storage in place of the one it would open.
+
+    Parameters:
+        monkeypatch: Fixture the stand-in is installed through.
+        source: The storage every open hands back.
+    """
+
+    def opening(roots: Sequence[Any], **kwargs: Any) -> _CountingSource:
+        return source
+
+    monkeypatch.setattr(results_filter, 'open_record_source', opening)
+
+
+def test_a_listing_that_refuses_releases_the_storage_it_was_read_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal comes out of the constructor, so the caller is handed nothing to close.
+
+    Over an index the storage is a connection pool, and a run whose selection
+    is refused is one an operator retries: each attempt would leave another
+    pool behind, released by nothing until the interpreter collected it.
+
+    Parameters:
+        tmp_path: Directory standing in for the results root, which the
+            stand-in storage never reads.
+        monkeypatch: Fixture the stand-in storage is installed through.
+    """
+    source = _CountingSource(ValueError('the index stopped answering'))
+    _opening(monkeypatch, source)
+    with pytest.raises(SelectionError):
+        ResultsFilter(VOLUMES, str(tmp_path), logger=null_logger(), has_offset_error=True)
+    assert source.closes == 1
+
+
+def test_a_listing_that_fails_outright_releases_the_storage_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The release belongs to the opening, not to the one failure that is translated.
+
+    A storage released only where a refusal is turned into the selection type
+    holds on to everything a fault leaves behind.
+
+    Parameters:
+        tmp_path: Directory standing in for the results root.
+        monkeypatch: Fixture the stand-in storage is installed through.
+    """
+    source = _CountingSource(RuntimeError('the storage layer fell over'))
+    _opening(monkeypatch, source)
+    with pytest.raises(RuntimeError):
+        ResultsFilter(VOLUMES, str(tmp_path), logger=null_logger(), has_offset_error=True)
+    assert source.closes == 1
+
+
+def test_a_refusal_from_the_report_releases_the_storage_as_well(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reporting the answer is the last thing that can refuse, and it refuses the same way.
+
+    An index is asked when its pass finished after it is asked what it holds, so
+    a connection lost between the two questions raises here.  An error filter
+    keeps its storage across the enumeration, so this is the one refusal raised
+    with somewhere to put the storage other than the caller's hands -- and the
+    caller never gets the filter, so putting it there releases nothing.
+
+    Parameters:
+        tmp_path: Directory standing in for the results root.
+        monkeypatch: Fixture the stand-in storage is installed through.
+    """
+    source = _CountingSource()
+    _opening(monkeypatch, source)
+
+    def refusing(results_db_url: str, root: Any) -> str:
+        raise ValueError('this results index could not be read')
+
+    monkeypatch.setattr(results_filter, 'snapshot_finish_time', refusing)
+    with pytest.raises(SelectionError, match='could not be read'):
+        ResultsFilter(
+            VOLUMES,
+            str(tmp_path),
+            logger=null_logger(),
+            results_db_url='sqlite+pysqlite:///nothing-is-opened',
+            has_offset_error=True,
+        )
+    assert source.closes == 1

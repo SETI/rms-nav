@@ -196,11 +196,18 @@ An error filter asks what a document records about its image, and reads it from
 the per-image facts the document yields: the values a results index holds in its
 columns, so a document is narrowed on exactly what a row is narrowed on. An
 offset metadata file that cannot be read, does not parse as JSON, does not parse
-to a JSON object, or parses to a JSON object that is not a navigation document
-yields no such facts, and satisfies no error filter, positive or negative: what
-it records is unknown rather than known to be an outcome. It is still a file
-that exists, so the presence filters count it, ``--has-offset-file`` selects its
-image and ``--has-no-offset-file`` passes it over.
+to a JSON object, or parses to a JSON object that is not a navigation document of
+the current metadata schema yields no such facts, and satisfies no error filter,
+positive or negative: what it records is unknown rather than known to be an
+outcome. A document written to an earlier metadata schema is one of those, so a
+results root holding nothing else answers every error filter, including
+``--has-offset-spice-error``, with no image at all; re-navigating those images
+rewrites their documents to the current schema. Such a file is still a file that
+exists, so the presence filters count it, ``--has-offset-file`` selects its image
+and ``--has-no-offset-file`` passes it over. When a run ends, its log says how
+many of the candidates it read yielded no facts and names one of them with the
+reason, so a selection short for this reason says so rather than only coming back
+smaller than expected.
 
 Two questions cover all six flags, and they are asked at different moments
 because they need different things. Which images the results root holds a
