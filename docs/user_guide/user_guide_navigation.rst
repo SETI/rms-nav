@@ -133,8 +133,9 @@ Environment options
   results tree. Pass ``--results-db none`` to read the tree even when a URL is
   set in the environment or a configuration file; the opt-out is that word
   exactly, in lower case, since anything else is read as the URL of an index.
-  A value that is empty, or nothing but spaces, names no index either: the run
-  reads the results tree and says in its log which setting was left empty.
+  A value that is empty, or nothing but spaces, is refused: it is neither a
+  connection URL nor the way to name no index, so the run stops and names the
+  setting that carries it.
 
 Navigation options
 ^^^^^^^^^^^^^^^^^^

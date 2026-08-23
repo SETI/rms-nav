@@ -218,7 +218,9 @@ output roots, and the results index URL:
   the driver would then open a file named after the query rather than the file
   named in the URL. A ``postgresql+psycopg:`` URL names a server. Leaving it
   unset means "no index", which is the default mode of every program, and the
-  literal value ``none`` says so explicitly, overriding a URL set elsewhere.
+  literal value ``none`` says so explicitly, overriding a URL set elsewhere. A
+  value that is empty, or nothing but spaces, is neither a URL nor that word, and
+  is refused at whichever level carries it rather than read as either.
 
 Each root may be a local path or a URL; ``filecache``-aware consumers handle
 both. ``results_db`` is the exception: it is a database connection URL, not a

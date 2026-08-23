@@ -671,9 +671,9 @@ def build_report(
 def _to_stderr(message: str) -> None:
     """Print one diagnostic where this program's other diagnostics go.
 
-    The resolver that names an index reports a value naming none through
-    whatever sink its caller supplies, and this program's sink is the stream its
-    refusals already print to, so the two arrive in the order they happened.
+    This program's output is terminal text for a person, so a refusal it caught
+    rather than raised belongs on the stream its other refusals print to, and
+    arrives there in the order it happened.
 
     Parameters:
         message: The line to print.
@@ -801,10 +801,10 @@ def main_report(cmdline: list[str] | None = None) -> int:
         cmdline: Argument list; None uses ``sys.argv``.
 
     Returns:
-        Process exit code: 0 on success, and 1 when the index that was named
-        cannot be read, when it holds no completed ingest of anything, when no
-        tree can be resolved to read instead, or when a tree cannot be read
-        whole.
+        Process exit code: 0 on success, and 1 when a level names the index with
+        an empty value, when the index that was named cannot be read, when it
+        holds no completed ingest of anything, when no tree can be resolved to
+        read instead, or when a tree cannot be read whole.
 
     Raises:
         SystemExit: With status 2, from the argument parser, for a command line
@@ -830,7 +830,15 @@ def main_report(cmdline: list[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
-    url = get_results_db_url(arguments, DEFAULT_CONFIG, warn=_to_stderr)
+    # A level that names the index with an empty value refuses the run, and its
+    # message names that level and says what to write.  Printed where this
+    # program's other refusals print, and returned as a status rather than raised,
+    # because a traceback would bury the one line that says what to change.
+    try:
+        url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    except ValueError as exc:
+        _to_stderr(str(exc))
+        return 1
     if url is None:
         return _report_over_a_tree(arguments, parser)
     return _report_from_an_index(url, arguments, parser)

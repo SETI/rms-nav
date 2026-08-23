@@ -1,11 +1,9 @@
 import argparse
 import os
-from collections.abc import Callable
 
 from filecache import FCPath
 
 from .config import Config
-from .logger import MAIN_LOGGER
 from .logging_keys import validate_logging_config
 
 RESULTS_DB_NONE = 'none'
@@ -170,12 +168,7 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace, config: Config) 
     return pds4_bundle_root_str
 
 
-def get_results_db_url(
-    arguments: argparse.Namespace,
-    config: Config,
-    *,
-    warn: Callable[[str], None] | None = None,
-) -> str | None:
+def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | None:
     """Get the results index URL from the arguments, configuration, or environment.
 
     First look in arguments.results_db, then in config.environment.results_db, then in
@@ -190,24 +183,28 @@ def get_results_db_url(
     of it, and it is otherwise matched as the exact string, so a URL that merely
     contains the word is still a URL.
 
-    A value that is empty, or nothing but spaces, names no index either, and is
-    answered the same way rather than passed on: a URL parser handed one refuses
-    with a message that begins with the colon after a name it does not have, and
-    on a machine exporting an empty NAV_RESULTS_DB that refusal would stop every
-    run.  It is not silent, because the level that set it may have meant to set a
-    URL, so the level is named in a warning.  What the warning says stops at what
-    was found and what to write instead: what follows from no index belongs to the
-    caller, which is also why the caller supplies the sink it is written to.
+    A value that is empty, or nothing but spaces, is refused rather than read as
+    naming no index.  ``none`` is the deliberate spelling of "no index" and is
+    honored at all three levels, so a machine that means to run without one
+    already has a way to say so; an empty value is a typo, a script that computed
+    nothing, or a variable half unset.  Answering it with a warning instead would
+    put one line in a batch log and then read a different source than the operator
+    believes for as long as the run lasts, which on a cloud root is hours.
+    Refusing fails every run on a machine configured that way, which is the point:
+    one unset fixes it, and it is found on the first run rather than after a long
+    batch has quietly read the tree.  The refusal names the level that supplied
+    the value and says what to write instead, so it is read once and fixed once.
 
     Parameters:
         arguments: The parsed arguments.
         config: The configuration possibly containing the environment section.
-        warn: Where to report a value that names no index, or None to report it
-            through the main log.  A program whose output is terminal text for a
-            person rather than a run log passes its own printer.
 
     Returns:
         The results index connection URL, or None when no index was named.
+
+    Raises:
+        ValueError: If a level supplied a value that is empty or nothing but
+            spaces.
     """
     # Absence is the ordinary case at both levels -- most programs define no
     # --results-db argument, and most configurations name no index -- so each is
@@ -225,17 +222,11 @@ def get_results_db_url(
         return None
     url = str(results_db_str)
     if not url.strip():
-        message = (
-            '%s is set to an empty value, which names no results index. Write %s to '
-            'name none deliberately, or a connection URL to name one.'
+        raise ValueError(
+            f'{named_by} is set to an empty value, which is neither a connection URL '
+            f'nor the way to name no index. Write {RESULTS_DB_NONE} to name no index, '
+            f'or a connection URL to name one.'
         )
-        if warn is None:
-            # Interpolated by the logger rather than here, so a level that
-            # discards the line does not pay to build it.
-            MAIN_LOGGER.warning(message, named_by, RESULTS_DB_NONE)
-        else:
-            warn(message % (named_by, RESULTS_DB_NONE))
-        return None
     if url.strip() == RESULTS_DB_NONE:
         return None
     return url

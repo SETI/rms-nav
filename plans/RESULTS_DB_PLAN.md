@@ -548,23 +548,32 @@ the same way; the spaces around it are not part of it, and it is otherwise
 matched as the exact string, so a URL that merely contains the word is still a
 URL.
 
-A value that is empty, or nothing but spaces, resolves to no index as well,
-without falling through to the next level -- the level that set it said
-something, and an operator who writes an empty option is not asking for whatever
-the machine exports. It is not silent: the level that carries it is named in a
-warning saying that the value names no index, and how to ask for that on
-purpose. The warning stops there. What follows from having no index is the
-caller's, because one resolver serves the programs that then read the tree --
-`sd_offset` and the report among them -- and `sd_stats_ingest`, which writes an
-index and has nowhere to put its rows without one; a warning that stated either
-meaning would be false for the other, and would arrive one line before their
-own message said the opposite. The caller supplies the sink as well as the
-meaning, so a program whose output is terminal text for a person prints the
-line where its other diagnostics go rather than having a run-log line routed
-into its report. Passing it on instead is what an unset variable
-expanded in a wrapper script produces, and it reaches the URL parser as a name
-that is not there, whose refusal begins with the colon after nothing and stops
-every run on the machine.
+A value that is empty, or nothing but spaces, is refused with a `ValueError`,
+which is the family a bad configuration value raises in here. It does not fall
+through to the next level and it is not answered as "no index": `none` is the
+deliberate spelling of that and is honored at all three levels, so a machine that
+means to run without an index already has a way to say so, and an empty value is
+a typo, a script that computed nothing, or a variable left half unset. A warning
+would be effectively silence in a batch log, and the run would then read a
+different source than the operator believes for as long as it lasts, which on a
+cloud root is hours. Failing every run on a machine configured that way is the
+desired outcome, not a hazard: one `unset` fixes it, and it is found on the first
+run rather than after a long batch has quietly read the tree. The refusal names
+the level that carries the value -- `--results-db`, the `environment.results_db`
+configuration variable, or `NAV_RESULTS_DB` -- and says to write `none` for no
+index or a connection URL for one, which is what makes it a one-line fix.
+
+What the refusal does *not* say is what this run would otherwise have done,
+because one resolver serves the programs that read the tree -- `sd_offset` and
+the report among them -- and `sd_stats_ingest`, which writes an index and has
+nowhere to put its rows without one. Each caller reports the refusal the way it
+reports every other misconfiguration: the dataset layer re-raises it as
+`SelectionError` so `sd_offset` prints it and exits 1; `sd_stats_report` prints
+it on the stream its other refusals print to and returns 1; `sd_stats_ingest`
+logs it fatal and exits 1; the three cloud-task workers return it as
+`unusable_results_db` with the message attached; and `sd_backplanes`, `sd_mosaic`
+and `sd_create_ck` let it out of `main` exactly as they let out an index that
+will not open and a malformed time bound.
 
 The codebase convention for an argument of this kind is that each program
 defines its own, as it does for the results roots: the reprojection family

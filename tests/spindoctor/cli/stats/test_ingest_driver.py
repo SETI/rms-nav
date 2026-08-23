@@ -118,6 +118,40 @@ def test_no_index_is_reported_and_not_raised(
     assert any('NAV_RESULTS_DB' in line for line in written)
 
 
+def test_an_index_named_with_an_empty_value_is_reported_and_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A value carrying no URL stops the ingest before it walks anything.
+
+    Parameters:
+        tmp_path: Directory the tree and the logs live under.
+        monkeypatch: Fixture the argument vector and logger are replaced through.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    status, _written = _run(
+        ['--nav-results-root', str(root), '--results-db', ''], monkeypatch, tmp_path
+    )
+    assert status == 1
+
+
+def test_an_index_named_with_an_empty_value_says_which_level_named_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Naming the level is the difference between a one-line fix and a hunt.
+
+    Parameters:
+        tmp_path: Directory the tree and the logs live under.
+        monkeypatch: Fixture the argument vector and logger are replaced through.
+    """
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    _status, written = _run(
+        ['--nav-results-root', str(root), '--results-db', ''], monkeypatch, tmp_path
+    )
+    assert any('--results-db is set to an empty value' in line for line in written)
+
+
 def test_the_run_log_does_not_carry_a_database_password(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

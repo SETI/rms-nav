@@ -16,7 +16,7 @@ from spindoctor.config import Config, get_nav_results_root, get_results_db_url
 from spindoctor.support.misc import flatten_list
 
 from .dataset import DataSet, ImageFile, ImageFiles
-from .results_filter import RESULTS_FILTER_BATCH_SIZE, ResultsFilter
+from .results_filter import RESULTS_FILTER_BATCH_SIZE, ResultsFilter, SelectionError
 
 # A PDS3 ^IMAGE pointer naming the data file that holds the image object, e.g.
 #   ^IMAGE = ("N1454725799_1.IMG",4)
@@ -637,7 +637,9 @@ class DataSetPDS3(DataSet):
                 arguments carry a ``results_db`` attribute, which is what a
                 program that declares ``--results-db`` supplies; a caller whose
                 arguments carry no such attribute reads the results tree, and
-                so does one whose resolved value is the literal ``none``.
+                so does one whose resolved value is the literal ``none``.  A
+                level that names the index with an empty value raises
+                :class:`spindoctor.dataset.results_filter.SelectionError`.
             choose_random_images: int | None = None,
                 When set, a positive count of images to sample uniformly at
                 random across the selected volumes.  Must be a positive
@@ -768,7 +770,15 @@ class DataSetPDS3(DataSet):
                 # files never becomes index-backed because a variable was
                 # exported for another one, and a caller that names no argument
                 # at all is asking for the tree.
-                results_db_url = get_results_db_url(resolved_arguments, self.config)
+                try:
+                    results_db_url = get_results_db_url(resolved_arguments, self.config)
+                except ValueError as exc:
+                    # A level that named the index with an empty value is a run
+                    # that was configured wrong, and its message already says
+                    # which level and what to write; re-raised in the family a
+                    # program reporting a refused selection catches, so it reads
+                    # as the setting it is rather than as a defect in the walk.
+                    raise SelectionError(str(exc)) from exc
             # ResultsFilter accepts the str | Path | FCPath union and normalizes
             # at its boundary, preserving an existing FCPath's file cache.
             results_filter = ResultsFilter(

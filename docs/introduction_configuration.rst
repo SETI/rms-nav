@@ -169,7 +169,9 @@ Environment Options
   separate ingest step --- as a ``sqlite:`` URL naming a local file or a
   ``postgresql+psycopg:`` URL naming a server. Unset means no index, which is
   the default for every program that offers the option; the literal value
-  ``none`` says so explicitly and overrides a URL set elsewhere. Only a program
+  ``none`` says so explicitly and overrides a URL set elsewhere. A value that is
+  empty, or nothing but spaces, is neither, and is refused where it is spelled.
+  Only a program
   that offers the option reads one: ``environment.results_db`` and
   ``NAV_RESULTS_DB`` do not make a program index-backed that does not declare
   ``--results-db``. See :doc:`/user_guide/user_guide_results_index`.

@@ -214,6 +214,28 @@ def _refused_index_result(
     return _runner(driver)(tmp_path, worker)
 
 
+def _empty_index_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
+) -> tuple[bool, Any]:
+    """Run one task of the named driver with the index named by an empty value.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        monkeypatch: Fixture used to stub the mosaic factory.
+        driver: Which of the two drivers is under test.
+
+    Returns:
+        The driver's ``(retry, result)``.
+    """
+    monkeypatch.setattr(sd_mosaic_cloud_tasks, 'build_ring_mosaic', lambda *a, **k: _StubMosaic())
+    worker = _worker_data(
+        nav_results_root=FCPath(tmp_path).as_posix(),
+        backplane_results_root=FCPath(tmp_path).as_posix(),
+        results_db='',
+    )
+    return _runner(driver)(tmp_path, worker)
+
+
 @pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
 def test_an_index_that_cannot_be_opened_fails_the_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
@@ -257,6 +279,39 @@ def test_the_refusal_names_what_would_have_written_the_index(
     """
     _, result = _refused_index_result(tmp_path, monkeypatch, driver)
     assert 'sd_stats_ingest' in result['status_exception']
+
+
+@pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
+def test_an_index_named_with_an_empty_value_fails_the_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
+) -> None:
+    """A worker on a machine exporting an empty variable refuses every share.
+
+    That is what refusing it is for: the alternative is a whole fan-out reading
+    the tree, or reprojecting a whole batch on uncorrected pointing.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        monkeypatch: Fixture used to stub the mosaic factory.
+        driver: Which of the two drivers is under test.
+    """
+    _, result = _empty_index_result(tmp_path, monkeypatch, driver)
+    assert result['status_error'] == 'unusable_results_db'
+
+
+@pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
+def test_such_a_task_says_which_level_named_the_empty_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver: str
+) -> None:
+    """A worker has no run log, so the level to fix comes back in the result.
+
+    Parameters:
+        tmp_path: Directory the task writes under.
+        monkeypatch: Fixture used to stub the mosaic factory.
+        driver: Which of the two drivers is under test.
+    """
+    _, result = _empty_index_result(tmp_path, monkeypatch, driver)
+    assert '--results-db' in result['status_exception']
 
 
 @pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])

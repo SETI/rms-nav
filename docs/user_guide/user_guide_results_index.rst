@@ -67,6 +67,18 @@ machine that has an index configured:
 
     sd_backplanes ... --results-db none
 
+A value that is empty, or nothing but spaces, is refused at whichever level
+carries it. ``none`` is how a level says "no index" deliberately, so an empty
+value is a typo, a script that computed nothing, or a variable left half unset;
+read as naming no index it would send a whole batch to the results tree, which
+answers a different question and takes hours longer to answer it on a cloud
+root. Every run on a machine configured that way therefore stops, on the first
+run rather than after the batch, and says which of the three levels to fix::
+
+    NAV_RESULTS_DB is set to an empty value, which is neither a connection URL
+    nor the way to name no index. Write none to name no index, or a connection
+    URL to name one.
+
 Two URL forms are supported::
 
     sqlite:////data/nav-offset-results/index.sqlite3

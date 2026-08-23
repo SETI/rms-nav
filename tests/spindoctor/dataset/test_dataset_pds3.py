@@ -10,7 +10,7 @@ from filecache import FCPath
 
 from spindoctor.cli.stats.ingest import ingest_metadata_files
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
-from spindoctor.dataset.results_filter import ResultsFilter
+from spindoctor.dataset.results_filter import ResultsFilter, SelectionError
 from spindoctor.results_index import open_index
 
 
@@ -467,6 +467,56 @@ def test_the_none_sentinel_on_the_command_line_overrides_a_working_url(
     )
 
     assert _yielded_names(groups) == ['N1000000100', 'N1000000101', 'W1000000100']
+
+
+def test_an_empty_results_index_url_refuses_the_selection(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An index named with no value stops the enumeration instead of steering it.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index and the exported variable are set through.
+        tmp_path: Directory the tree and the index are built under.
+    """
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, _url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', '')
+
+    with pytest.raises(SelectionError, match='empty value'):
+        list(
+            ds.yield_image_files_index(
+                volumes=['COISS_2001'],
+                has_offset_file=True,
+                nav_results_root=str(results_root),
+                arguments=_program_arguments(ds, declares_results_db=True),
+            )
+        )
+
+
+def test_an_empty_results_index_url_names_the_level_that_set_it(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The refusal a program prints is the resolver's, so it still says what to unset.
+
+    Parameters:
+        ds: The dataset under test.
+        monkeypatch: Fixture the index and the exported variable are set through.
+        tmp_path: Directory the tree and the index are built under.
+    """
+    _install_two_camera_index(ds, monkeypatch)
+    results_root, _url = _indexed_tree_and_late_document(tmp_path)
+    monkeypatch.setenv('NAV_RESULTS_DB', '')
+
+    with pytest.raises(SelectionError, match='NAV_RESULTS_DB'):
+        list(
+            ds.yield_image_files_index(
+                volumes=['COISS_2001'],
+                has_offset_file=True,
+                nav_results_root=str(results_root),
+                arguments=_program_arguments(ds, declares_results_db=True),
+            )
+        )
 
 
 def test_has_offset_file_keeps_only_navigated_in_order(

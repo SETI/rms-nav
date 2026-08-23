@@ -59,9 +59,9 @@ def _task_pointing_source(
         The source, which the task closes when it is done with it.
 
     Raises:
-        ValueError: If a named index cannot be opened, is not an index, was
-            written by another version of the schema, or has not fully ingested
-            this root.
+        ValueError: If a level names the index with an empty value, or if a named
+            index cannot be opened, is not an index, was written by another
+            version of the schema, or has not fully ingested this root.
     """
     return build_pointing_source(
         nav_results_root, results_db_url=get_results_db_url(arguments, DEFAULT_CONFIG)
@@ -82,10 +82,11 @@ def process_task(
     Returns:
         Tuple of ``(retry, result)``.  ``retry`` is always False.  ``result``
         names the error when the task could not run -- including
-        ``unusable_results_db`` when an index was named that cannot be opened or
-        has not ingested this root, which fails the task rather than falling
-        back to reading files -- and otherwise reports whether the image was
-        processed or skipped.  One task is one image, so the ways that image
+        ``unusable_results_db`` when a level named the index with an empty
+        value, or an index was named that cannot be opened or has not ingested
+        this root, which fails the task rather than falling back to reading
+        files -- and otherwise reports whether the image was processed or
+        skipped.  One task is one image, so the ways that image
         can fail are reported the same way: nothing recorded it is
         ``no_navigation_record`` and a skip, and anything else -- a document
         the ingest refused among them -- is ``backplanes_failed`` and an error.

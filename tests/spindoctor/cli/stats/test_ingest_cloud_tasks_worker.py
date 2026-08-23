@@ -140,6 +140,26 @@ def test_a_worker_with_no_index_url_reports_it() -> None:
     assert result['status_error'] == 'no_results_db'
 
 
+def test_a_worker_given_an_empty_index_url_reports_it_as_unusable() -> None:
+    """An empty value is a setting that was written wrong, not one left out.
+
+    Told apart from the missing setting because the fix differs: one level has
+    to be unset, and the message says which.
+    """
+    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_db='')
+    )
+    assert result['status_error'] == 'unusable_results_db'
+
+
+def test_such_a_worker_says_which_level_named_the_empty_value() -> None:
+    """The share's result is the only account of it, so it carries the level."""
+    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_db='')
+    )
+    assert '--results-db' in result['status_exception']
+
+
 def test_a_worker_told_to_use_no_index_reports_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
