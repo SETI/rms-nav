@@ -194,11 +194,17 @@ def test_the_file_named_is_the_first_one_read_and_not_the_last(
     A run cut short by a limit, and the same run without one, read different
     numbers of documents; named the last, the two would send an operator to
     different files for one root's answer.
+
+    The file that should be named is asserted first, so that the absence of the
+    other one is read off a line that named a file at all rather than off a
+    report the scan never made.
     """
     earlier = [EARLIER_SCHEMA, SECOND_EARLIER_SCHEMA]
     root = _write_root(tmp_path, earlier)
     _scan(root, earlier)
-    assert f'{SECOND_EARLIER_SCHEMA}_metadata.json' not in capsys.readouterr().out
+    reported = capsys.readouterr().out
+    assert f'{EARLIER_SCHEMA}_metadata.json' in reported
+    assert f'{SECOND_EARLIER_SCHEMA}_metadata.json' not in reported
 
 
 def test_the_scan_names_one_of_the_files_it_read_no_record_out_of(

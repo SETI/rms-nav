@@ -656,10 +656,6 @@ def test_every_kind_of_refused_file_is_recorded(
     came out of, whatever went wrong with it and wherever under the root it sits
     -- including one above every subtree, which no enumeration ever asks about
     but which a pass still meets and still has to remember refusing.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
     """
     root = tmp_path / 'results'
     _tree_holding_one_of_each_refusal(root)

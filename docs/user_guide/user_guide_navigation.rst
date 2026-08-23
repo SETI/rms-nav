@@ -240,12 +240,12 @@ tells those apart: a single request covering all of them would end at the first
 volume it could not read, and every volume after it would go unasked.
 
 Given ``--results-db``, whichever of the two questions the flags call for is
-answered from the index's rows, and the results tree is not read at all. A results root the index holds no completed
-ingest of is refused rather than answered, because absence of a row would
-otherwise read as "this image was never navigated". The paragraphs below are the
-answers an index is known to give differently from the tree; each of them is a
-property of what an ingest pass could read and record rather than of the
-storage.
+answered from the index's rows, and the results tree is not read at all. A
+results root for which the index has no completed ingest is refused rather than
+answered, because absence of a row would otherwise read as "this image was never
+navigated". The paragraphs below are the answers an index is known to give
+differently from the tree; each of them is a property of what an ingest pass
+could read and record rather than of the storage.
 
 **A file the index has no row at all for reads as absent**, and
 ``--has-no-offset-file`` reads absence as "this image was never navigated", so

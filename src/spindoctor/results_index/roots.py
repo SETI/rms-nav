@@ -170,8 +170,10 @@ def snapshot_finish_time(url: str, root: str | FCPath | Path) -> str | None:
             separator names the root the ingest recorded.
 
     Returns:
-        The finish time the newest pass over that root stamped, and None when
-        the root has no run row at all or its newest run never finished.
+        The finish time the newest pass over that root stamped.  A root with
+        no run row at all, and one whose newest run never finished, are both
+        roots the index holds no completed ingest of: they are refused rather
+        than answered about, so no caller here reads a time of None.
 
     Raises:
         ValueError: If the index cannot be opened, is stamped with another

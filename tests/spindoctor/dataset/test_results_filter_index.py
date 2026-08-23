@@ -12,6 +12,7 @@ each with a test of its own, and what the filter reports about the pass that
 filled the index.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -563,34 +564,67 @@ def test_a_document_the_database_would_not_store_leaves_the_root_unreadable(
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _EngineBuilt:
+    """One engine built to answer a filter, and what became of the pool it started with.
+
+    Parameters:
+        engine: The engine, as answering the filter left it.
+        pool: The pool it held when it was built.
+        checked_out_at_disposal: How many connections were still out of that pool
+            at the moment disposal was asked for, and None if it was never
+            disposed of.  Disposal installs a fresh pool and leaves whatever is
+            checked out of the old one checked out, so this is the last moment at
+            which a connection the answer kept is visible at all.
+    """
+
+    engine: sqlalchemy.Engine
+    pool: QueuePool
+    checked_out_at_disposal: int | None = None
+
+
 def _engines_built_answering(
     tree: Path, indexed: str, monkeypatch: pytest.MonkeyPatch
-) -> list[tuple[sqlalchemy.Engine, QueuePool]]:
-    """Answer a filter, recording every engine built for it and the pool it started with.
+) -> list[_EngineBuilt]:
+    """Answer a filter, recording every engine built for it and how the answer left it.
 
     Parameters:
         tree: The results root under test.
         indexed: The index answering the filter.
-        monkeypatch: Fixture the recording hook is installed through.
+        monkeypatch: Fixture the recording hooks are installed through.
 
     Returns:
-        One pair per engine: the engine, and the pool it held when it was built.
+        One record per engine, in the order they were built.  There is always at
+        least one, since a filter answered from an index opens one.
     """
-    built: list[tuple[sqlalchemy.Engine, QueuePool]] = []
+    built: list[_EngineBuilt] = []
     create_engine = sqlalchemy.create_engine
+    disposing = sqlalchemy.Engine.dispose
 
     def recording(*args: Any, **kwargs: Any) -> sqlalchemy.Engine:
         made = create_engine(*args, **kwargs)
         # A file-backed SQLite engine pools its connections, and only a pooling
         # implementation can report what it is holding.
         assert isinstance(made.pool, QueuePool)
-        built.append((made, made.pool))
+        built.append(_EngineBuilt(made, made.pool))
         return made
 
+    def counting(engine: sqlalchemy.Engine, *args: Any, **kwargs: Any) -> None:
+        # What is checked out has to be counted before the pool goes, and
+        # disposal is where it goes: it installs a fresh one and leaves whatever
+        # was checked out of the old one checked out, so afterwards neither pool
+        # reports a connection the answer kept.
+        for record in built:
+            if record.engine is engine:
+                record.checked_out_at_disposal = record.pool.checkedout()
+        disposing(engine, *args, **kwargs)
+
     monkeypatch.setattr(sqlalchemy, 'create_engine', recording)
+    monkeypatch.setattr(sqlalchemy.Engine, 'dispose', counting)
     ResultsFilter(
         VOLUMES, str(tree), logger=null_logger(), results_db_url=indexed, has_offset_file=True
     )
+    assert built != []
     return built
 
 
@@ -607,12 +641,12 @@ def test_answering_the_filter_leaves_no_index_open(
     Parameters:
         tree: The results root under test.
         indexed: The index answering the filter.
-        monkeypatch: Fixture the recording hook is installed through.
+        monkeypatch: Fixture the recording hooks are installed through.
     """
     left_open = [
-        engine
-        for engine, pool in _engines_built_answering(tree, indexed, monkeypatch)
-        if engine.pool is pool
+        record.engine
+        for record in _engines_built_answering(tree, indexed, monkeypatch)
+        if record.engine.pool is record.pool
     ]
     assert left_open == []
 
@@ -622,12 +656,18 @@ def test_answering_the_filter_returns_every_connection(
 ) -> None:
     """A stream holding a cursor has to release it, or a run leaks one per query.
 
+    The count is read at the moment disposal is asked for, which is the last
+    moment it says anything: disposal replaces the pool without reclaiming what
+    is checked out of it, so afterwards neither the old pool nor the new one
+    reports the connection the answer kept.
+
     Parameters:
         tree: The results root under test.
         indexed: The index answering the filter.
-        monkeypatch: Fixture the recording hook is installed through.
+        monkeypatch: Fixture the recording hooks are installed through.
     """
-    held = [
-        pool.checkedin() for _engine, pool in _engines_built_answering(tree, indexed, monkeypatch)
+    checked_out = [
+        record.checked_out_at_disposal
+        for record in _engines_built_answering(tree, indexed, monkeypatch)
     ]
-    assert held == [0] * len(held)
+    assert checked_out == [0] * len(checked_out)

@@ -501,7 +501,7 @@ def test_a_listing_that_refuses_releases_the_storage_it_was_read_through(
     """
     source = _CountingSource(ValueError('the index stopped answering'))
     _opening(monkeypatch, source)
-    with pytest.raises(SelectionError):
+    with pytest.raises(SelectionError, match='stopped answering'):
         ResultsFilter(VOLUMES, str(tmp_path), logger=null_logger(), has_offset_error=True)
     assert source.closes == 1
 
@@ -520,7 +520,7 @@ def test_a_listing_that_fails_outright_releases_the_storage_too(
     """
     source = _CountingSource(RuntimeError('the storage layer fell over'))
     _opening(monkeypatch, source)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match='fell over'):
         ResultsFilter(VOLUMES, str(tmp_path), logger=null_logger(), has_offset_error=True)
     assert source.closes == 1
 

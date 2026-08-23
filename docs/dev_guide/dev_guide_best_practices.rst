@@ -47,10 +47,9 @@ Imports
     locating one is as far as the module gets without it. The run banner of
     every program passes through that module and most runs name no index, so a
     top-level import would put the database layer behind every one of them.
-    ``test_masking_a_line_with_no_url_imports_no_database_layer``, in
-    ``tests/spindoctor/support/test_command_line.py``, asserts in a subprocess
-    that masking a command line carrying no URL imports no ``sqlalchemy``
-    module.
+    A subprocess test in ``tests/spindoctor/support/test_command_line.py``
+    asserts that masking a command line carrying no URL imports no
+    ``sqlalchemy`` module.
 
 Linting and typing
 ------------------

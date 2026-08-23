@@ -983,13 +983,14 @@ it was read. It is what lets a second pass skip it. It is deliberately not an
 ``images`` exists to answer.
 
 ``reason`` names one of two things. ``unreadable``, ``not valid JSON`` and ``not
-a JSON object`` are a file no JSON object came out of. A reason beginning ``not
-a current-schema navigation document`` is a JSON object this schema will not
-take, and names in parentheses which field said so. Every one of the reasons is
-the reason a reader of the results tree gives for the same file, so the two
-never describe one file's fault two different ways, and a file refused for any
-of them yields no per-image facts to either storage: it counts as a file that
-exists, for the presence filters and for nothing else.
+a JSON object`` each name a file from which no JSON object was produced. A
+reason beginning ``not a current-schema navigation document`` names a JSON
+object that was produced and that this schema will not take, and says in
+parentheses which field said so. Every one of the reasons is the reason a reader
+of the results tree gives for the same file, so the two never describe one
+file's fault two different ways, and a file refused for any of them yields no
+per-image facts to either storage: it counts as a file that exists, for the
+presence filters and for nothing else.
 
 ``schema_meta`` holds a single row stamping the database with the column-set
 version that created it. An index whose stamp is not the version this build
