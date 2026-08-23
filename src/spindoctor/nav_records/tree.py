@@ -280,12 +280,13 @@ class TreeRecordSource:
                 one mission.  Also if the selection names a root this source
                 does not hold, or names stubs without resolving to exactly one
                 root, since a stub is a key under a root.
-            UnlistableDirectoryError: If a directory under a selected root could
-                not be listed, or :class:`UnlistableRootError` if a selected
-                root could not be listed at all.  Raised from the walk, so it
-                reaches the caller as it reads.  A listing of named stubs is
-                answered about files rather than about a whole root, so a
-                directory of the tree that is not there holds none of them
+            ~spindoctor.nav_records.UnlistableDirectoryError: If a directory
+                under a selected root could not be listed, or
+                :class:`~spindoctor.nav_records.UnlistableRootError` if a
+                selected root could not be listed at all.  Raised from the
+                walk, so it reaches the caller as it reads.  A listing of named
+                stubs is answered about files rather than about a whole root,
+                so a directory of the tree that is not there holds none of them
                 instead of ending the listing, which is the answer a check of
                 one of those files gives.
         """
@@ -324,11 +325,12 @@ class TreeRecordSource:
             ValueError: If the selection names stubs without resolving to
                 exactly one root, since a stub is a key under a root; or if it
                 names a root this source does not hold.
-            UnlistableDirectoryError: If a directory under a selected root could
-                not be listed, or :class:`UnlistableRootError` if a selected
-                root could not be listed at all.  Raised from the walk as the
-                caller reads, and not at all when the selection names its own
-                stubs, which lists nothing.
+            ~spindoctor.nav_records.UnlistableDirectoryError: If a directory
+                under a selected root could not be listed, or
+                :class:`~spindoctor.nav_records.UnlistableRootError` if a
+                selected root could not be listed at all.  Raised from the walk
+                as the caller reads, and not at all when the selection names
+                its own stubs, which lists nothing.
         """
         return self._selected_records(self._found(selection), selection)
 
@@ -366,9 +368,10 @@ class TreeRecordSource:
         Raises:
             ValueError: If the selection names stubs without resolving to
                 exactly one root, or names a root this source does not hold.
-            UnlistableDirectoryError: If a directory under a selected root could
-                not be listed, or :class:`UnlistableRootError` if a selected
-                root could not be listed at all.
+            ~spindoctor.nav_records.UnlistableDirectoryError: If a directory
+                under a selected root could not be listed, or
+                :class:`~spindoctor.nav_records.UnlistableRootError` if a
+                selected root could not be listed at all.
         """
         return self._selected_facts(self._found(selection), selection)
 

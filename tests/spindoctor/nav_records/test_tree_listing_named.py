@@ -396,6 +396,10 @@ def test_a_remote_walk_covers_only_the_volumes_the_stubs_lie_in(
 ) -> None:
     """A walk of the whole root to answer about one volume is a walk of the archive.
 
+    The volume the stub does lie in is asserted first, so that the absence of
+    the other one is read off a recording that spells a walked directory the way
+    this one looks for it.
+
     Parameters:
         remote_tree: The remote root and the directory backing it.
         quiet_logger: Logger the source reports through.
@@ -404,6 +408,7 @@ def test_a_remote_walk_covers_only_the_volumes_the_stubs_lie_in(
     source = remote_source(remote_tree, quiet_logger)
     listed = count_listings(monkeypatch)
     list(source.listing(Selection(stubs=(FIRST_STUB,))))
+    assert f'{remote_tree.url}/VOL1' in listed
     assert f'{remote_tree.url}/VOL2' not in listed
 
 

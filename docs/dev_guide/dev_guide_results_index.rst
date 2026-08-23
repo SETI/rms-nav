@@ -119,6 +119,124 @@ what it builds the index out of: it discovers them through the seam's listing
 and keeps a reading loop of its own, which owns the refusal vocabulary the
 index stores.
 
+.. mermaid::
+
+   classDiagram
+      direction LR
+
+      class RecordSource {
+          <<protocol>>
+          +record(stub) NavRecord
+          +records(selection) Iterator[NavRecord | UnreadableFile]
+          +facts(selection) Iterator[ImageFacts | UnreadableFile]
+          +listing(selection) Iterator[ListedRecord]
+          +describe() str
+          +close()
+          +\_\_enter\_\_() RecordSource
+          +\_\_exit\_\_(exc_type, exc, traceback)
+      }
+
+      class TreeRecordSource {
+          +\_\_init\_\_(roots, *, logger=None)
+          +roots: tuple[str, ...]
+      }
+
+      class IndexRecordSource {
+          +\_\_init\_\_(engine, roots, url, columns)
+          +roots: tuple[str, ...]
+      }
+
+      class ResultsFilter {
+          +needs_batch_filtering: bool
+          +passes(results_path_stub) bool
+          +filter_batch(image_files) list[ImageFile]
+          +close()
+      }
+
+      class Selection {
+          <<frozen dataclass>>
+          +roots: tuple[str, ...]
+          +subtrees: tuple[str, ...]
+          +stubs: tuple[str, ...]
+          +instrument: str | None
+          +start_et: float | None
+          +stop_et: float | None
+          +bounded_in_time: bool
+      }
+
+      class NavRecord {
+          <<frozen dataclass>>
+          +path: FCPath
+          +stub: str
+          +metadata: dict[str, Any]
+      }
+
+      class ImageFacts {
+          <<frozen dataclass>>
+          +image: dict[str, Any]
+          +techniques: list[dict[str, Any]]
+          +feature_sources: list[dict[str, Any]]
+      }
+
+      class ListedRecord {
+          <<frozen dataclass>>
+          +stub: str
+          +path: FCPath
+          +mtime_ns: int | None
+          +size_bytes: int | None
+          +has_metrics: bool
+      }
+
+      class UnreadableFile {
+          <<frozen dataclass>>
+          +path: FCPath
+          +stub: str
+          +reason: str
+      }
+
+      RecordSource <|.. TreeRecordSource : reads documents
+      RecordSource <|.. IndexRecordSource : reads rows
+
+      ResultsFilter ..> RecordSource : lists once, then asks per batch
+      ResultsFilter ..> Selection : writes
+
+      RecordSource ..> Selection : asked in terms of
+      RecordSource ..> NavRecord : record(), records()
+      RecordSource ..> ImageFacts : facts()
+      RecordSource ..> ListedRecord : listing()
+      RecordSource ..> UnreadableFile : records(), facts()
+
+:class:`~spindoctor.nav_records.RecordSource` is the whole of the contract: the
+four questions, the two calls that hold a run together rather than answering
+anything, and the context-manager pair, which is on the protocol rather than
+left to each implementation because a stream may hold a connection that a caller
+walking away mid-loop must still release.
+:class:`~spindoctor.nav_records.TreeRecordSource` answers it out of the
+documents and is built from nothing but the roots and a logger.
+:class:`~spindoctor.results_index.IndexRecordSource` answers it out of the rows
+and is built from an open engine, the index URL its messages name, and the
+columns a consumer's records are rebuilt from --- the one asymmetry between the
+two that a consumer has to know about, taken up under *The rules that hold at
+the seam* below. Both expose the roots they hold, because a stub is a key under
+one of them and a source holding more than one root cannot answer for a bare
+stub.
+
+The values on either side of the seam are the same values.
+:class:`~spindoctor.nav_records.Selection` is what every question is asked in
+terms of. :class:`~spindoctor.nav_records.NavRecord`,
+:class:`~spindoctor.nav_records.ImageFacts` and
+:class:`~spindoctor.nav_records.ListedRecord` are what the three streaming
+questions yield, and :class:`~spindoctor.nav_records.UnreadableFile` is what
+arrives in a stream in place of a record or a fact set when a file yielded
+neither. Each is taken in turn in the sections below.
+
+:class:`~spindoctor.dataset.results_filter.ResultsFilter` stands here for every
+consumer, and is drawn because it is the one that asks at two different moments:
+it writes a :class:`~spindoctor.nav_records.Selection` naming subtrees when it is
+built and one naming stubs for each batch of candidates afterwards. Which of its
+flags is answered at which of those two moments, and what each costs, is
+*What each flag costs* below.
+
 Four questions, because the programs ask four things
 ----------------------------------------------------
 
@@ -349,7 +467,7 @@ Which index, and when a results root is read at all
 Two different things are called an index in this codebase, and an enumeration
 consults them for different questions.
 
-The **dataset index file** is the archive's own catalogue of a volume, the
+The **dataset index file** is the archive's own catalog of a volume, the
 ``<VOL>_index.tab`` under ``metadata/``. It answers *what images exist*, it is
 read once per selected volume, and every enumeration reads it. There is no mode
 that walks the holdings tree instead: ``--img-name`` and ``--image-filespec-csv``
@@ -391,7 +509,7 @@ program still resolves the URL through the command line, then the
 ``environment.results_db`` configuration variable, then ``NAV_RESULTS_DB``. A
 program that declares no such option has no attribute to find, so an exported
 variable cannot quietly change what its selection means. ``--results-db none``
-is the deliberate spelling of "no index", honoured at every level, so a machine
+is the deliberate spelling of "no index", honored at every level, so a machine
 that exports one can still be told to read the tree.
 
 What each flag costs
@@ -400,16 +518,25 @@ What each flag costs
 A filter asks the seam once when it is built and once per batch of candidates
 the enumeration offers.
 
-``--has-offset-file`` and the four error filters are settled at construction by
-a :meth:`~spindoctor.nav_records.source.RecordSource.listing` of the selected
+``--has-offset-file`` is settled outright at construction, by a
+:meth:`~spindoctor.nav_records.source.RecordSource.listing` of the selected
 subtrees. A listing opens no document: it is a directory enumeration, so the
 cost is one listing call per directory rather than one read per image.
 :meth:`~spindoctor.dataset.results_filter.ResultsFilter.passes` is then a set
 lookup, which is what lets an enumeration offering a million rows reject most
-of them without constructing anything. The error filters go on to ask
-:meth:`~spindoctor.nav_records.source.RecordSource.facts` for each batch of
-candidates, and that does read documents --- but only the candidates, never
-every document under the volume.
+of them without constructing anything.
+
+The four error filters are settled in two stages, because each of them asks what
+a document records and so requires one to exist. The construction listing
+settles that half and no more: an error filter is folded into the same presence
+question, so ``passes`` rejects an image the results root holds no document for
+and no later stage ever names it. What the document *records* is settled per
+batch, by :meth:`~spindoctor.nav_records.source.RecordSource.facts` over the
+candidates
+:meth:`~spindoctor.dataset.results_filter.ResultsFilter.filter_batch` is handed.
+That call does read documents --- but only the candidates the other selection
+constraints kept, never every document under the volume, and never one for an
+image the listing has already excluded.
 
 ``--has-no-offset-file`` is asked about the candidates instead. Its answer set
 is one it only ever rejects from, so listing a volume to build it would be work

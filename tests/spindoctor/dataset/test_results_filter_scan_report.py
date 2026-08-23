@@ -15,6 +15,7 @@ import pytest
 from tests.spindoctor.dataset.conftest import (
     CANDIDATES,
     NO_RESULT,
+    SUCCESS,
     VOLUMES,
     candidate_files,
     index_of_two_roots,
@@ -146,6 +147,28 @@ def test_a_closed_scan_says_how_many_of_them_were_already_navigated(
     _scanned(root, results_db_url=None, has_no_offset_file=True)
     found = len(CANDIDATES) - 1
     assert f'{found} of which had a navigation document' in capsys.readouterr().out
+
+
+def test_a_scan_counts_one_document_once_for_each_image_that_has_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both halves of the line count images, so they can be read against each other.
+
+    A batch naming one stub twice holds two candidates and one document, and a
+    line counting the documents would report fewer images as already navigated
+    than were asked about.
+
+    Parameters:
+        tmp_path: Directory the tree is written under.
+        capsys: Fixture the logger's own stream is read back through.
+    """
+    root = _tree(tmp_path)
+    documented = [image for image in candidate_files(root) if image.results_path_stub == SUCCESS]
+    with ResultsFilter(
+        VOLUMES, str(root), logger=reporting_logger(), has_no_offset_file=True
+    ) as results_filter:
+        results_filter.filter_batch(documented * 2)
+    assert '2 of which had a navigation document' in capsys.readouterr().out
 
 
 def test_a_scan_that_asked_about_nothing_says_nothing(

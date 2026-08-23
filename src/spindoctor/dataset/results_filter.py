@@ -638,7 +638,12 @@ class ResultsFilter:
         """
         documented = self._documented_of(tuple(image.results_path_stub for image in image_files))
         self._candidates += len(image_files)
-        self._documented += len(documented)
+        # One count per image rather than one per document, because the two
+        # halves of the reported line are counted against each other: a batch
+        # offering one stub twice holds two candidates and one document, and a
+        # count of the documents would say that fewer of them were already
+        # navigated than were.
+        self._documented += sum(1 for image in image_files if image.results_path_stub in documented)
         return [image for image in image_files if image.results_path_stub not in documented]
 
     def _documented_of(self, stubs: Sequence[str]) -> frozenset[str]:
