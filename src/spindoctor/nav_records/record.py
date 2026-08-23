@@ -92,6 +92,13 @@ class ListedRecord:
     last read, so a listing that reports neither cannot answer that question and
     every document under it has to be read again.
 
+    An entry can therefore arrive with neither, and one that answered a
+    selection of named stubs by checking those files does: a check says whether
+    the file is there and reports nothing else about it.  Both are None in that
+    case, and :attr:`has_metrics` is how a consumer asks -- a stand-in value for
+    either of them would be read as the file's own and would make a changed
+    document look unchanged.
+
     Parameters:
         stub: The document's results path stub -- its path under the root with
             the document suffix removed.

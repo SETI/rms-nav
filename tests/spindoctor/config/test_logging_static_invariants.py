@@ -88,7 +88,7 @@ methods above, which are matched on every object.
 """
 
 _MAY_WRITE_THROUGH_A_LENT_LOGGER = {
-    'nav_records/tree.py': (('_walk_from', 'info'),),
+    'nav_records/walk.py': (('walk_from', 'info'),),
 }
 """Every place either data-access layer writes through a logger it was lent.
 
@@ -221,12 +221,12 @@ def test_a_module_exempted_twice_is_read_in_the_order_the_scan_reports(
     """
     monkeypatch.setitem(
         _MAY_WRITE_THROUGH_A_LENT_LOGGER,
-        'nav_records/tree.py',
-        (('_walk_from', 'warn'), ('_walk_from', 'info')),
+        'nav_records/walk.py',
+        (('walk_from', 'warn'), ('walk_from', 'info')),
     )
-    assert _exempt_sites(_SRC / 'nav_records' / 'tree.py') == [
-        ('_walk_from', 'info'),
-        ('_walk_from', 'warn'),
+    assert _exempt_sites(_SRC / 'nav_records' / 'walk.py') == [
+        ('walk_from', 'info'),
+        ('walk_from', 'warn'),
     ]
 
 

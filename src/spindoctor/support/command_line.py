@@ -11,9 +11,7 @@ it rather than by remembering to mask at its own call site.
 
 The masking rule itself belongs to the results index, which is where a
 connection URL is parsed, and is imported only when a command line actually
-carries one.  That keeps SQLAlchemy off the navigation critical path, which is
-the same reason the selection filters import their index-backed implementation
-inside the branch that has a URL.
+carries one, since a line carrying none has nothing for it to decide.
 """
 
 from collections.abc import Sequence

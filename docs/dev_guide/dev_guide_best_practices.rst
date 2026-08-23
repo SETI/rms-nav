@@ -34,28 +34,22 @@ Imports
   of a module that only some callers reach: the GUI toolkit, the plotting and
   imaging libraries, the SPICE and array libraries a single function needs, and
   each instrument's ``oops`` host module.
-* Three of them protect a guarantee beyond their own module:
+* Two of them protect a guarantee beyond their own module:
 
   * PyQt6, imported where a dialog is opened rather than at the top of the
     module that opens it -- the manual navigation technique in
     ``spindoctor/nav_technique/nav_technique_manual.py`` is the one on the
     navigation path -- so that a headless run never imports a GUI toolkit.
-  * :mod:`spindoctor.results_index.selection` in
-    ``spindoctor/dataset/results_filter.py``, imported inside the branch that
-    was given a results-index URL. Every navigation run imports
-    :mod:`spindoctor.dataset`, and most name no index, so the top-level import
-    would put SQLAlchemy on the navigation critical path for all of them. A
-    test asserts in a subprocess that importing :mod:`spindoctor.dataset`
-    imports no ``sqlalchemy`` module.
   * :func:`spindoctor.results_index.masked_url` in
     ``spindoctor/support/command_line.py``, imported only when the command line
     being logged carries a value for a connection-URL option. Whether such a
     value holds a credential is what the masking rule itself decides, so
-    locating one is as far as the module gets without it. The run banner of every
-    program passes through that module, and :mod:`spindoctor.support.misc` is
-    itself reached from :mod:`spindoctor.dataset`, so a top-level import there
-    would defeat the guarantee above as well. The same subprocess assertion
-    covers it.
+    locating one is as far as the module gets without it. The run banner of
+    every program passes through that module and most runs name no index, so a
+    top-level import would put the database layer behind every one of them.
+    A subprocess test in ``tests/spindoctor/support/test_command_line.py``
+    asserts that masking a command line carrying no URL imports no
+    :mod:`sqlalchemy` module.
 
 Linting and typing
 ------------------

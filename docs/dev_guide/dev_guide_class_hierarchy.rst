@@ -14,7 +14,7 @@ narrative below the diagram describes each group in turn.
       direction RL
 
       class NavBase {
-          +__init__(*, config=None, **kwargs)
+          +\_\_init\_\_(*, config=None, **kwargs)
           +config: Config
           +logger: PdsLogger
       }
@@ -44,7 +44,7 @@ narrative below the diagram describes each group in turn.
 
       class NavModel {
           <<abstract>>
-          +__init__(name, obs, *, config=None)
+          +\_\_init\_\_(name, obs, *, config=None)
           +name
           +obs
           +metadata
@@ -132,7 +132,7 @@ narrative below the diagram describes each group in turn.
       class NavTechniqueManual
 
       class NavOrchestrator {
-          +__init__(models, *, config=None, only_models='*', only_techniques='*')
+          +\_\_init\_\_(models, *, config=None, only_models='*', only_techniques='*')
           +navigate(obs) NavResult
       }
 

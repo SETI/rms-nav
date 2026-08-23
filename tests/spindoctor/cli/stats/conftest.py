@@ -59,7 +59,6 @@ from spindoctor.nav_records import (
 from spindoctor.results_index import (
     INGEST_RUNS,
     IndexRecordSource,
-    normalize_root_url,
     open_index,
 )
 
@@ -280,36 +279,6 @@ def write_refusal_matching(root: Path, stub: str, document: Path) -> Path:
     path.write_text(json.dumps({_NOT_A_NAVIGATION_DOCUMENT: padding}), encoding='utf-8')
     os.utime(path, ns=(metrics.st_mtime_ns, metrics.st_mtime_ns))
     return path
-
-
-REFUSAL_REPORT_LEAD = 'Documents under '
-"""How the standing-refusal line opens, for picking it out of a log."""
-
-
-def refusal_report(root: Path | str, refused: int) -> str:
-    """Return the line a pass writes about the refusals its root's index holds.
-
-    Written once here because three modules read the same line: it is what an
-    operator is told about the gap between an error filter answered from the
-    index and the same filter answered from the tree, and the number in it is
-    the root's own standing total of the refusals that make that gap, rather
-    than what any one pass refused.
-
-    Parameters:
-        root: The results root the pass covered.
-        refused: How many such refusals the index holds under it.
-
-    Returns:
-        The line, spelled as the pass writes it.
-    """
-    return (
-        f'{REFUSAL_REPORT_LEAD}{normalize_root_url(root)} an error filter reads from the '
-        f'results tree and not from this index: {refused}, whichever pass recorded them. '
-        f'Each is a JSON object the ingest refused, so this index records no status for it '
-        f'and no error filter answered here selects its image. The count is the whole root, '
-        f'so it bounds rather than measures how short a selection over some of its subtrees '
-        f'comes.'
-    )
 
 
 def recorded_lines(

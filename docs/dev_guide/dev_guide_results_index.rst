@@ -45,15 +45,14 @@ operator runs rather than an API a consumer calls.
        and the opener that checks it. Root normalization is a rule about
        identity rather than about a database, so it lives in
        :mod:`spindoctor.nav_records` and is re-exported from here.
-   * - :mod:`spindoctor.results_index.selection`
-     - The one query answering the results-based selection filters.
    * - :mod:`spindoctor.results_index.rebuild`
      - The one correspondence between a row's columns and a record's fields, and
        the rebuild that reads it.
    * - :mod:`spindoctor.results_index.record_source`
      - The record seam's index-backed half, and
        :func:`~spindoctor.results_index.open_record_source`, which decides
-       which half a run gets.
+       which half a run gets --- including the half that answers an
+       enumeration's selection filters.
    * - :mod:`spindoctor.results_index.drop`
      - Reading what a database holds, and removing the index's own tables.
    * - :mod:`spindoctor.nav_records`
@@ -65,6 +64,12 @@ operator runs rather than an API a consumer calls.
        one document into the per-image shape both storages answer in. Reading a
        document needs no database, so every reader shares it whether or not its
        program can read an index.
+   * - :mod:`spindoctor.dataset.results_filter`
+     - Not part of this package either: the six results-based selection
+       filters, answered through the seam. A listing of the selected subtrees
+       settles which images have a document; the per-image facts of a batch of
+       candidates settle what each one records. One implementation therefore
+       serves both storages.
    * - ``spindoctor.cli.stats.ingest``
      - The pass itself: walk, select, read, write, prune, complete --- in one
        process or divided into queue tasks.
@@ -114,6 +119,124 @@ what it builds the index out of: it discovers them through the seam's listing
 and keeps a reading loop of its own, which owns the refusal vocabulary the
 index stores.
 
+.. mermaid::
+
+   classDiagram
+      direction LR
+
+      class RecordSource {
+          <<protocol>>
+          +record(stub) NavRecord
+          +records(selection) Iterator[NavRecord | UnreadableFile]
+          +facts(selection) Iterator[ImageFacts | UnreadableFile]
+          +listing(selection) Iterator[ListedRecord]
+          +describe() str
+          +close()
+          +\_\_enter\_\_() RecordSource
+          +\_\_exit\_\_(exc_type, exc, traceback)
+      }
+
+      class TreeRecordSource {
+          +\_\_init\_\_(roots, *, logger=None)
+          +roots: tuple[str, ...]
+      }
+
+      class IndexRecordSource {
+          +\_\_init\_\_(engine, roots, url, columns)
+          +roots: tuple[str, ...]
+      }
+
+      class ResultsFilter {
+          +needs_batch_filtering: bool
+          +passes(results_path_stub) bool
+          +filter_batch(image_files) list[ImageFile]
+          +close()
+      }
+
+      class Selection {
+          <<frozen dataclass>>
+          +roots: tuple[str, ...]
+          +subtrees: tuple[str, ...]
+          +stubs: tuple[str, ...]
+          +instrument: str | None
+          +start_et: float | None
+          +stop_et: float | None
+          +bounded_in_time: bool
+      }
+
+      class NavRecord {
+          <<frozen dataclass>>
+          +path: FCPath
+          +stub: str
+          +metadata: dict[str, Any]
+      }
+
+      class ImageFacts {
+          <<frozen dataclass>>
+          +image: dict[str, Any]
+          +techniques: list[dict[str, Any]]
+          +feature_sources: list[dict[str, Any]]
+      }
+
+      class ListedRecord {
+          <<frozen dataclass>>
+          +stub: str
+          +path: FCPath
+          +mtime_ns: int | None
+          +size_bytes: int | None
+          +has_metrics: bool
+      }
+
+      class UnreadableFile {
+          <<frozen dataclass>>
+          +path: FCPath
+          +stub: str
+          +reason: str
+      }
+
+      RecordSource <|.. TreeRecordSource : reads documents
+      RecordSource <|.. IndexRecordSource : reads rows
+
+      ResultsFilter ..> RecordSource : lists once, then asks per batch
+      ResultsFilter ..> Selection : writes
+
+      RecordSource ..> Selection : asked in terms of
+      RecordSource ..> NavRecord : record(), records()
+      RecordSource ..> ImageFacts : facts()
+      RecordSource ..> ListedRecord : listing()
+      RecordSource ..> UnreadableFile : records(), facts()
+
+:class:`~spindoctor.nav_records.RecordSource` is the whole of the contract: the
+four questions, the two calls that hold a run together rather than answering
+anything, and the context-manager pair, which is on the protocol rather than
+left to each implementation because a stream may hold a connection that a caller
+walking away mid-loop must still release.
+:class:`~spindoctor.nav_records.TreeRecordSource` answers it out of the
+documents and is built from nothing but the roots and a logger.
+:class:`~spindoctor.results_index.IndexRecordSource` answers it out of the rows
+and is built from an open engine, the index URL its messages name, and the
+columns a consumer's records are rebuilt from --- the one asymmetry between the
+two that a consumer has to know about, taken up under *The rules that hold at
+the seam* below. Both expose the roots they hold, because a stub is a key under
+one of them and a source holding more than one root cannot answer for a bare
+stub.
+
+The values on either side of the seam are the same values.
+:class:`~spindoctor.nav_records.Selection` is what every question is asked in
+terms of. :class:`~spindoctor.nav_records.NavRecord`,
+:class:`~spindoctor.nav_records.ImageFacts` and
+:class:`~spindoctor.nav_records.ListedRecord` are what the three streaming
+questions yield, and :class:`~spindoctor.nav_records.UnreadableFile` is what
+arrives in a stream in place of a record or a fact set when a file yielded
+neither. Each is taken in turn in the sections below.
+
+:class:`~spindoctor.dataset.results_filter.ResultsFilter` stands here for every
+consumer, and is drawn because it is the one that asks at two different moments:
+it writes a :class:`~spindoctor.nav_records.Selection` naming subtrees when it is
+built and one naming stubs for each batch of candidates afterwards. Which of its
+flags is answered at which of those two moments, and what each costs, is
+*What each flag costs* below.
+
 Four questions, because the programs ask four things
 ----------------------------------------------------
 
@@ -155,6 +278,30 @@ with their metrics, against one round trip per document, which is what the
 ingest's discovery and its unchanged-file skip are both built on. What a listing
 cannot do is answer anything a document says, so a selection restricting on a
 mission or a span is refused rather than partly honored.
+
+**A selection naming stubs is not such a restriction.** A stub is the identity
+of a file rather than something the file says, so a listing answers it, and that
+is the question a caller enumerating candidate images asks: which of the ones
+this run might still keep has a document. The index answers it with one keyed
+query per batch. The tree has two ways to answer it and picks between them on
+whether the root is local, because what decides is not a ratio of files named to
+documents held but what one call costs. On a local root a check is a system
+call, and checking the named files beats walking their directories at every
+ratio worth having: ten files of a fifty-thousand-document volume by three
+orders of magnitude, a fifth of the volume by two and a half times, and only at
+something near the whole of it does the walk come back ahead. On a cloud root a check is a
+paid round trip per file against one per directory for a thousand entries, so
+the walk wins above roughly a thousandth of the root --- and one walk made for
+one batch answers every later batch of the same run, since a run asks in
+batches. The choice lives inside the seam, so a caller has one way to ask what a
+root holds; two shapes in the callers would be two answers to keep true of each
+other.
+
+**What a check cannot report is the size and the modification time.** Those come
+from a directory entry, and an entry a check produced carries neither and says
+so through :attr:`~spindoctor.nav_records.ListedRecord.has_metrics`. A consumer
+that decides whether a document has changed reads that rather than a stand-in
+value, which would make a changed document look unchanged.
 
 Two more methods hold the run together rather than answering a question:
 ``describe()`` says which storage answered, for the run log, and ``close()``
@@ -203,19 +350,28 @@ computed anywhere else.
 returns the first when the run names no index and the second when it names one.
 
 **The seam is split along the database line, and the line is not a matter of
-taste.** ``import spindoctor.dataset`` must not import SQLAlchemy: every
-navigation run imports that package and most of them name no index. The
-enumeration is a reader of documents and lives in that package, so the half of
-the seam that reads documents has to be reachable from it without acquiring a
-database. :mod:`spindoctor.nav_records` --- what a record is, what a document is
+taste.** ``import spindoctor.nav_records`` must not import SQLAlchemy. It is
+the storage-free half of the seam: reading a results tree requires no index, so
+a program that can open none still reads its records through this package, and
+a database layer imported anywhere under it would be acquired by every one of
+them. So :mod:`spindoctor.nav_records` --- what a record is, what a document is
 named and where one lives, what a selection is, the protocol, the implementation
-over the documents, and the per-image shape built from one document ---
-therefore imports no database layer, and a subprocess test pins that. The half
-that reads rows needs SQLAlchemy by definition, so it lives in
-:mod:`spindoctor.results_index` alongside the schema
-it reads, and so does the factory that chooses between the two. That is why a
-consumer on the navigation path resolves its index half through a branch-local
-import rather than at the top of its module.
+over the documents, and the per-image shape built from one document --- imports
+no database layer, and a subprocess test pins that. The half that reads rows
+needs SQLAlchemy by definition, so it lives in :mod:`spindoctor.results_index`
+alongside the schema it reads, and so does the factory that chooses between the
+two.
+
+An inline import could not have arranged this. The rule is about a whole
+package rather than about one call site, so every module under
+:mod:`spindoctor.nav_records` would need the same guard and any one of them
+could defeat it. The subprocess is likewise not a nicety: by the time any test
+in the session runs, something has already imported SQLAlchemy, so the same
+assertion inside the process would pass whatever the packages did. The probe
+imports :mod:`spindoctor.nav_records` in a fresh interpreter, asserts that no
+module of SQLAlchemy loaded, and asserts as well that the walk itself loaded,
+since a guarantee about a package that imported almost nothing is a guarantee
+about nothing.
 
 What a caller asks for
 ----------------------
@@ -305,6 +461,99 @@ Written out per call site, that sequence loses a step at a time --- an engine
 left undisposed on a refusal, a root checked after the first query rather than
 before it.
 
+Which index, and when a results root is read at all
+===================================================
+
+Two different things are called an index in this codebase, and an enumeration
+consults them for different questions.
+
+The **dataset index file** is the archive's own catalog of a volume, the
+``<VOL>_index.tab`` under ``metadata/``. It answers *what images exist*, it is
+read once per selected volume, and every enumeration reads it. There is no mode
+that walks the holdings tree instead: ``--img-name`` and ``--image-filespec-csv``
+narrow within the rows the index file produced rather than replacing it as the
+source.
+
+The **results index** is this chapter's subject. It answers *what has already
+been navigated*, which is a question an enumeration asks only when it is told
+to. :class:`~spindoctor.dataset.results_filter.ResultsFilter` is constructed
+only when one of the six image-selection flags is given
+(``--has-offset-file``, ``--has-no-offset-file``, ``--has-offset-error``,
+``--has-no-offset-error``, ``--has-offset-spice-error``,
+``--has-offset-nonspice-error``). With none of them, no filter is built, the
+navigation results root is never resolved, and nothing under it is opened or
+listed.
+
+Given one of those flags, which storage answers is a third and independent
+choice, made by
+:func:`~spindoctor.results_index.open_record_source`:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Condition
+     - What answers the flag
+   * - No image-selection flag
+     - Nothing. The results root is not read.
+   * - A flag, and a results index URL resolves
+     - The index, by query.
+   * - A flag, and no index URL resolves
+     - The results tree, by listing and by reading documents.
+
+A results index URL resolves only for a program that **declares**
+``--results-db``. The test is whether the parsed arguments carry a
+``results_db`` attribute, which :mod:`argparse` supplies with its default as
+soon as the option is added, so an operator need type nothing: a declaring
+program still resolves the URL through the command line, then the
+``environment.results_db`` configuration variable, then ``NAV_RESULTS_DB``. A
+program that declares no such option has no attribute to find, so an exported
+variable cannot quietly change what its selection means. ``--results-db none``
+is the deliberate spelling of "no index", honored at every level, so a machine
+that exports one can still be told to read the tree.
+
+What each flag costs
+--------------------
+
+A filter asks the seam once when it is built and once per batch of candidates
+the enumeration offers.
+
+``--has-offset-file`` is settled outright at construction, by a
+:meth:`~spindoctor.nav_records.source.RecordSource.listing` of the selected
+subtrees. A listing opens no document: it is a directory enumeration, so the
+cost is one listing call per directory rather than one read per image.
+:meth:`~spindoctor.dataset.results_filter.ResultsFilter.passes` is then a set
+lookup, which is what lets an enumeration offering a million rows reject most
+of them without constructing anything.
+
+The four error filters are settled in two stages, because each of them asks what
+a document records and so requires one to exist. The construction listing
+settles that half and no more: an error filter is folded into the same presence
+question, so ``passes`` rejects an image the results root holds no document for
+and no later stage ever names it. What the document *records* is settled per
+batch, by :meth:`~spindoctor.nav_records.source.RecordSource.facts` over the
+candidates
+:meth:`~spindoctor.dataset.results_filter.ResultsFilter.filter_batch` is handed.
+That call does read documents --- but only the candidates the other selection
+constraints kept, never every document under the volume, and never one for an
+image the listing has already excluded.
+
+``--has-no-offset-file`` is asked about the candidates instead. Its answer set
+is one it only ever rejects from, so listing a volume to build it would be work
+with no reader. It is also structurally alone: the constructor refuses every
+combination that pairs it with another results flag.
+
+A listing that names the images it asks about is answered the way the root
+answers most cheaply, and the source decides. A local root checks the named
+images, because a local check is a system call. A remote root walks the named
+subtrees once and answers every batch of that scan from the one walk, because a
+remote check is a request per image while a listing returns about a thousand
+entries with their metrics for the price of one. An entry produced by a check
+carries neither of its two metrics and reports
+:attr:`~spindoctor.nav_records.record.ListedRecord.has_metrics` false: a size
+and a modification time come from a directory entry, and a stand-in would be
+read as the file's own and make a changed document look unchanged.
+
 Opening an index
 ================
 
@@ -387,39 +636,6 @@ cannot be listed **at all** raises
 :exc:`~spindoctor.nav_records.UnlistableRootError` instead, which the ingest
 catches to charge a mistyped root to that root and go on to the next one, and
 which every other consumer lets end its run.
-
-The import exception on the navigation path
-===========================================
-
-``import spindoctor.dataset`` must not import SQLAlchemy. Every navigation run
-imports that package, and most name no index at all, so the database layer has
-no business on that path.
-
-:class:`~spindoctor.dataset.results_filter.ResultsFilter` therefore imports
-:func:`~spindoctor.results_index.read_result_stubs` **inside** the branch that
-has a URL, rather than at the top of the module. The imports-at-the-top rule
-permits an inline import only to keep a heavy optional dependency off a path
-that does not need it, which is what this is and what the GUI toolkit's inline
-imports are; it is not a cycle workaround, and the comment at the import says
-which of the two it is.
-
-The same rule is what puts the record seam's database-free half in
-:mod:`spindoctor.nav_records` rather than here. The enumeration reads documents
-through that seam, so a database layer imported anywhere under it would be
-imported by every navigation run --- and an inline import cannot save a package
-whose whole surface is on that path. The split is the arrangement instead: the
-record types, the document rules, the selection, the protocol, the tree backend
-and the per-image shape acquire no database, and the index-backed half and the
-factory live on this side, where SQLAlchemy is already a dependency.
-
-Both halves of that are pinned in a subprocess, and have to be: by the time any
-test in the session runs, something has already imported SQLAlchemy, so the same
-assertion inside the process would pass whatever the packages did. One probe
-imports :mod:`spindoctor.dataset` and one imports
-:mod:`spindoctor.nav_records`, each asserting that no module of SQLAlchemy
-loaded --- and the second asserts as well that the walk itself loaded, since a
-guarantee about a package that imported almost nothing is a guarantee about
-nothing.
 
 Adding a column
 ===============

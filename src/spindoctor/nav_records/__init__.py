@@ -112,9 +112,8 @@ from spindoctor.nav_records.tree import (
     RECORDS_NO_MIDTIME,
     RETRIEVE_BATCH_SIZE,
     TreeRecordSource,
-    UnlistableDirectoryError,
-    UnlistableRootError,
 )
+from spindoctor.nav_records.walk import UnlistableDirectoryError, UnlistableRootError
 
 __all__ = [
     'ABSOLUTE_PATH_FRAGMENT',

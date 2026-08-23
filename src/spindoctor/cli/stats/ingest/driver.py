@@ -29,7 +29,7 @@ document before it said.  Reading the file to find out whether it needs reading
 is the retrieval this skip exists to avoid, so ``force`` is the answer to that
 rather than a finer comparison, and the consequence for a consumer is stated
 with the rest of what the index answers differently in
-:mod:`spindoctor.results_index.selection`.
+:mod:`spindoctor.dataset.results_filter`.
 
 What leaving the tree costs
 ---------------------------
@@ -60,7 +60,7 @@ from pdslogger import PdsLogger
 from spindoctor.cli.stats.ingest.chunks import _batched, _ingest_chunk
 from spindoctor.cli.stats.ingest.counts import IngestCounts
 from spindoctor.cli.stats.ingest.runs import _finish_run, _start_run
-from spindoctor.cli.stats.ingest.store import _recorded_files, _RecordedFile, _report_refusals
+from spindoctor.cli.stats.ingest.store import _recorded_files, _RecordedFile
 from spindoctor.nav_records import (
     ListedRecord,
     Selection,
@@ -388,6 +388,5 @@ def ingest_metadata_files(
             counts.files_seen,
             root_url,
         )
-        _report_refusals(engine, root_url, logger=logger)
         total.add(counts)
     return total

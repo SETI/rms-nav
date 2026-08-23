@@ -189,7 +189,15 @@ class RecordSource(Protocol):
         do is answer anything a document says, so a selection restricting on
         what a document says is refused rather than partly honoured.
 
-        The order is whatever order the implementation finds documents in.
+        A selection naming stubs asks about those files and no others, which is
+        what a caller enumerating candidates asks: which of the images this run
+        might still keep has a document.  It is not a restriction on what a
+        document says -- a stub is the identity of a file -- so each storage
+        answers it by whatever means is cheap on the storage it is, and neither
+        opens anything.
+
+        The order is whatever order the implementation finds documents in, and
+        the order the selection named them in when it named stubs.
 
         Parameters:
             selection: Which documents to list.  Only the restrictions that can
@@ -197,12 +205,17 @@ class RecordSource(Protocol):
 
         Yields:
             One entry per document, carrying its stub, its location and the two
-            metrics that say whether it has changed.
+            metrics that say whether it has changed.  An implementation that
+            answered by checking named files reports neither metric, since a
+            check reports nothing about a file but whether it is there, and says
+            so through
+            :attr:`~spindoctor.nav_records.ListedRecord.has_metrics`.
 
         Raises:
             ValueError: If the selection carries a restriction a listing cannot
-                answer, naming which; or if it names a root the source does not
-                hold.
+                answer, naming which; if it names a root the source does not
+                hold; or if it names stubs without resolving to the single root
+                a stub is a key under.
         """
         ...
 
@@ -346,16 +359,20 @@ def refuse_what_a_listing_cannot_answer(selection: Selection) -> None:
     over the next is not a seam, and a caller would read a listing of the whole
     root as a listing of one mission.
 
+    A selection naming stubs is not one of those.  A stub is the identity of a
+    file rather than something the file says, so both storages answer it without
+    opening anything: a source over the documents checks the named files or
+    finds them in a walk of the directories they lie in, and a source over the
+    index reads the keys out of the tables that record them.
+
     Parameters:
         selection: The selection to check.
 
     Raises:
-        ValueError: If it carries ``stubs``, ``instrument``, ``start_et`` or
-            ``stop_et``, naming every one of them it carries.
+        ValueError: If it carries ``instrument``, ``start_et`` or ``stop_et``,
+            naming every one of them it carries.
     """
     carried: list[str] = []
-    if selection.stubs:
-        carried.append('stubs')
     if selection.instrument is not None:
         carried.append('instrument')
     if selection.start_et is not None:

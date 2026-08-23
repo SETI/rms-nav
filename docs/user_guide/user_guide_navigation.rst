@@ -129,8 +129,8 @@ Environment options
   naming a local path, or a ``postgresql+psycopg:`` URL naming a server),
   overriding both the ``NAV_RESULTS_DB`` environment variable and any
   corresponding configuration setting. The results-file selection filters below
-  are then answered by one query over the index instead of by reading the
-  results tree. Pass ``--results-db none`` to read the tree even when a URL is
+  are then answered from the index's rows, and the results tree is not read.
+  Pass ``--results-db none`` to read the tree even when a URL is
   set in the environment or a configuration file; the opt-out is that word
   exactly, in lower case, since anything else is read as the URL of an index.
   A value that is empty, or nothing but spaces, names no index either: the run
@@ -186,112 +186,109 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
   no error, and ``--has-no-offset-file`` is what selects it. So
   ``--has-offset-file --has-no-offset-error`` is how a run asks for the images
   whose navigation reached a result rather than dying before it could read the
-  image. What it selects is stated exactly below, and it is not the same set
-  read from the results tree as read from a results index.
+  image. What it selects is stated exactly below, along with the answers a
+  results index is known to give differently from the results tree.
 * ``--has-offset-spice-error`` / ``--has-offset-nonspice-error``: like
   ``--has-offset-error``, but restricted to fatal errors caused by / not caused
   by missing SPICE data.
 
-Reading the results tree, an error filter is answered from whatever JSON object
-the file parses to: any object with a ``status`` of ``error`` is a fatal error
-and any other object records none, whether or not the object is a navigation
-document. An offset metadata file that cannot be read, does not parse as JSON,
-or does not parse to a JSON object satisfies no error filter, positive or
-negative, and is reported as excluded: what it records is unknown rather than
-known to be an outcome. Reading a results index, the excluded set is larger,
-and ``--results-db`` below says by how much.
+An error filter asks what a document records about its image, and reads it from
+the per-image facts the document yields: the values a results index holds in its
+columns, so a document is narrowed on exactly what a row is narrowed on. An
+offset metadata file that cannot be read, does not parse as JSON, does not parse
+to a JSON object, or parses to a JSON object that is not a navigation document of
+the current metadata schema yields no such facts, and satisfies no error filter,
+positive or negative: what it records is unknown rather than known to be an
+outcome. A document written to an earlier metadata schema is one of those, so a
+results root holding nothing else answers every error filter, including
+``--has-offset-spice-error``, with no image at all; re-navigating those images
+rewrites their documents to the current schema. Such a file is still a file that
+exists, so the presence filters count it, ``--has-offset-file`` selects its image
+and ``--has-no-offset-file`` passes it over. When a run ends, its log says how
+many of the candidates it read yielded no facts and names one of them with the
+reason, so a selection short for this reason says so rather than only coming back
+smaller than expected.
 
-The results-file filters answer their questions three ways when they read the
-results tree, all of them efficient even when the results root is a cloud
-location. The presence filter (``--has-offset-file``) and the error filters
-(``--has-offset-error``, ``--has-no-offset-error`` and the SPICE variants) walk
-the results tree once per selected volume and test each candidate against the
-collected file set. The absence filter is always on its own -- it contradicts
-every other results filter -- so it does not walk the tree; it answers with
-batched ``exists()`` calls. The error filters additionally retrieve the matched
-metadata files in batches to inspect their contents.
+Two questions cover all six flags, and they are asked at different moments
+because they need different things.
 
-Given ``--results-db``, all of them are answered instead by one query per
-enumeration, and the results tree is not read at all. A results root the index
-holds no completed ingest of is refused rather than answered, because absence of
-a row would otherwise read as "this image was never navigated". The paragraphs
-below are the answers an index is known to give differently from the tree; each
-of them is a property of what an ingest pass could read and record rather than
-of the query.
+Which images the results root holds a document for opens no document at all, and
+a run selecting images that *have* one --- ``--has-offset-file``, and every error
+filter, since each of those reads what a document records --- asks it once, when
+the enumeration starts, by listing the volumes it selected. That costs one
+listing per directory rather than one read per image, and testing a candidate
+image against the answer afterwards is a set lookup that costs nothing.
 
-**A document the ingest refused answers no error filter.** A
-``*_metadata.json`` file the ingest could not read as a navigation document is
-recorded as a file that exists and as nothing else. It is present in the tree
-and present for the presence filters, so ``--has-offset-file`` selects its image
-and ``--has-no-offset-file`` passes it over; and it records no outcome, so it
-satisfies neither ``--has-offset-error`` nor ``--has-no-offset-error`` nor
-either SPICE variant.
+A run selecting images that have *none* --- ``--has-no-offset-file`` --- asks the
+same question about the candidate images themselves, in batches, as the
+enumeration offers them. It keeps the images the results root holds nothing for,
+so every entry a listing of a whole volume produced would be an entry to reject
+from: a run whose other constraints name ten images would pay for fifty thousand
+of them to answer about ten. Asking about the candidates instead costs a check
+per candidate on a local results root, where a check is a system call, and one
+listing per directory on a cloud one, where it is a paid round trip --- and on a
+cloud root one listing serves every batch of the run rather than being taken
+again for each.
 
-Whether that differs from the tree depends on why the file was refused. One that
-cannot be read, does not parse as JSON, or does not parse to a JSON object
-satisfies no error filter read from the tree either, as the paragraph on the
-results tree above says, so the two answer alike about it. One that parses to a
-JSON object the index will not take -- contents that do not carry what the index
-requires (see :doc:`user_guide_results_index`), or a JSON object that was never a
-navigation document at all -- is read from the tree as it stands, and its
-``status`` answers every error filter there. Those are the images an error
-filter answered from an index drops and the same filter answered from the tree
-keeps, with nothing in the run saying so. The line ``*** Results index holds N
-offset metadata files under ...`` counts every refused file among the N, so a
-count in line with what the tree holds is no evidence that the selection
-matched. The gap is not necessarily small. A root every one of whose documents
-is a JSON object the index will not take answers every error filter with nothing
-at all while still reporting a plausible count of metadata files, so a selection
-that comes back short, or empty, is a reason to measure the gap rather than to
-conclude the root holds no such images. Pass ``--results-db none`` for a run
-that must ask the documents themselves.
+What each document records is read from the per-image facts, in batches, as the
+enumeration offers its candidates. An error filter has to read a document, and
+which documents to read is the set of candidate images, which the other
+selection constraints decide and which is not known when the enumeration starts.
+So a batch of candidates names its images and asks about those. A run whose
+other constraints keep one image in a hundred therefore reads a hundredth of the
+documents, rather than every document under the volumes it selected --- on a
+cloud results root, one paid download apiece. Only images that have a document
+are ever asked about, since the listing has already excluded the rest, which is
+also what makes every error filter keep only images that have one.
 
-The gap is the rows ``failed_files`` holds for the root whose ``reason`` begins
-``not a current-schema navigation document``; the other reasons are the files
-the tree excludes as well. One query separates them:
+The listing taken when the enumeration starts covers the volumes the enumeration
+selected and no others, and they are asked about one at a time. Reading the
+results tree, a selected volume the results root has no directory for
+contributes nothing: a volume nobody has navigated yet has no directory under
+the results root, which is an ordinary state of a results tree rather than a
+reason to stop. A directory that is there and will not be listed -- this user may
+not read it, the share it lives on has gone away -- ends the run instead, because
+a filter answering from what it could see would silently select images it has no
+evidence about. Asking one volume at a time is what tells those apart: a single
+request covering all of them would end at the first volume it could not read, and
+every volume after it would go unasked.
 
-.. code-block:: sql
+A run that asks about its candidates needs no such restriction and applies none.
+The images it is offered come from the volumes the enumeration walked, so naming
+those volumes as well would narrow nothing, and a volume the results root has no
+directory for still costs nothing and ends nothing: the images under it are
+images the root holds no document for.
 
-    SELECT reason, COUNT(*) FROM failed_files
-    WHERE root_url = '/path/to/nav-results'
-    GROUP BY reason;
-
-``root_url`` is the results root as the ingest normalized it: absolute and
-resolved, with any
-trailing ``/`` removed. A selection also enumerates subtrees --- the top-level
-directories under the root, which a PDS3 selection names as volumes --- so add
-``AND subtree IN (...)`` to bound what one selection can be short by; a row whose
-``subtree`` is NULL sits above every subtree an enumeration walks and can shorten
-nothing.
-
-``sd_stats_ingest`` reports that count, narrowed to the rows carrying a subtree,
-at the end of each root's pass, as the line ``Documents under ... an error
-filter reads from the results tree and not from this index``, which is the
-root's standing total rather than what that pass refused. The two differ, and
-the difference is what makes the tally in the pass's closing summary the wrong
-number to read here: an ingest is incremental, a refused file that has not
-changed since is skipped without being read, and a pass that skips it refuses
-nothing and tallies nothing. Run ``sd_stats_ingest --force`` over the root to
-have every document read again and the reasons tallied by that summary, which
-names one file per reason.
+Given ``--results-db``, whichever of the two questions the flags call for is
+answered from the index's rows, and the results tree is not read at all. A
+results root for which the index has no completed ingest is refused rather than
+answered, because absence of a row would otherwise read as "this image was never
+navigated". The paragraphs below are the answers an index is known to give
+differently from the tree; each of them is a property of what an ingest pass
+could read and record rather than of the storage.
 
 **A file the index has no row at all for reads as absent**, and
 ``--has-no-offset-file`` reads absence as "this image was never navigated", so
 it selects that image again. One pass ends that way: one that could not retrieve
-the file. That is deliberate -- a recorded refusal would be skipped for as long
-as the file did not change, and the next pass would never retry it. Two other
-ways a file could go unrecorded are not this, because neither leaves a completed
-pass behind it: an ingest that cannot list a directory stops there, and one
-whose document the index would not store stops there. A root the index holds a
-completed pass over is a root every directory of which was listed and every
-document of which was stored.
+the file. Nothing is recorded for it deliberately -- a recorded row would be
+skipped for as long as the file did not change, and a download that failed once
+says nothing that will still be true next pass. Two other ways a file could go
+unrecorded are not this, because neither leaves a completed pass behind it: an
+ingest that cannot list a directory stops there, and one whose document the
+index would not store stops there. A root the index holds a completed pass over
+is a root every directory of which was listed and every document of which was
+stored.
 
-**A document rewritten in place that kept the length and the modification time
-it had before** is one the ingest skips, because those two metrics are
+**A document rewritten in place, keeping the length and the modification time
+it had before,** is one the ingest skips, because those two metrics are
 everything a listing supplies about a file. Its row goes on recording what the
 document before it said, so an error filter answers from that one however
-recently the last pass finished. Running ``sd_stats_ingest --force`` over the
-root re-reads every document and is what puts such a row right.
+recently the last pass finished. A tree restored by a copy that preserves times,
+a document patched and stamped back from a sibling, and a backend reporting one
+modification time for two writes all produce it; an ordinary re-navigation
+writes a different length at a later time and does not. Running
+``sd_stats_ingest --force`` over the root re-reads every document and is what
+puts such a row right.
 
 An index is also a snapshot of the tree as of the last ingest over that root,
 with no staleness detection: an image navigated since is one the index does not

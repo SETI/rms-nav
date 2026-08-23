@@ -112,9 +112,10 @@ Which programs read it
        refusal for a retrieval that failed once.
    * - ``sd_offset``
      - The results-based selection filters (``--has-offset-file``,
-       ``--has-no-offset-file``, the error filters), which otherwise walk the
-       tree once per selected volume and read every document an error filter
-       looks inside.
+       ``--has-no-offset-file``, the error filters). Given no index, a run
+       selecting images that have a document lists each selected volume, a run
+       selecting images that have none asks about its candidate images by name,
+       and the documents of the candidate images say what each one records.
    * - ``sd_backplanes``, ``sd_backplanes_cloud_tasks``
      - Each image's recorded status and pointing, which the stage reads before
        it decides there is work to do.
@@ -152,10 +153,10 @@ still match is not read at all. Every run that answers from an index reports
 when the pass that filled it finished and how long ago that was, so the age of
 the answer is in the run log beside the answer.
 
-Where the two disagree for reasons the age does not explain --- a document the
-ingest refused, a document rewritten in place --- the cases are enumerated in
-:doc:`user_guide_navigation` under the selection filters, and the reason
-vocabulary the backplane and reprojection stages report is in
+Where the two disagree for reasons the age does not explain --- a file the index
+has no row at all for, a document rewritten in place --- the cases are
+enumerated in :doc:`user_guide_navigation` under the selection filters, and the
+reason vocabulary the backplane and reprojection stages report is in
 :doc:`user_guide_backplanes` and :doc:`user_guide_reprojection`.
 
 Building one
@@ -304,21 +305,10 @@ and running the ingest again is what closes the gap.
 That tally is what this pass read, and not what the root holds. A refused file
 is recorded in ``failed_files``, and every pass after it skips the file
 unchanged rather than reading it again, so a second pass over the same tree
-refuses nothing and tallies nothing. Each root's pass therefore also reports a
-standing count, as the line ``Documents under ... an error filter reads from the
-results tree and not from this index``, which counts the rows ``failed_files``
-holds for that root whichever pass wrote them, restricted to the ones a
-selection can be short by. Those are the rows whose ``reason`` begins ``not a
-current-schema navigation document`` -- a JSON object the index will not take,
-which reading the tree answers every error filter out of -- and that carry a
-subtree, since an enumeration reads the volumes it selected and nothing above
-them. The other reasons record a file no JSON object came out of, which the tree
-excludes from every error filter as well, so they are refusals without being a
-difference. Read the count as a bound on how much shorter a selection answered
-from the index comes than the tree would have made it, and
-:doc:`user_guide_navigation` for what to do about it.
-``sd_stats_ingest --force`` reads every document again, which puts the reasons
-and the example files back into the summary.
+refuses nothing and tallies nothing and a summary of zero refusals is a summary
+of what changed. ``sd_stats_ingest --force`` reads every document again, which
+puts the reasons and the example files back into the summary; the root's whole
+set of them is otherwise a query over ``failed_files`` away.
 
 **A directory under a root that the walk cannot list stops the ingest.** One
 this user may not read, or on a share that stopped answering, is reported as an
@@ -528,12 +518,10 @@ read ends in a partial line.
 
 The closing summary of step 3 is the summary a single-process ingest writes:
 files seen, ingested, skipped and refused, with the refusals tallied by reason
-and one example file per reason, followed by the same standing count for each
-root it completed. A root whose shares do not add up is not completed, and no
-count is reported for it. The reasons come back in the task results, since a
-worker has no run log to write them in. Every file a share could not read is
-named in its task result too, and the ones refused for something about the
-document are recorded in the index's ``failed_files`` table as well.
+and one example file per reason. The reasons come back in the task results,
+since a worker has no run log to write them in. Every file a share could not
+read is named in its task result too, and the ones refused for something about
+the document are recorded in the index's ``failed_files`` table as well.
 
 Rebuilding one
 ==============
@@ -996,13 +984,14 @@ it was read. It is what lets a second pass skip it. It is deliberately not an
 ``images`` exists to answer.
 
 ``reason`` names one of two things. ``unreadable``, ``not valid JSON`` and ``not
-a JSON object`` are a file no JSON object came out of, which every reader
-excludes alike. A reason beginning ``not a current-schema navigation document``
-is a JSON object this schema will not take, and names in parentheses which field
-said so; reading the results tree answers an error filter out of such an object,
-so those are the rows a selection answered from the index can be short by. Every
-one of the reasons is the reason a reader of the results tree gives for the same
-file, so the two never describe one file's fault two different ways.
+a JSON object`` each name a file from which no JSON object was produced. A
+reason beginning ``not a current-schema navigation document`` names a JSON
+object that was produced and that this schema will not take, and says in
+parentheses which field said so. Every one of the reasons is the reason a reader
+of the results tree gives for the same file, so the two never describe one
+file's fault two different ways, and a file refused for any of them yields no
+per-image facts to either storage: it counts as a file that exists, for the
+presence filters and for nothing else.
 
 ``schema_meta`` holds a single row stamping the database with the column-set
 version that created it. An index whose stamp is not the version this build
