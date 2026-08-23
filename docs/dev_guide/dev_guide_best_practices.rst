@@ -49,7 +49,7 @@ Imports
     top-level import would put the database layer behind every one of them.
     A subprocess test in ``tests/spindoctor/support/test_command_line.py``
     asserts that masking a command line carrying no URL imports no
-    ``sqlalchemy`` module.
+    :mod:`sqlalchemy` module.
 
 Linting and typing
 ------------------
