@@ -343,6 +343,90 @@ Written out per call site, that sequence loses a step at a time --- an engine
 left undisposed on a refusal, a root checked after the first query rather than
 before it.
 
+Which index, and when a results root is read at all
+===================================================
+
+Two different things are called an index in this codebase, and an enumeration
+consults them for different questions.
+
+The **dataset index file** is the archive's own catalogue of a volume, the
+``<VOL>_index.tab`` under ``metadata/``. It answers *what images exist*, it is
+read once per selected volume, and every enumeration reads it. There is no mode
+that walks the holdings tree instead: ``--img-name`` and ``--image-filespec-csv``
+narrow within the rows the index file produced rather than replacing it as the
+source.
+
+The **results index** is this chapter's subject. It answers *what has already
+been navigated*, which is a question an enumeration asks only when it is told
+to. :class:`~spindoctor.dataset.results_filter.ResultsFilter` is constructed
+only when one of the six image-selection flags is given
+(``--has-offset-file``, ``--has-no-offset-file``, ``--has-offset-error``,
+``--has-no-offset-error``, ``--has-offset-spice-error``,
+``--has-offset-nonspice-error``). With none of them, no filter is built, the
+navigation results root is never resolved, and nothing under it is opened or
+listed.
+
+Given one of those flags, which storage answers is a third and independent
+choice, made by
+:func:`~spindoctor.results_index.open_record_source`:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Condition
+     - What answers the flag
+   * - No image-selection flag
+     - Nothing. The results root is not read.
+   * - A flag, and a results index URL resolves
+     - The index, by query.
+   * - A flag, and no index URL resolves
+     - The results tree, by listing and by reading documents.
+
+A results index URL resolves only for a program that **declares**
+``--results-db``. The test is whether the parsed arguments carry a
+``results_db`` attribute, which :mod:`argparse` supplies with its default as
+soon as the option is added, so an operator need type nothing: a declaring
+program still resolves the URL through the command line, then the
+``environment.results_db`` configuration variable, then ``NAV_RESULTS_DB``. A
+program that declares no such option has no attribute to find, so an exported
+variable cannot quietly change what its selection means. ``--results-db none``
+is the deliberate spelling of "no index", honoured at every level, so a machine
+that exports one can still be told to read the tree.
+
+What each flag costs
+--------------------
+
+A filter asks the seam once when it is built and once per batch of candidates
+the enumeration offers.
+
+``--has-offset-file`` and the four error filters are settled at construction by
+a :meth:`~spindoctor.nav_records.source.RecordSource.listing` of the selected
+subtrees. A listing opens no document: it is a directory enumeration, so the
+cost is one listing call per directory rather than one read per image.
+:meth:`~spindoctor.dataset.results_filter.ResultsFilter.passes` is then a set
+lookup, which is what lets an enumeration offering a million rows reject most
+of them without constructing anything. The error filters go on to ask
+:meth:`~spindoctor.nav_records.source.RecordSource.facts` for each batch of
+candidates, and that does read documents --- but only the candidates, never
+every document under the volume.
+
+``--has-no-offset-file`` is asked about the candidates instead. Its answer set
+is one it only ever rejects from, so listing a volume to build it would be work
+with no reader. It is also structurally alone: the constructor refuses every
+combination that pairs it with another results flag.
+
+A listing that names the images it asks about is answered the way the root
+answers most cheaply, and the source decides. A local root checks the named
+images, because a local check is a system call. A remote root walks the named
+subtrees once and answers every batch of that scan from the one walk, because a
+remote check is a request per image while a listing returns about a thousand
+entries with their metrics for the price of one. An entry produced by a check
+carries neither of its two metrics and reports
+:attr:`~spindoctor.nav_records.record.ListedRecord.has_metrics` false: a size
+and a modification time come from a directory entry, and a stand-in would be
+read as the file's own and make a changed document look unchanged.
+
 Opening an index
 ================
 
