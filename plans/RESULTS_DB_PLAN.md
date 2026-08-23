@@ -1040,7 +1040,9 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 
 Nothing survives. The navigator's own types settle it: a `success` record carries an offset of two floats, a recorded attitude is validated as a proper rotation of finite numbers before it is written, and a pointing block always carries its baseline and both frame identities as integers. So for every record the navigator wrote and ingest stored, everything a product is built from -- the mechanism, the matrices, the midtime, the offset -- is identical in the two paths, and so is every field the readers report about it, the reason among them. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the same message shapes; where a message names the storage that was searched, it names the one that actually was.
 
-**`ResultsFilter`.** All six filters are answered through the record seam, by two of its questions, so one implementation serves both storages. A listing of the selected subtrees says which images have a document and costs no document read, which answers presence and absence; a stream of per-image facts says what each document records, which answers the error filters and settles presence along with them. `open_record_source` decides which storage answers: a run naming an index reads rows, a run naming none reads the documents. Because the facts are the values the index holds in its columns, a document is narrowed on exactly what a row is narrowed on, and the two agree by construction rather than by two pieces of code that agree today. The constructor keeps every contradictory-pair rejection, and asks its question once, so `passes(stub)` is a set lookup. A file the ingest refused is still a file the walk finds, so a listing of the index reads `failed_files` alongside `images`, and that table carries the subtree for the same reason.
+**`ResultsFilter`.** All six filters are answered through the record seam, by two of its questions, so one implementation serves both storages. A listing says which images have a document and costs no document read; a stream of per-image facts says what each document records, which answers the error filters and settles presence along with them. `open_record_source` decides which storage answers: a run naming an index reads rows, a run naming none reads the documents. Because the facts are the values the index holds in its columns, a document is narrowed on exactly what a row is narrowed on, and the two agree by construction rather than by two pieces of code that agree today. The constructor keeps every contradictory-pair rejection. A file the ingest refused is still a file the walk finds, so a listing of the index reads `failed_files` alongside `images`, and that table carries the subtree for the same reason.
+
+**The listing is asked in one of two ways, and which one is decided by what the run selects.** A run selecting images that *have* a document -- `--has-offset-file`, and every error filter, since each of those requires one to exist -- lists the selected subtrees once at construction, so `passes(stub)` is a set lookup and the same listing supplies the count the run log reports. A run selecting images that have *none* -- `--has-no-offset-file`, which contradicts all five of the others and is therefore always alone -- names its candidate images instead, a batch at a time, exactly as the error filters name theirs. It keeps the images the root holds nothing for, so every entry a listing of a whole volume produced would be one to reject from, and a run whose other constraints name ten images would pay for a volume to answer about ten. Such a run applies no subtree restriction and needs none: the candidates come from the volumes the enumeration walked. It reports the age of an index at construction, because that is what an index owes a run whatever it goes on to find, and reports what it asked about and how much of it was already navigated when it is closed.
 
 **What the index answers differently is what one ingest pass could read and record, never a property of the query.** It is enumerated in section 4's Phase 5 entry, restated as acceptance criterion 1, repeated in the `results_filter` module docstring and stated for an operator in the navigation guide's account of `--results-db`; each member has a test of its own, and a member found later is added in all four of those places in one commit. The enumeration-list guard reads the four and compares them; it is not itself one of them. The enumeration is maintained rather than audited closed: it names what is known to differ, and a divergence nobody has found yet is not evidence that none exists. The guide is one of the four because the person a silently short selection is served to reads the guide and not the module: a divergence enumerated only where a maintainer meets it leaves a user with a selection that looks like the one they asked for.
 
@@ -2059,7 +2061,7 @@ Tests: for every filter flag, the answer over the documents against the answer o
 
 Details settled during execution, none of them a change of intent:
 
-- **The filter hands itself a plain set.** The constructor opens the source, reads the one stream it needs, closes it, and keeps a frozen set of stubs, so nothing the storage layer owns outlives construction and `passes(stub)` costs a hash lookup. The stream is read inside the same guard as the open, because a source reading rows runs its query as the caller reads it: a storage that stops answering surfaces at the boundary that translates it rather than above.
+- **A run selecting images that have a document hands itself a plain set.** The constructor opens the source, reads the one stream it needs, and keeps a frozen set of stubs, so `passes(stub)` costs a hash lookup; where no further question is coming it closes the source at once rather than holding a connection pool across an enumeration. The stream is read inside the same guard as the open, because a source reading rows runs its query as the caller reads it: a storage that stops answering surfaces at the boundary that translates it rather than above.
 - **A document recording no fatal error is a filter of its own.** `--has-no-offset-error` is the negation the other three lacked, and it reads the same per-image facts they read: one more condition on the status those facts carry. A file no facts came out of matches it no more than it matches the other three, since such a file records neither an error nor the absence of one. It contradicts the three that name an error and, like them, contradicts `--has-no-offset-file`, because it asks what a document records and a document that does not exist records nothing.
 - **A refusal says which exclusion it means.** Two flags that exclude each other
   and nothing else are named as mutually exclusive. One flag that excludes
@@ -2219,6 +2221,26 @@ yielding a stream, `facts(selection)` yielding every field of every image, and
 Above the seam, one implementation of everything; below it, batching.
 `volume -> subtree` folded in, since the schema version moves either way.
 
+**A listing answers a selection that names stubs, and picks its own way to.** A
+stub is the identity of a file rather than something the file says, so it is not
+a restriction a listing has to refuse, and it is the question a caller
+enumerating candidate images asks. The index answers it with one keyed query per
+batch. The tree answers it by checking the named files on a local root and by
+walking the directories they lie in on a remote one, and decides on
+`FCPath.is_local()` rather than on a ratio, because what differs is what one
+call costs: a syscall against a paid round trip. Measured on a local root over a
+volume of fifty thousand documents, checking beats walking by 600x or better at
+ten files named, by 200x at a hundred, by 24x at a thousand and by 2.6x at ten
+thousand, and loses by about half at every document in the volume; about seventy
+per cent of the check's cost is the storage layer's per-path machinery rather
+than the syscall. A walk made to answer one batch answers every later batch of
+the same run, keyed by root and by the directory walked, and is released when
+the source is closed. The choice lives inside the seam: a caller has one way to
+ask what a root holds, and two shapes in the callers would be two answers to
+keep true of each other. An entry a check produced carries neither metric and
+says so through `ListedRecord.has_metrics`, since a stand-in for either would
+make a changed document look unchanged.
+
 **The package is split along the database line, and the line is forced.**
 `import spindoctor.nav_records` must not import SQLAlchemy: it is the
 storage-free half of the seam, so a program that can open no index still reads
@@ -2273,7 +2295,12 @@ the kernel writer read one rule.
 **A directory nobody can list ends a walk; a root nobody can list is charged to
 that root.** `UnlistableRootError` is a subclass of `UnlistableDirectoryError`,
 which is what lets the ingest catch the second to keep its per-root accounting
-while every other consumer lets either end its run.
+while every other consumer lets either end its run. Both carry the directory
+they are about, so a caller can tell the directory it asked about from one
+further down: a listing of named stubs answers "no document" for a directory the
+root does not hold, which is what a check of a file under it answers, and still
+refuses one further down, where the stubs it did find would be read as the whole
+of a directory it did list.
 
 Tests: the three calls against both backends over one fixture tree and the index
 ingested from it, with the declared disagreements between them each pinned

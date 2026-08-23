@@ -6,12 +6,15 @@ cover is the half that has none.
 """
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pdslogger
 import pytest
 from filecache import FCPath
+from filecache import file_cache as file_cache_module
+from filecache.file_cache_source import FileCacheSourceFake
 
 from spindoctor.nav_records import (
     METADATA_SUFFIX,
@@ -145,6 +148,69 @@ evidence that there is none -- and enumerating only some of them lets the others
 through as an empty directory.  A permission error is the commonest of all on a
 shared tree.
 """
+
+
+@dataclass(frozen=True)
+class RemoteTree:
+    """A results root the storage layer answers about as a remote one.
+
+    Parameters:
+        url: The root, as a source is given it.
+        backing: The local directory the storage layer serves it out of, which
+            is where a document is written to put it under the root.
+    """
+
+    url: str
+    backing: Path
+
+
+@pytest.fixture
+def remote_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RemoteTree:
+    """Return a results root that is not on the local filesystem.
+
+    The storage layer serves a ``fake://`` URL out of a local directory while
+    answering about it as a remote location, and a remote location is the whole
+    of what the choice between listing named files and walking for them turns
+    on: ``FCPath.is_local()`` is false for one.  So a source over this root takes
+    every branch a cloud root takes, without a bucket, a network or a credential.
+
+    Parameters:
+        tmp_path: Directory the storage lives under.
+        monkeypatch: Fixture the storage directory is installed through, which
+            is process-wide and has to be put back.  So is the storage layer's
+            memory of the backends it has built: one is built once per location
+            and keeps the storage directory it was built with, so a second test
+            in the same process would otherwise read the first one's tree and
+            pass on documents it did not write.
+
+    Returns:
+        The root and the directory backing it.
+    """
+    storage = tmp_path / 'remote'
+    storage.mkdir()
+    monkeypatch.setattr(FileCacheSourceFake, '_DEFAULT_STORAGE_DIR', storage)
+    monkeypatch.setattr(file_cache_module, '_SOURCE_CACHE', {})
+    return RemoteTree(url='fake://bucket/results', backing=storage / 'bucket' / 'results')
+
+
+@pytest.fixture
+def second_remote_tree(remote_tree: RemoteTree) -> RemoteTree:
+    """Return a second remote results root beside the first.
+
+    One stub is a key under every root there is, so anything keyed on a stub
+    alone answers about one root out of another's documents.  A second root
+    holding the same stubs is what makes that visible.
+
+    Parameters:
+        remote_tree: The first root, whose storage directory this one shares.
+
+    Returns:
+        The root and the directory backing it.
+    """
+    return RemoteTree(
+        url='fake://bucket/other-results',
+        backing=remote_tree.backing.parent / 'other-results',
+    )
 
 
 def two_volume_tree(tmp_path: Path) -> Path:

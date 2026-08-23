@@ -417,6 +417,73 @@ def test_a_failure_of_the_bookkeeping_query_names_the_table(tmp_path: Path) -> N
         )
 
 
+def test_an_index_that_stops_answering_a_scan_of_candidates_refuses_the_selection(
+    tmp_path: Path,
+) -> None:
+    """A scan that names its candidates asks as the enumeration runs, and so fails there.
+
+    Its question is put once per batch rather than once at construction, so the
+    boundary that turns a database failure into the sentence an operator can act
+    on has to be around that question too.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+    """
+    root, images = one_image_tree(tmp_path)
+    url = index_without_a_table(tmp_path, root, 'failed_files')
+    scan = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
+    )
+    with scan, pytest.raises(SelectionError, match='could not be read'):
+        scan.filter_batch(images)
+
+
+def test_an_index_that_stops_answering_a_scan_of_candidates_raises_no_database_exception(
+    tmp_path: Path,
+) -> None:
+    """This module never imports the database layer, so it may not raise its types.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+    """
+    root, images = one_image_tree(tmp_path)
+    url = index_without_a_table(tmp_path, root, 'failed_files')
+    scan = ResultsFilter(
+        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
+    )
+    with scan, pytest.raises(SelectionError) as excinfo:
+        scan.filter_batch(images)
+    assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
+
+
+def test_a_scan_of_candidates_refused_at_the_bookkeeping_query_leaves_no_storage_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A constructor that raises hands the caller no filter, so it releases what it opened.
+
+    A scan that names its candidates holds its storage across the enumeration,
+    so it is opened before the age of the index's answer is read -- and that
+    read can refuse the selection.
+
+    Parameters:
+        tmp_path: Directory the tree and the index live under.
+        monkeypatch: Fixture the bookkeeping query is wrapped through.
+    """
+    root, _images = one_image_tree(tmp_path)
+    url = index_without_a_table(tmp_path, root, 'ingest_runs')
+    source = _CountingSource()
+
+    def opening(roots: Sequence[Any], **kwargs: Any) -> Any:
+        return source
+
+    monkeypatch.setattr(results_filter, 'open_record_source', opening)
+    with pytest.raises(SelectionError, match='could not be read'):
+        ResultsFilter(
+            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
+        )
+    assert source.closes == 1
+
+
 class _CountingSource:
     """A record source that holds nothing, notes its closes, and can refuse to list.
 

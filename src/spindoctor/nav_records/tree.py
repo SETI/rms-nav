@@ -5,46 +5,36 @@ always current.  Everything a program asks of this source is answered by looking
 at the tree, which is why a question about every image costs a read of every
 file, and why the listing is worth so much more than the names it carries.
 
-The walk carries the metrics
-----------------------------
+Finding the documents is :mod:`spindoctor.nav_records.walk`'s, which lists a
+directory at a time and carries each entry's size and modification time out of
+the listing that reported them.
 
-The recursive listing collects the navigation documents in a single pass and
-carries each entry's size and modification time with it, so both file metrics
-come from the walk.  There is no per-file stat and no per-file existence check:
-on a cloud root each of those is a paid round trip per image per run, against
-one round trip per directory for a listing that returns up to a thousand entries
-with their metrics.  Those two metrics are exactly what decides whether a
-document has changed since it was last read, so a discovery that could not
-supply them would make every consumer re-read every document.
+A listing of named documents, and where a syscall costs nothing
+---------------------------------------------------------------
 
-A directory nobody can list
----------------------------
+A selection that names its stubs asks about those files and no others, and there
+are two ways to answer it.  Checking each named file directly is one call per
+file; walking the directories they lie under is one call per directory for as
+many entries as it holds.  Which is cheaper is not a ratio of the two counts, it
+is what one call costs: on a local root a check is a syscall, and checking ten
+files beats walking a volume of fifty thousand documents by three orders of
+magnitude, a fifth of the volume by two and a half times, and loses only where
+very nearly every document in the volume is named -- and there by about half, on
+a call the whole of which takes under a second.  On a cloud root a check is a
+paid round trip per file, against one round trip per directory for a listing
+that returns about a thousand entries with their metrics, so the walk wins above
+roughly a thousandth of the root.
 
-A walk that cannot list a directory ends there and then.  A directory nobody
-enumerated holds documents nobody read, and absence is what a consumer reads as
-"this image was never navigated", so a pass that finished around the gap would
-stamp that reading as an answer.  Stopping costs a run; finishing costs a wrong
-answer that outlives it.  A kernel set or a summary that quietly covers less
-than the tree is worse than one that stops and says so.
+So the choice is made on whether the root is local, and it is made here rather
+than by each caller: a caller has one way to ask what a root holds, and two
+shapes in the callers would be two answers to maintain.  A walk made to answer
+one batch answers every later batch of the same run from what it already found,
+because a run asks in batches and a walk per batch would be a walk per batch of
+the whole scan.
 
-A directory the walk has already listed under another name is a different thing,
-and not a gap: its documents are in the listing under the path the walk met
-first, and descending a second time would only report them again under stubs no
-consumer asks about.  The walk declines it, says so, and goes on.  That also
-stops a link pointing back up the tree from being followed until the filesystem
-runs out of link depth.
-
-Symbolic links inside a results tree
-------------------------------------
-
-Which of the two paths to such a directory the walk met first is whatever the
-directory listings returned first, and that is not defined.  A document reached
-two ways is therefore recorded under one of two stubs, either of them, and a
-later pass may choose the other -- which makes it a document that has left the
-tree under the stub the earlier pass recorded, so the rows written by one pass
-are deleted by the next.  Do not put symbolic links inside a results tree.  A
-results *root* that is a link is a different matter and is handled: a root is
-resolved to the location it names before anything is read.
+What a check cannot report is the size and the modification time, which come
+from a directory entry: an entry answered by a check carries neither, and says
+so through :attr:`~spindoctor.nav_records.ListedRecord.has_metrics`.
 
 Batched underneath, lazy on top
 -------------------------------
@@ -78,7 +68,7 @@ either storage.
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import Any, cast
+from typing import cast
 
 from filecache import FCPath
 from pdslogger import NullLogger, PdsLogger
@@ -96,6 +86,7 @@ from spindoctor.nav_records.facts import (
     ImageFacts,
     MetadataDocumentError,
     facts_from_document,
+    subtree_of,
 )
 from spindoctor.nav_records.record import ListedRecord, NavRecord, UnreadableFile
 from spindoctor.nav_records.roots import distinct_roots
@@ -107,6 +98,11 @@ from spindoctor.nav_records.source import (
     root_for_stubs,
     selected_roots,
 )
+from spindoctor.nav_records.walk import (
+    UnlistableDirectoryError,
+    UnlistableRootError,
+    walk_from,
+)
 from spindoctor.support.nav_record import record_midtime_et
 
 __all__ = [
@@ -114,8 +110,6 @@ __all__ = [
     'RECORDS_NO_MIDTIME',
     'RETRIEVE_BATCH_SIZE',
     'TreeRecordSource',
-    'UnlistableDirectoryError',
-    'UnlistableRootError',
 ]
 
 RETRIEVE_BATCH_SIZE = 64
@@ -148,240 +142,6 @@ time-bounded run without a trace.
 """
 
 
-class UnlistableDirectoryError(Exception):
-    """A directory under a results root that the walk could not list.
-
-    Raised where the walk meets the directory rather than where the damage
-    would show, which is what keeps the cost to the run that has read nothing
-    yet: a pass stopped at the end has already read every document under an
-    archive-scale root, and discards hours of retrieval to say what it could
-    have said in the first minute.
-
-    A transient failure -- a share that stops answering for a moment, a
-    permission fixed a minute later -- therefore costs a whole pass rather than
-    degrading one.  That is the trade this exception is: what a pass produces is
-    reproducible from the tree and can simply be produced again, and the answer
-    it would otherwise leave behind is one no later pass corrects.
-
-    Parameters:
-        directory: The directory that would not be listed.
-        reason: What the storage layer said when it refused.
-    """
-
-    def __init__(self, directory: str, reason: str) -> None:
-        super().__init__(
-            f'{directory} could not be listed ({reason}), so the documents under it were '
-            f'never seen and an image beneath it would read as one nothing was ever '
-            f'written for'
-        )
-
-
-class UnlistableRootError(UnlistableDirectoryError):
-    """A results root the walk could not list at all.
-
-    Its own class because it is the one refusal a caller may reasonably absorb:
-    a pass over several roots accounts for each of them separately, and a
-    mistyped root is the commonest thing an operator types.  Every other
-    consumer lets it end the run, exactly as it lets the directory case end one,
-    which is why it is a kind of that rather than a thing beside it.
-
-    Parameters:
-        root: The root that would not be listed.
-        reason: What the storage layer said when it refused.
-    """
-
-    def __init__(self, root: str, reason: str) -> None:
-        # The base class's message is about a directory inside a root that was
-        # otherwise read.  Nothing under this one was read at all, and the
-        # likeliest cause is the spelling rather than the storage, so the
-        # message says that instead.
-        Exception.__init__(
-            self,
-            f'results root {root} could not be listed ({reason}), so nothing under it has '
-            f'been read: check the spelling of the root',
-        )
-
-
-def _metrics_of(entry_metadata: dict[str, Any] | None) -> tuple[int | None, int | None]:
-    """The modification time and size a listing entry reports.
-
-    Parameters:
-        entry_metadata: The listing entry's metadata, or None when the backend
-            reported none.
-
-    Returns:
-        ``(mtime_ns, size_bytes)``, each None when unreported.  The time is
-        converted from the seconds a listing reports; the conversion is exact
-        enough for its only purpose, which is noticing that a file changed.
-    """
-    if entry_metadata is None:
-        return None, None
-    mtime = entry_metadata.get('mtime')
-    size = entry_metadata.get('size')
-    mtime_ns = None if mtime is None else round(float(mtime) * 1_000_000_000)
-    size_bytes = None if size is None else int(size)
-    return mtime_ns, size_bytes
-
-
-def _is_directory(path: FCPath, entry_metadata: dict[str, Any] | None) -> bool:
-    """Whether one listing entry is a directory.
-
-    Parameters:
-        path: The entry.
-        entry_metadata: What the listing said about it, or None when the
-            backend reported nothing.
-
-    Returns:
-        True when the entry is a directory.  A backend that reported no
-        metadata for the entry, or metadata that does not say, is asked
-        directly; an entry that is no longer there to answer about is a file
-        as far as this walk is concerned, since a deletion landing mid-walk is
-        ordinary and there is nothing under such an entry to have missed.
-
-    Raises:
-        UnlistableDirectoryError: If the storage layer refuses to say what the
-            entry is for any other reason.  An entry it will not answer about
-            may be a directory holding documents, and calling it a file is
-            exactly the silent gap this walk refuses: the walk would go on, the
-            run would complete, and every document under it would read as an
-            image nothing had navigated.
-    """
-    is_dir = None if entry_metadata is None else entry_metadata.get('is_dir')
-    if is_dir is not None:
-        return bool(is_dir)
-    try:
-        return bool(path.is_dir())
-    except (FileNotFoundError, NotADirectoryError):
-        return False
-    except OSError as exc:
-        raise UnlistableDirectoryError(path.as_posix(), str(exc)) from exc
-
-
-def _directory_identity(directory: FCPath) -> tuple[int, int] | None:
-    """Return what makes one directory the same directory as another.
-
-    Parameters:
-        directory: The directory the walk is about to list.
-
-    Returns:
-        The device and inode numbers the filesystem gives it, or None when no
-        identity can be taken: a cloud location, which has no links for a walk
-        to go round in, or a directory the filesystem would not answer about,
-        which the listing itself is about to fail on anyway.
-    """
-    if not directory.is_local():
-        return None
-    try:
-        status = directory.stat()
-    except OSError:
-        return None
-    return status.st_dev, status.st_ino
-
-
-def _entries_of(
-    directory: FCPath, unlistable: type[UnlistableDirectoryError]
-) -> list[tuple[FCPath, dict[str, Any] | None]]:
-    """List one directory, or refuse in the terms its caller asked for.
-
-    Parameters:
-        directory: The directory to list.
-        unlistable: The refusal to raise when it will not be listed, which is
-            :class:`UnlistableRootError` for the root of a walk and
-            :class:`UnlistableDirectoryError` for everything under it.
-
-    Returns:
-        The entries, each paired with whatever the listing reported about it.
-
-    Raises:
-        UnlistableDirectoryError: If the directory could not be listed.  Every
-            way that can happen -- it is not there, it stopped being a directory
-            between the parent listing and this call, this user may not read it,
-            the share it lives on has gone away -- means the same thing to the
-            walk: it can see no document here, which is not the same as there
-            being none.
-    """
-    try:
-        return list(directory.iterdir_metadata())
-    except OSError as exc:
-        raise unlistable(directory.as_posix(), str(exc)) from exc
-
-
-def _walk_from(
-    directory: FCPath,
-    prefix: str,
-    visited: dict[tuple[int, int], str],
-    *,
-    unlistable: type[UnlistableDirectoryError],
-    logger: PdsLogger,
-) -> Iterator[ListedRecord]:
-    """Yield the documents under one directory, descending as it goes.
-
-    Parameters:
-        directory: The directory to list.
-        prefix: The path of that directory under the root, ending in ``/`` (or
-            empty at the root itself), which is what makes each entry's stub.
-        visited: Where this walk has already listed each directory it has
-            listed, by identity, which it adds this one to.
-        unlistable: The refusal to raise when this directory will not be listed.
-            Its subdirectories always refuse as directories.
-        logger: Logger for a directory reached a second way.
-
-    Yields:
-        One entry per navigation document, in the order the listings return
-        them.  The walk descends the moment it meets a subdirectory, so a
-        directory's own documents and the documents beneath it interleave.
-
-    Raises:
-        UnlistableDirectoryError: If this directory or any under it could not be
-            listed.  The documents beneath it are then documents this walk
-            cannot see, and a record's absence is what a consumer reads as an
-            answer, so the walk stops instead of finishing around them.
-    """
-    identity = _directory_identity(directory)
-    if identity is not None:
-        listed_as = visited.get(identity)
-        if listed_as is not None:
-            # A second path to a directory this walk has already listed -- a
-            # link back to an ancestor, or one subtree reachable two ways.
-            # Descending would report the same documents again under a second
-            # set of stubs, one per document per level until the filesystem
-            # stops the loop at its own link limit, and no consumer asks about
-            # any of them: a stub comes from the image's own subtree and
-            # filespec, which name the directory once.  So the walk declines
-            # it, and the root is still wholly listed, because every document
-            # under it is in this listing under the path met first.
-            logger.info(
-                'Not listing %s, which is %s reached a second way and already listed',
-                directory.as_posix(),
-                listed_as,
-            )
-            return
-        visited[identity] = directory.as_posix()
-    for path, entry_metadata in _entries_of(directory, unlistable):
-        name = path.name
-        relative = f'{prefix}{name}'
-        if _is_directory(path, entry_metadata):
-            yield from _walk_from(
-                path,
-                f'{relative}/',
-                visited,
-                unlistable=UnlistableDirectoryError,
-                logger=logger,
-            )
-        elif name.endswith(METADATA_SUFFIX):
-            mtime_ns, size_bytes = _metrics_of(entry_metadata)
-            yield ListedRecord(
-                stub=relative[: -len(METADATA_SUFFIX)],
-                path=path,
-                mtime_ns=mtime_ns,
-                size_bytes=size_bytes,
-            )
-        # Every other file is passed over without being counted anywhere.  A
-        # results tree holds the summary picture a navigation that reached a
-        # result drew, and whatever else an operator has put there, and none of
-        # them is a file this walk reads or a gap in what it listed.
-
-
 class TreeRecordSource:
     """The navigation records as documents under one or more results roots.
 
@@ -408,6 +168,13 @@ class TreeRecordSource:
             raise ValueError('a record source over the documents needs at least one results root')
         self._roots = tuple(held)
         self._logger = NullLogger() if logger is None else logger
+        # What a walk answering a listing of named documents found, keyed by the
+        # root and the top-level directory walked.  A scan asks in batches, so a
+        # walk made for one batch answers every later batch of the same scan.
+        # The root is half the key because a source holds several of them and
+        # one stub is a key under each: a memory keyed on the directory alone
+        # would hand one root's answer back for another.
+        self._walked: dict[tuple[str, str], dict[str, ListedRecord]] = {}
 
     def __enter__(self) -> 'TreeRecordSource':
         """Enter a run's use of this source.
@@ -474,35 +241,59 @@ class TreeRecordSource:
     def listing(self, selection: Selection) -> Iterator[ListedRecord]:
         """Return every document the selection covers, without opening one.
 
-        The roots are walked in the order this source holds them, and each
-        root's documents arrive in the order its directory listings return them.
-        What the selection asks for is checked before anything is walked, so a
-        selection this source cannot honour is refused where it is asked rather
-        than partway through a caller's loop.
+        A selection that names no stubs walks: the roots in the order this
+        source holds them, and each root's documents in the order its directory
+        listings return them.  One that names stubs asks about those files and
+        no others, and is answered by whichever call is cheap on the root they
+        are under -- a check per file on a local root, where a check is a
+        syscall, and a walk of the directories they lie in on a remote one,
+        where it is a paid round trip.  Which of the two answered is not
+        something a caller has to know: they answer the same question, and only
+        the walk can report an entry's metrics.
+
+        What the selection asks for is checked before anything is walked or
+        checked, so a selection this source cannot honour is refused where it is
+        asked rather than partway through a caller's loop.
 
         Parameters:
-            selection: Which documents to list.  Only ``roots`` and ``subtrees``
-                may be set.
+            selection: Which documents to list.  ``instrument``, ``start_et``
+                and ``stop_et`` may not be set.  A selection naming stubs names
+                the documents outright, and its ``subtrees`` narrow nothing
+                further, exactly as they narrow nothing for a stream of records
+                or of facts.
 
         Returns:
-            One entry per document, with the size and modification time its
-            directory listing reported, produced as the walk goes.
+            One entry per document that is there, produced as the answer comes.
+            An entry a walk found carries the size and modification time its
+            directory listing reported; one a check answered carries neither,
+            and says so through
+            :attr:`~spindoctor.nav_records.ListedRecord.has_metrics`.  Stubs are
+            answered in the order the selection named them, and a named stub the
+            root holds no document for yields nothing.
 
         Raises:
-            ValueError: If the selection carries ``stubs``, ``instrument``,
-                ``start_et`` or ``stop_et``, naming which.  A listing opens no
-                document, so it cannot answer what a document says, and a
-                restriction silently ignored is a wrong answer rather than a
-                missing feature: a caller would read a listing of the whole root
-                as a listing of one mission.  Also if the selection names a root
-                this source does not hold.
+            ValueError: If the selection carries ``instrument``, ``start_et`` or
+                ``stop_et``, naming which.  A listing opens no document, so it
+                cannot answer what a document says, and a restriction silently
+                ignored is a wrong answer rather than a missing feature: a
+                caller would read a listing of the whole root as a listing of
+                one mission.  Also if the selection names a root this source
+                does not hold, or names stubs without resolving to exactly one
+                root, since a stub is a key under a root.
             UnlistableDirectoryError: If a directory under a selected root could
                 not be listed, or :class:`UnlistableRootError` if a selected
                 root could not be listed at all.  Raised from the walk, so it
-                reaches the caller as it reads.
+                reaches the caller as it reads.  A listing of named stubs is
+                answered about files rather than about a whole root, so a
+                directory of the tree that is not there holds none of them
+                instead of ending the listing, which is the answer a check of
+                one of those files gives.
         """
         refuse_what_a_listing_cannot_answer(selection)
-        return self._listing_of(selected_roots(self._roots, selection.roots), selection.subtrees)
+        roots = selected_roots(self._roots, selection.roots)
+        if not selection.stubs:
+            return self._listing_of(roots, selection.subtrees)
+        return self._listing_of_named(root_for_stubs(roots, selection.stubs), selection.stubs)
 
     def records(self, selection: Selection) -> Iterator[NavRecord | UnreadableFile]:
         """Return the records the selection covers, yielded one at a time.
@@ -682,6 +473,172 @@ class TreeRecordSource:
         except MetadataDocumentError as exc:
             return UnreadableFile(path=found.path, stub=found.stub, reason=exc.reason)
 
+    def _listing_of_named(self, root_url: str, stubs: Sequence[str]) -> Iterator[ListedRecord]:
+        """Say which of the named documents are there, by whichever call is cheap.
+
+        The whole of the decision, made here so that no caller makes it: one
+        caller asking two ways would be two answers to keep true of each other,
+        and the question is the same one either way.
+
+        Parameters:
+            root_url: The one normalized root those keys are under.
+            stubs: The stubs to answer about, in the order to answer them.
+
+        Returns:
+            One entry per named document that is there, in the order the stubs
+            were named.
+
+        Raises:
+            UnlistableDirectoryError: From the walk a remote root is answered
+                from, for a directory under a named stub's own that would not be
+                listed.
+        """
+        root = FCPath(root_url)
+        if root.is_local():
+            return self._checked(root, stubs)
+        return self._found_in_a_walk(root, root_url, stubs)
+
+    @staticmethod
+    def _checked(root: FCPath, stubs: Sequence[str]) -> Iterator[ListedRecord]:
+        """Ask the filesystem about each named document, a batch of paths at a time.
+
+        The call that costs a syscall per file, which is what makes it the cheap
+        one on a local root wherever the question is worth asking: measured over
+        a volume of fifty thousand documents, ten files named beat a walk of
+        their directories by three orders of magnitude, a fifth of the volume by
+        two and a half times, and only naming very nearly every document in it
+        does the walk come back ahead, by about half.  Batched so that a caller
+        naming a mission's worth of keys does not put every one of them in one
+        list.
+
+        Parameters:
+            root: The results root the stubs are keys under, which is local.
+            stubs: The stubs to answer about, in the order to answer them.
+
+        Yields:
+            One entry per named document that is there, carrying neither metric.
+            A check says whether the file is there and reports nothing else
+            about it, so a consumer that needs the metrics reads
+            :attr:`~spindoctor.nav_records.ListedRecord.has_metrics` and finds
+            them absent, rather than being handed a stand-in for them.
+        """
+        for batch in in_batches(iter(stubs), RETRIEVE_BATCH_SIZE):
+            sub_paths: list[str | Path] = [f'{stub}{METADATA_SUFFIX}' for stub in batch]
+            there = cast(list[bool], root.exists(sub_paths))
+            for stub, found in zip(batch, there, strict=True):
+                if found:
+                    yield ListedRecord(
+                        stub=stub, path=document_path(root, stub), mtime_ns=None, size_bytes=None
+                    )
+
+    def _found_in_a_walk(
+        self, root: FCPath, root_url: str, stubs: Sequence[str]
+    ) -> Iterator[ListedRecord]:
+        """Answer about the named documents from a walk of the directories they lie in.
+
+        The call that costs one round trip per directory for about a thousand
+        entries rather than one round trip per file, which is what makes it the
+        cheap one on a cloud root above roughly a thousandth of the root.  What
+        a walk found is kept for the rest of the run: a scan asks in batches,
+        and a walk per batch would list one directory once for every batch of
+        the images under it.
+
+        Parameters:
+            root: The results root the stubs are keys under, which is remote.
+            root_url: The same root normalized, which is half of what a walk is
+                remembered under.
+            stubs: The stubs to answer about, in the order to answer them.
+
+        Yields:
+            One entry per named document a walk of this root found, in the order
+            the stubs were named, carrying the two metrics the listing reported.
+
+        Raises:
+            UnlistableDirectoryError: If a directory under one of the walked
+                ones would not be listed.
+        """
+        self._walk_for(root, root_url, stubs)
+        for stub in stubs:
+            found = self._walked_entry(root_url, stub)
+            if found is not None:
+                yield found
+
+    def _walk_for(self, root: FCPath, root_url: str, stubs: Sequence[str]) -> None:
+        """Walk whatever of this root the named stubs are not already answered from.
+
+        Parameters:
+            root: The results root, which is remote.
+            root_url: The same root normalized, which is half of the key.
+            stubs: The stubs to be answered about.
+        """
+        if (root_url, '') in self._walked:
+            # The whole root is in hand, so every stub under it is answered.
+            return
+        wanted = {subtree_of(stub) or '' for stub in stubs}
+        # A stub with no subtree above it names a document directly under the
+        # root, and the only walk that reaches one is a walk of the root -- which
+        # covers every other stub's directory too, so it is the only walk left
+        # to make.
+        for scope in sorted({''} if '' in wanted else wanted):
+            key = (root_url, scope)
+            if key not in self._walked:
+                self._walked[key] = self._walk_of(root, scope)
+
+    def _walk_of(self, root: FCPath, scope: str) -> dict[str, ListedRecord]:
+        """List one top-level directory of a root and everything under it, by stub.
+
+        Parameters:
+            root: The results root.
+            scope: The top-level directory to walk, or empty for the whole root.
+
+        Returns:
+            Every document found, keyed by its stub.  Empty when that directory
+            is not there at all: the root holds no such directory, so it holds
+            none of the documents under it, which is the answer a check of one
+            of those files gives on a local root.  Every other way a directory
+            refuses to be listed is a directory whose documents nobody saw, and
+            is refused rather than read as an absence.
+
+        Raises:
+            UnlistableDirectoryError: If the directory is there and would not be
+                listed, or if any directory under it would not be.
+        """
+        directory = root if scope == '' else root / scope
+        unlistable = UnlistableRootError if scope == '' else UnlistableDirectoryError
+        try:
+            return {
+                entry.stub: entry
+                for entry in walk_from(
+                    directory,
+                    '' if scope == '' else f'{scope}/',
+                    {},
+                    unlistable=unlistable,
+                    logger=self._logger,
+                )
+            }
+        except UnlistableDirectoryError as exc:
+            if exc.directory != directory.as_posix() or not isinstance(
+                exc.__cause__, (FileNotFoundError, NotADirectoryError)
+            ):
+                raise
+        return {}
+
+    def _walked_entry(self, root_url: str, stub: str) -> ListedRecord | None:
+        """Return what a walk of this root found for one stub, if anything did.
+
+        Parameters:
+            root_url: The normalized root the stub is a key under, which is what
+                keeps one root's answer out of another's.
+            stub: The stub.
+
+        Returns:
+            The listing entry, or None when no walk of this root found it.
+        """
+        whole = self._walked.get((root_url, ''))
+        if whole is not None:
+            return whole.get(stub)
+        return self._walked.get((root_url, subtree_of(stub) or ''), {}).get(stub)
+
     def _listing_of(self, roots: Sequence[str], subtrees: Sequence[str]) -> Iterator[ListedRecord]:
         """Walk each root in turn, yielding its documents as they are found.
 
@@ -727,7 +684,13 @@ class TreeRecordSource:
         return f'the navigation documents under {", ".join(self._roots)}'
 
     def close(self) -> None:
-        """Release nothing: reading documents holds nothing open."""
+        """Release what a listing of named documents walked, and nothing else.
+
+        Reading documents holds nothing open, so this is the whole of it: a walk
+        made to answer one batch of named stubs is held for every later batch of
+        the same scan, and a run that is done with the source is done with it.
+        """
+        self._walked.clear()
 
     def _listing_of_root(self, root: FCPath, subtrees: Sequence[str]) -> Iterator[ListedRecord]:
         """Yield one root's documents, restricted to the named top-level directories.
@@ -754,12 +717,12 @@ class TreeRecordSource:
         # listed once between them rather than once each.
         visited: dict[tuple[int, int], str] = {}
         if not subtrees:
-            yield from _walk_from(
+            yield from walk_from(
                 root, '', visited, unlistable=UnlistableRootError, logger=self._logger
             )
             return
         for subtree in subtrees:
-            yield from _walk_from(
+            yield from walk_from(
                 root / subtree,
                 f'{subtree}/',
                 visited,

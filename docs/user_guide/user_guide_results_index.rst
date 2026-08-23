@@ -112,9 +112,10 @@ Which programs read it
        refusal for a retrieval that failed once.
    * - ``sd_offset``
      - The results-based selection filters (``--has-offset-file``,
-       ``--has-no-offset-file``, the error filters). Given no index, a listing
-       of each selected volume says which images have a document, and the
-       documents of the candidate images say what each one records.
+       ``--has-no-offset-file``, the error filters). Given no index, a run
+       selecting images that have a document lists each selected volume, a run
+       selecting images that have none asks about its candidate images by name,
+       and the documents of the candidate images say what each one records.
    * - ``sd_backplanes``, ``sd_backplanes_cloud_tasks``
      - Each image's recorded status and pointing, which the stage reads before
        it decides there is work to do.

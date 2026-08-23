@@ -210,12 +210,25 @@ reason, so a selection short for this reason says so rather than only coming bac
 smaller than expected.
 
 Two questions cover all six flags, and they are asked at different moments
-because they need different things. Which images the results root holds a
-document for is read from a listing, once, when the enumeration starts; it opens
-no document at all and so costs one listing per directory rather than one read
-per image. That answers ``--has-offset-file`` and ``--has-no-offset-file``
-outright, and testing a candidate image against it afterwards is a set lookup
-that costs nothing.
+because they need different things.
+
+Which images the results root holds a document for opens no document at all, and
+a run selecting images that *have* one --- ``--has-offset-file``, and every error
+filter, since each of those reads what a document records --- asks it once, when
+the enumeration starts, by listing the volumes it selected. That costs one
+listing per directory rather than one read per image, and testing a candidate
+image against the answer afterwards is a set lookup that costs nothing.
+
+A run selecting images that have *none* --- ``--has-no-offset-file`` --- asks the
+same question about the candidate images themselves, in batches, as the
+enumeration offers them. It keeps the images the results root holds nothing for,
+so every entry a listing of a whole volume produced would be an entry to reject
+from: a run whose other constraints name ten images would pay for fifty thousand
+of them to answer about ten. Asking about the candidates instead costs a check
+per candidate on a local results root, where a check is a system call, and one
+listing per directory on a cloud one, where it is a paid round trip --- and on a
+cloud root one listing serves every batch of the run rather than being taken
+again for each.
 
 What each document records is read from the per-image facts, in batches, as the
 enumeration offers its candidates. An error filter has to read a document, and
@@ -228,16 +241,23 @@ cloud results root, one paid download apiece. Only images that have a document
 are ever asked about, since the listing has already excluded the rest, which is
 also what makes every error filter keep only images that have one.
 
-Only the volumes the enumeration selected are asked about, and they are asked
-about one at a time. Reading the results tree, a selected volume the results
-root has no directory for contributes nothing: a volume nobody has navigated yet
-has no directory under the results root, which is an ordinary state of a results
-tree rather than a reason to stop. A directory that is there and will not be
-listed -- this user may not read it, the share it lives on has gone away -- ends
-the run instead, because a filter answering from what it could see would silently
-select images it has no evidence about. Asking one volume at a time is what
-tells those apart: a single request covering all of them would end at the first
-volume it could not read, and every volume after it would go unasked.
+The listing taken when the enumeration starts covers the volumes the enumeration
+selected and no others, and they are asked about one at a time. Reading the
+results tree, a selected volume the results root has no directory for
+contributes nothing: a volume nobody has navigated yet has no directory under
+the results root, which is an ordinary state of a results tree rather than a
+reason to stop. A directory that is there and will not be listed -- this user may
+not read it, the share it lives on has gone away -- ends the run instead, because
+a filter answering from what it could see would silently select images it has no
+evidence about. Asking one volume at a time is what tells those apart: a single
+request covering all of them would end at the first volume it could not read, and
+every volume after it would go unasked.
+
+A run that asks about its candidates needs no such restriction and applies none.
+The images it is offered come from the volumes the enumeration walked, so naming
+those volumes as well would narrow nothing, and a volume the results root has no
+directory for still costs nothing and ends nothing: the images under it are
+images the root holds no document for.
 
 Given ``--results-db``, whichever of the two questions the flags call for is
 answered from the index's rows, and the results tree is not read at all. A

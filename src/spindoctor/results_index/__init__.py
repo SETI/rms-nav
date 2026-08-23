@@ -64,8 +64,9 @@ from spindoctor.results_index.engine import (
     reporting_a_failed_read,
 )
 from spindoctor.results_index.masking import masked_url
+from spindoctor.results_index.open_source import open_record_source
 from spindoctor.results_index.rebuild import RECORD_FIELDS, RecordField, record_from_row
-from spindoctor.results_index.record_source import IndexRecordSource, open_record_source
+from spindoctor.results_index.record_source import IndexRecordSource
 from spindoctor.results_index.roots import (
     RootNotIngestedError,
     ingested_roots,

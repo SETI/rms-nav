@@ -15,11 +15,26 @@ implementation serve both storages.  Two of the seam's questions cover all six
 flags, and they are asked at different moments because they need different
 things.
 
-A listing of the selected subtrees says which images have a navigation document.
-It opens no document, so it costs one listing per directory rather than one read
-per image, and it is asked once when the filter is built.  That answers the
-presence and absence filters outright, and it settles the half of every error
-filter that requires the document to exist.
+A listing says which images have a navigation document.  It opens no document,
+so it is the cheap question over either storage, and it is asked in one of two
+ways depending on what the run is selecting.
+
+A run selecting images that *have* a document -- ``--has-offset-file``, and every
+error filter, each of which reads what a document records and so requires one to
+exist -- lists the selected subtrees once, when the filter is built.  Testing an
+image afterwards is then a set lookup, and the same listing is what the run log
+reports the root as holding.
+
+A run selecting images that have *none* -- ``--has-no-offset-file`` -- asks about
+the candidates the enumeration produced, in batches, naming their stubs.  It has
+to be asked that way to be worth asking: the run keeps the images the results
+root holds nothing for, so a listing of the whole of every selected volume would
+produce a set used only to reject from, and a run whose other constraints name
+ten images would pay for fifty thousand entries to answer about ten.  What the
+seam does with the stubs it is handed is the seam's own business: it checks the
+named files where a check is a syscall and walks their directories where it is a
+paid round trip, and where it walks, one walk of a root serves every batch of the
+same scan.
 
 What a document records is asked of the per-image facts, in batches, as the
 enumeration offers its candidates.  It has to be: an error filter reads a
@@ -49,13 +64,21 @@ reported one at a time because a real results root holds hundreds of them, and
 reported at all because a selection that is short for this reason is otherwise
 indistinguishable from a root holding no such image.
 
-Only the subtrees the enumeration selected are listed, one at a time.  A subtree
-the results root does not hold is an ordinary state -- a volume nobody has
-navigated yet has no directory under the results root -- so it contributes no
-documents rather than ending the run, while a subtree that is there and will not
-be read still does.  Asking about one subtree at a time is what allows that
-distinction: a listing of several ends at the first one it cannot read, and the
-subtrees after it would go unasked.
+The listing taken when the filter is built covers the subtrees the enumeration
+selected and no others, one at a time.  A subtree the results root does not hold
+is an ordinary state -- a volume nobody has navigated yet has no directory under
+the results root -- so it contributes no documents rather than ending the run,
+while a subtree that is there and will not be read still does.  Asking about one
+subtree at a time is what allows that distinction: a listing of several ends at
+the first one it cannot read, and the subtrees after it would go unasked.
+
+A scan that names its candidates needs no such restriction, and applies none.
+It asks about the images the enumeration accepted, which come from the selected
+volumes because that is what the enumeration walked, so naming a volume as well
+would narrow nothing.  A volume the results root has no directory for still
+costs nothing and ends nothing: the images under it are images the root holds no
+document for, which is what the seam answers about a named file whose directory
+is not there.
 
 What the index answers differently
 ----------------------------------
@@ -201,6 +224,18 @@ def _file_count(count: int) -> str:
     return f'{count} file' if count == 1 else f'{count} files'
 
 
+def _image_count(count: int) -> str:
+    """Render a number of images so that a line reads for one of them as for many.
+
+    Parameters:
+        count: How many images.
+
+    Returns:
+        The count and the noun agreeing with it.
+    """
+    return f'{count} image' if count == 1 else f'{count} images'
+
+
 def _elapsed_phrase(seconds: float) -> str:
     """Return an interval in the coarsest unit that has a whole number of it.
 
@@ -290,22 +325,25 @@ class ResultsFilter:
     Constructed once per enumeration when any of the results-based selection
     flags is active.  Construction validates the flag combination (the flags
     AND together; a combination carrying a contradictory pair raises, naming
-    every contradiction it carries rather than the first one found) and then
-    lists the selected subtrees, so that testing an image for presence or
-    absence afterwards is a set lookup and costs nothing.
+    every contradiction it carries rather than the first one found) and, for a
+    run selecting images that have a document, lists the selected subtrees, so
+    that testing an image afterwards is a set lookup and costs nothing.
 
-    The filter is applied in two stages, because the two questions need
-    different things:
+    The filter is applied in two stages, because the questions need different
+    things:
 
     - :meth:`passes` is the per-image test, answered from that listing.  It
-      settles presence and absence outright, and for an error filter it settles
-      the half that requires the document to exist.
-    - :meth:`filter_batch` asks what a batch of candidates' documents record,
-      naming their stubs, and applies the error filters to the answer.  It is
-      asked of the candidates rather than of the subtrees because reading a
-      document is what an error filter costs, and the candidates are what a run
-      might still keep.  :attr:`needs_batch_filtering` says whether it has
-      anything to do.
+      settles ``has_offset_file`` outright, and for an error filter it settles
+      the half that requires the document to exist.  A run that lists no
+      subtrees keeps every image it is offered here and settles the whole of its
+      selection in the stage below.
+    - :meth:`filter_batch` asks about a batch of candidates by name: which of
+      them the results root holds a document for, when the run selects the ones
+      it holds none for, and what their documents record, when an error filter
+      is active.  Both are asked of the candidates rather than of the subtrees,
+      because the candidates are what a run might still keep and the other
+      selection constraints are what decide them.
+      :attr:`needs_batch_filtering` says whether it has anything to do.
 
     A filter with a second question to ask holds its storage open until it is
     closed, so it is usable as a context manager and an enumeration closes it
@@ -457,13 +495,22 @@ class ResultsFilter:
         # bury the selection the run was asked for.
         self._unreadable_count = 0
         self._unreadable_example: UnreadableFile | None = None
-        # None where no flag asked anything of the results root, which is a
-        # filter that keeps every image it is offered.
+        # What an absence scan has asked about and how much of it was already
+        # navigated, which is what the run log owes an operator whose selection
+        # was answered a batch at a time.
+        self._candidates = 0
+        self._documented = 0
+        # None where nothing was listed at construction, which is a filter that
+        # keeps every image it is offered here: a run with no results-based flag
+        # at all, and one selecting the images this root holds no document for,
+        # which asks about its candidates instead.
         self._stubs: frozenset[str] | None = None
-        if self._needs_offset_presence or has_no_offset_file:
+        if self._needs_offset_presence:
             # Fixed here rather than left as it came: an iterator is emptied by
             # whichever pass reads it first.
             self._stubs = self._documented_stubs(tuple(volumes))
+        elif has_no_offset_file:
+            self._source = self._held_open()
 
     def __enter__(self) -> 'ResultsFilter':
         """Enter an enumeration's use of this filter.
@@ -489,13 +536,14 @@ class ResultsFilter:
         self.close()
 
     def close(self) -> None:
-        """Report what the scan read nothing out of, and release its storage.
+        """Report what the scan found and what it read nothing out of, and release it.
 
         Called when the enumeration is done with the filter, however it ended,
-        which is the moment the scan is over and its count of unreadable
-        candidates is final.  A filter with no second question to ask never held
-        a storage open, and closing twice costs nothing and says nothing twice.
+        which is the moment the scan is over and its counts are final.  A filter
+        with no second question to ask never held a storage open, and closing
+        twice costs nothing and says nothing twice.
         """
+        self._report_candidates()
         self._report_unreadable()
         if self._source is not None:
             self._source.close()
@@ -510,60 +558,113 @@ class ResultsFilter:
         it is accepted.
 
         Returns:
-            True when an error filter is active, which is the only filter that
-            needs a document read.  Presence and absence are settled by the
-            listing taken when the filter was built.
+            True when an error filter is active, which needs a document read,
+            and when the run selects the images this root holds no document for,
+            which asks about its candidates by name.  ``has_offset_file`` alone
+            is settled by the listing taken when the filter was built.
         """
-        return self._needs_metadata_read
+        return self._needs_metadata_read or self._has_no_offset_file
 
     def passes(self, results_path_stub: str) -> bool:
-        """True if the image satisfies the filters the listing settles.
+        """True if the image satisfies the filters the construction listing settles.
 
         A set lookup: the results root was listed once when this filter was
         built, so an enumeration offering a million candidates pays for that
-        answer once.  It settles the presence and absence filters outright, and
-        for an error filter it settles the half that requires the document to
-        exist -- what the document records is :meth:`filter_batch`'s.
+        answer once.  It settles ``has_offset_file`` outright, and for an error
+        filter it settles the half that requires the document to exist -- what
+        the document records is :meth:`filter_batch`'s.
 
         Parameters:
             results_path_stub: The image's results path stub (relative to the
                 results root, no suffix).
 
         Returns:
-            True if the image is still a candidate.  With no results-based flag
-            active every image is, since there is nothing to test it against.
+            True if the image is still a candidate.  Every image is when nothing
+            was listed at construction: a run with no results-based flag has
+            nothing to test one against, and one selecting the images this root
+            holds no document for tests them in :meth:`filter_batch`, against
+            the answer to a question about the candidates themselves.
         """
         if self._stubs is None:
             return True
-        if self._needs_offset_presence and results_path_stub not in self._stubs:
-            return False
-        return not (self._has_no_offset_file and results_path_stub in self._stubs)
+        return results_path_stub in self._stubs
 
     def filter_batch(self, image_files: list[ImageFile]) -> list[ImageFile]:
-        """Apply the error filters to a batch of candidates, in input order.
+        """Apply the filters asked of a batch of candidates, in input order.
 
-        One question per batch, naming the candidates' stubs, so the documents
-        read are the ones a run might still keep rather than every document
-        under the subtrees it enumerated.  Every stub named here passed
-        :meth:`passes`, so each of them has a document and none is read for an
-        image already excluded.
+        One question per batch, naming the candidates' stubs, so what is asked
+        about is the images a run might still keep rather than everything under
+        the subtrees it enumerated.
+
+        Two filters are asked here, and never both: a run selecting the images
+        the results root holds no document for asks which of the batch it holds
+        one for, and an error filter asks what the batch's documents record.
+        Every stub an error filter names passed :meth:`passes`, so each of them
+        has a document and none is read for an image already excluded.
 
         Parameters:
             image_files: Candidates that already passed :meth:`passes`.
 
         Returns:
-            Those of them the active error filters keep, in input order.  With
-            no error filter active the batch is returned as it was given.
+            Those of them the active filters keep, in input order.  With neither
+            asked here the batch is returned as it was given.
 
         Raises:
             SelectionError: If a results index stops answering while the
                 enumeration reads it, which is the same refusal failing to read
                 it at the start is.
         """
-        if not image_files or not self._needs_metadata_read:
+        if not image_files:
+            return image_files
+        if self._has_no_offset_file:
+            return self._undocumented(image_files)
+        if not self._needs_metadata_read:
             return image_files
         matching = self._matching_stubs(tuple(image.results_path_stub for image in image_files))
         return [image for image in image_files if image.results_path_stub in matching]
+
+    def _undocumented(self, image_files: list[ImageFile]) -> list[ImageFile]:
+        """Keep the candidates of one batch the results root holds no document for.
+
+        Parameters:
+            image_files: The batch, in the order the enumeration accepted it.
+
+        Returns:
+            Those of them nothing has been written for, in input order.
+
+        Raises:
+            SelectionError: If a results index stops answering while this reads
+                it.
+        """
+        documented = self._documented_of(tuple(image.results_path_stub for image in image_files))
+        self._candidates += len(image_files)
+        self._documented += len(documented)
+        return [image for image in image_files if image.results_path_stub not in documented]
+
+    def _documented_of(self, stubs: Sequence[str]) -> frozenset[str]:
+        """Ask which of one batch of candidates the storage holds a document for.
+
+        Parameters:
+            stubs: The candidates' results path stubs.
+
+        Returns:
+            Those the storage holds a file for.  A file that is there and says
+            nothing readable is one of them, because presence is a question
+            about the file and not about what is in it.
+
+        Raises:
+            SelectionError: If a results index stops answering while this reads
+                it.
+        """
+        source = self._source
+        if source is None:  # pragma: no cover - closed only when nothing asks again
+            raise SelectionError('this selection filter has been closed and cannot answer')
+        try:
+            return frozenset(
+                listed.stub for listed in source.listing(Selection(stubs=tuple(stubs)))
+            )
+        except ValueError as exc:
+            raise SelectionError(str(exc)) from exc
 
     def _open(self) -> RecordSource:
         """Open the storage this run resolved.
@@ -588,6 +689,30 @@ class ResultsFilter:
             # where it becomes the type a program can report on without
             # catching every other ValueError an enumeration raises.
             raise SelectionError(str(exc)) from exc
+
+    def _held_open(self) -> RecordSource:
+        """Open the storage a scan will ask about its candidates, and say so.
+
+        The scan has counted nothing yet, so what is reported is what a run over
+        an index is owed whatever it goes on to find: how old the answer it is
+        about to be given is.
+
+        Returns:
+            The source, which the filter holds until it is closed.
+
+        Raises:
+            SelectionError: If the index cannot be opened, cannot be read, or
+                holds no completed ingest of this results root.  Whatever was
+                opened is released before any failure leaves this method, since
+                a constructor that raises hands the caller no filter to close.
+        """
+        source = self._open()
+        try:
+            self._report(None)
+        except BaseException:
+            source.close()
+            raise
+        return source
 
     def _documented_stubs(self, subtrees: Sequence[str]) -> frozenset[str]:
         """List the selected subtrees and report what they hold.
@@ -697,34 +822,70 @@ class ResultsFilter:
         self._unreadable_count = 0
         self._unreadable_example = None
 
-    def _report(self, documents: int) -> None:
+    def _report(self, documents: int | None) -> None:
         """Say what the results root was found to hold, and how current that is.
 
         Parameters:
             documents: How many offset metadata files the root holds under the
-                selected subtrees.
+                selected subtrees, or None for a scan that asks about its
+                candidates as it meets them and has therefore counted nothing
+                yet.  What such a scan found is reported when it is over, by
+                :meth:`_report_candidates`.
 
         Raises:
             SelectionError: If the index cannot be read for the age of its
                 answer, which is the same refusal reading it for the answer is.
         """
         if self._results_db_url is None:
-            self._logger.info(
-                '*** Results scan found %d offset metadata files under %s',
-                documents,
-                self._nav_results_root,
-            )
+            if documents is None:
+                self._logger.info(
+                    '*** Results scan will ask %s about each candidate image',
+                    self._nav_results_root,
+                )
+            else:
+                self._logger.info(
+                    '*** Results scan found %d offset metadata files under %s',
+                    documents,
+                    self._nav_results_root,
+                )
             return
         try:
             ingested_utc = snapshot_finish_time(self._results_db_url, self._nav_results_root)
         except ValueError as exc:
             raise SelectionError(str(exc)) from exc
+        if documents is None:
+            self._logger.info(
+                '*** Results index answers about the images under %s, ingested %s',
+                self._nav_results_root,
+                _snapshot_age(ingested_utc),
+            )
+            return
         self._logger.info(
             '*** Results index holds %d offset metadata files under %s, ingested %s',
             documents,
             self._nav_results_root,
             _snapshot_age(ingested_utc),
         )
+
+    def _report_candidates(self) -> None:
+        """Say how much of what a scan asked about was already navigated.
+
+        A scan that asks about its candidates never counts the root, so this is
+        what stands in the place of the count a construction listing reports:
+        how many images the run offered and how many of them already had a
+        document.  Nothing is said by a filter that asked about none, and
+        nothing is said twice: the counts are cleared once reported.
+        """
+        if not self._candidates:
+            return
+        self._logger.info(
+            '*** Results scan asked about %s under %s, %d of which had a navigation document',
+            _image_count(self._candidates),
+            self._nav_results_root,
+            self._documented,
+        )
+        self._candidates = 0
+        self._documented = 0
 
     def _listed(self, source: RecordSource, subtrees: Sequence[str]) -> Iterator[ListedRecord]:
         """Yield what the storage holds under each selected subtree in turn.

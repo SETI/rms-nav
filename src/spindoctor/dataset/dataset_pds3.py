@@ -751,10 +751,11 @@ class DataSetPDS3(DataSet):
             )
         ]
 
-        # Build the results-based filter, if any of its flags is active. It lists
-        # the selected volumes once, at construction, so testing an image for
-        # presence or absence afterwards is a set lookup; an error filter then
-        # asks what a batch of candidates' documents record.
+        # Build the results-based filter, if any of its flags is active. A run
+        # selecting images that have a document lists the selected volumes once,
+        # at construction, so testing an image afterwards is a set lookup; a run
+        # selecting images that have none, and an error filter, ask about a batch
+        # of candidates instead.
         results_filter: ResultsFilter | None = None
         if any(results_filter_flags.values()):
             resolved_arguments = arguments if arguments is not None else argparse.Namespace()
@@ -935,7 +936,8 @@ class DataSetPDS3(DataSet):
                 ):
                     return None, False
 
-                # Check the filters the listing settles (a set lookup, no round trips)
+                # Check the filters the construction listing settles (a set lookup,
+                # no round trips)
                 results_path_stub = self._results_path_stub(search_vol, label_filespec)
                 if results_filter is not None and not results_filter.passes(results_path_stub):
                     return None, False
@@ -954,7 +956,7 @@ class DataSetPDS3(DataSet):
                 # Uniform random sampling across every selected volume: collect every row
                 # passing the cheap filters (index-derived criteria plus the listed
                 # results sets) into one pool, shuffle it, then rejection-sample through
-                # the batched error filter until the requested count is reached. Reading
+                # the batched filter until the requested count is reached. Reading
                 # every volume's index is required for cross-volume uniformity (the
                 # indexes are cached locally, so repeat runs are cheap); the pool holds
                 # one ImageFile per qualifying image, so an unconstrained sample costs
@@ -995,9 +997,9 @@ class DataSetPDS3(DataSet):
             # whose FDS counts roll over between encounter volume sets) no
             # image-number-based stop applies and every requested volume is scanned,
             # though a requested result limit can still end the scan early. Accepted
-            # images pass through the batched error filter in buffered chunks (so one
+            # images pass through the batched filter in buffered chunks (so one
             # question covers many candidates) while preserving enumeration order; with
-            # no error filter active the buffer flushes immediately.
+            # nothing left to ask per batch the buffer flushes immediately.
             num_yields = 0
             pending: list[ImageFile] = []
             pending_flush_size = (
@@ -1007,11 +1009,11 @@ class DataSetPDS3(DataSet):
             )
 
             def _flush_pending() -> list[ImageFile]:
-                """Run the pending buffer through the batched error filter.
+                """Run the pending buffer through the filter's batched question.
 
                 Returns:
-                    The images of the buffer that the error filters keep, in the
-                    order the enumeration accepted them.
+                    The images of the buffer the filter keeps, in the order the
+                    enumeration accepted them.
                 """
                 nonlocal pending
                 batch, pending = pending, []

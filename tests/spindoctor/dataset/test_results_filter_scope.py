@@ -519,6 +519,104 @@ def test_a_root_named_through_a_parent_segment_is_the_root_the_ingest_recorded(
 
 
 # ---------------------------------------------------------------------------
+# What a scan of the candidates themselves answers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('from_an_index', STORAGES)
+def test_an_absence_filter_keeps_the_candidates_this_root_holds_nothing_for(
+    tmp_path: Path, from_an_index: bool
+) -> None:
+    """The whole answer, stated, so that every exclusion below is a real one.
+
+    Parameters:
+        tmp_path: Directory the roots and any index are written under.
+        from_an_index: Whether the filter reads an index rather than the tree.
+    """
+    kept = _answering(tmp_path, from_an_index=from_an_index, has_no_offset_file=True)
+    assert kept == [
+        ONLY_IN_THE_OTHER_ROOT,
+        ONLY_REFUSED_IN_THE_OTHER_ROOT,
+        ONLY_IN_THE_OTHER_ROOTS_OTHER_VOLUME,
+    ]
+
+
+@pytest.mark.parametrize('from_an_index', STORAGES)
+def test_an_absence_filter_drops_a_candidate_this_root_holds_a_document_for(
+    tmp_path: Path, from_an_index: bool
+) -> None:
+    """The image the run is not to navigate again.
+
+    Parameters:
+        tmp_path: Directory the roots and any index are written under.
+        from_an_index: Whether the filter reads an index rather than the tree.
+    """
+    kept = _answering(tmp_path, from_an_index=from_an_index, has_no_offset_file=True)
+    assert SELECTED not in kept
+
+
+@pytest.mark.parametrize('from_an_index', STORAGES)
+def test_an_absence_filter_drops_a_candidate_whose_file_says_nothing_readable(
+    tmp_path: Path, from_an_index: bool
+) -> None:
+    """Presence is a question about the file and not about what is in it.
+
+    Parameters:
+        tmp_path: Directory the roots and any index are written under.
+        from_an_index: Whether the filter reads an index rather than the tree.
+    """
+    kept = _answering(tmp_path, from_an_index=from_an_index, has_no_offset_file=True)
+    assert UNSELECTED_REFUSED not in kept
+
+
+@pytest.mark.parametrize('from_an_index', STORAGES)
+def test_an_absence_filter_keeps_a_candidate_only_the_other_root_holds(
+    tmp_path: Path, from_an_index: bool
+) -> None:
+    """A stub is a key under every root there is, and only this one's answers.
+
+    Parameters:
+        tmp_path: Directory the roots and any index are written under.
+        from_an_index: Whether the filter reads an index rather than the tree.
+    """
+    kept = _answering(tmp_path, from_an_index=from_an_index, has_no_offset_file=True)
+    assert ONLY_IN_THE_OTHER_ROOT in kept
+
+
+@pytest.mark.parametrize('from_an_index', STORAGES)
+def test_an_absence_filter_keeps_a_file_only_the_other_root_refused(
+    tmp_path: Path, from_an_index: bool
+) -> None:
+    """The other half of the key, over the table that records a refused file.
+
+    Parameters:
+        tmp_path: Directory the roots and any index are written under.
+        from_an_index: Whether the filter reads an index rather than the tree.
+    """
+    kept = _answering(tmp_path, from_an_index=from_an_index, has_no_offset_file=True)
+    assert ONLY_REFUSED_IN_THE_OTHER_ROOT in kept
+
+
+@pytest.mark.parametrize('from_an_index', STORAGES)
+def test_an_absence_filter_answers_about_a_candidate_under_no_selected_volume(
+    tmp_path: Path, from_an_index: bool
+) -> None:
+    """It asks about the image, so where the image sits narrows nothing.
+
+    An enumeration only offers images from the volumes it walked, so naming
+    those volumes as well would narrow nothing that is ever offered -- and a
+    scan that named them would answer about this candidate out of a listing that
+    never covered it.
+
+    Parameters:
+        tmp_path: Directory the roots and any index are written under.
+        from_an_index: Whether the filter reads an index rather than the tree.
+    """
+    kept = _answering(tmp_path, from_an_index=from_an_index, has_no_offset_file=True)
+    assert UNSELECTED_VOLUME not in kept
+
+
+# ---------------------------------------------------------------------------
 # What each storage is asked, rather than what it answers
 # ---------------------------------------------------------------------------
 
@@ -527,8 +625,10 @@ class _RecordingSource:
     """A record source that holds nothing and notes what it is asked about.
 
     Parameters:
-        asked: List a listing appends the subtrees it named to.
-        named: List a question about documents appends the stubs it named to.
+        asked: List a listing of subtrees appends the subtrees it named to.
+        named: List a question about named files appends the stubs it named to,
+            whether it asked what those files record or only whether they are
+            there.
     """
 
     def __init__(self, asked: list[tuple[str, ...]], named: list[tuple[str, ...]]) -> None:
@@ -552,7 +652,7 @@ class _RecordingSource:
         self.closes += 1
 
     def listing(self, selection: Selection) -> Iterator[ListedRecord]:
-        """Note the subtrees this question named and report no documents.
+        """Note what this question named and report no documents.
 
         Parameters:
             selection: What the filter asked for.
@@ -560,7 +660,10 @@ class _RecordingSource:
         Returns:
             An empty stream.
         """
-        self._asked.append(selection.subtrees)
+        if selection.stubs:
+            self._named.append(selection.stubs)
+        else:
+            self._asked.append(selection.subtrees)
         return iter(())
 
     def facts(self, selection: Selection) -> Iterator[ImageFacts | UnreadableFile]:
@@ -640,6 +743,43 @@ def _stubs_named_by_a_batch(
     return named
 
 
+def _stubs_listed_by_a_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stubs: Sequence[str]
+) -> list[tuple[str, ...]]:
+    """Build an absence filter over a stand-in storage and batch some candidates at it.
+
+    Parameters:
+        tmp_path: Directory standing in for the results root, which the
+            stand-in storage never reads.
+        monkeypatch: Fixture the stand-in is installed through.
+        stubs: The candidates to offer the batch.
+
+    Returns:
+        The stubs of each question about which files are there, in the order
+        asked.
+    """
+    named: list[tuple[str, ...]] = []
+
+    def recording(roots: Sequence[Any], **kwargs: Any) -> _RecordingSource:
+        return _RecordingSource([], named)
+
+    monkeypatch.setattr(results_filter, 'open_record_source', recording)
+    with ResultsFilter(
+        VOLUMES, str(tmp_path), logger=null_logger(), has_no_offset_file=True
+    ) as results_filter_under_test:
+        results_filter_under_test.filter_batch(
+            [
+                ImageFile(
+                    image_file_url=FCPath(tmp_path / 'x.IMG'),
+                    label_file_url=FCPath(tmp_path / 'x.LBL'),
+                    results_path_stub=stub,
+                )
+                for stub in stubs
+            ]
+        )
+    return named
+
+
 def test_a_presence_filter_asks_about_one_selected_volume_at_a_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -688,6 +828,35 @@ def test_an_error_filter_asks_about_its_candidates_and_not_about_a_volume(
     assert named == [(SELECTED, ERRORED_HERE)]
 
 
+def test_an_absence_filter_lists_no_volume_when_it_is_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It keeps the images the root has nothing for, so a listing of a volume is waste.
+
+    Every entry such a listing produces is one to reject from, so a run whose
+    other constraints name ten images would pay for a whole volume to answer
+    about ten.
+
+    Parameters:
+        tmp_path: Directory standing in for the results root.
+        monkeypatch: Fixture the stand-in storage is installed through.
+    """
+    assert _subtrees_asked_about(tmp_path, monkeypatch, has_no_offset_file=True) == []
+
+
+def test_an_absence_filter_asks_about_its_candidates_and_not_about_a_volume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One question per batch, naming the images the run might still keep.
+
+    Parameters:
+        tmp_path: Directory standing in for the results root.
+        monkeypatch: Fixture the stand-in storage is installed through.
+    """
+    named = _stubs_listed_by_a_batch(tmp_path, monkeypatch, [SELECTED, ERRORED_HERE])
+    assert named == [(SELECTED, ERRORED_HERE)]
+
+
 def _source_of(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **flags: bool) -> _RecordingSource:
     """Build a filter over a stand-in storage and hand that storage back.
 
@@ -728,6 +897,18 @@ def test_leaving_an_error_filter_closes_the_storage_it_held_open(
     assert _source_of(tmp_path, monkeypatch, has_offset_error=True).closes == 1
 
 
+def test_leaving_an_absence_filter_closes_the_storage_it_held_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It asks a question per batch too, so it holds its storage for the enumeration.
+
+    Parameters:
+        tmp_path: Directory standing in for the results root.
+        monkeypatch: Fixture the stand-in storage is installed through.
+    """
+    assert _source_of(tmp_path, monkeypatch, has_no_offset_file=True).closes == 1
+
+
 def test_a_filter_with_nothing_left_to_ask_closes_the_storage_at_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -747,7 +928,7 @@ def test_a_filter_with_nothing_left_to_ask_closes_the_storage_at_once(
     ('flags', 'batches'),
     [
         pytest.param({'has_offset_file': True}, False, id='offset-file'),
-        pytest.param({'has_no_offset_file': True}, False, id='no-offset-file'),
+        pytest.param({'has_no_offset_file': True}, True, id='no-offset-file'),
         pytest.param({'has_offset_error': True}, True, id='offset-error'),
         pytest.param({'has_no_offset_error': True}, True, id='no-offset-error'),
         pytest.param({'has_offset_spice_error': True}, True, id='spice-error'),
@@ -762,9 +943,10 @@ def test_only_a_filter_that_reads_documents_asks_the_enumeration_to_batch(
     Nothing about an answer depends on this, which is why it needs a test of its
     own: a filter that reported the wrong thing here would answer every
     selection correctly and pay for it one candidate at a time, asking a
-    question per image where one question covers sixty-four.  An error filter is
-    the only one with a second question to ask; presence and absence are settled
-    by the listing taken when the filter was built.
+    question per image where one question covers sixty-four.  An error filter
+    has a document to read per batch and an absence filter has a question to ask
+    about one; ``has_offset_file`` is settled by the listing taken when the
+    filter was built.
 
     Parameters:
         tmp_path: Directory standing in for the results root.

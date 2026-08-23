@@ -4,8 +4,9 @@ A navigation pass writes one document per image, and an ingest pass copies what
 a consumer reads into one row per image and its child rows.  Reading a document
 is one file read per image, which on a cloud root is one paid round trip per
 image and a Cassini-scale root holds several hundred thousand; reading a row is
-one query per run.  This module is the half of the seam that reads rows, and the
-factory that decides which half a run gets.
+one query per run.  This module is the half of the seam that reads rows; the
+choice of which half a run gets is
+:func:`spindoctor.results_index.open_record_source`.
 
 The other half -- what a record is, what a document is named, what a caller is
 asking for, the protocol, and the implementation over the documents themselves
@@ -163,7 +164,6 @@ from typing import Any
 
 import sqlalchemy
 from filecache import FCPath
-from pdslogger import PdsLogger
 from sqlalchemy.engine import Connection, Engine
 
 from spindoctor.nav_records import (
@@ -171,9 +171,7 @@ from spindoctor.nav_records import (
     ImageFacts,
     ListedRecord,
     NavRecord,
-    RecordSource,
     Selection,
-    TreeRecordSource,
     UnreadableFile,
     distinct_roots,
     document_path,
@@ -187,13 +185,9 @@ from spindoctor.results_index.engine import reporting_a_failed_read
 from spindoctor.results_index.facts_stream import facts_stream, reading_one_snapshot
 from spindoctor.results_index.masking import masked_url
 from spindoctor.results_index.rebuild import record_from_row
-from spindoctor.results_index.roots import open_index_for_roots
 from spindoctor.results_index.schema import FAILED_FILES, IMAGES
 
-__all__ = [
-    'IndexRecordSource',
-    'open_record_source',
-]
+__all__ = ['IndexRecordSource']
 
 _ROW_FETCH_SIZE = 1000
 """How many rows a streamed query brings back from the server at a time.
@@ -410,27 +404,41 @@ class IndexRecordSource:
         are.  Nothing here reads a document or a record field, which is what
         makes it the cheap call over either storage.
 
+        A selection naming stubs is answered about those keys and no others,
+        which is the question a caller enumerating candidate images asks: which
+        of the ones this run might still keep is recorded here.  It is asked in
+        batches, for the reason every keyed read here is, and each batch's
+        answers are put back into the order the batch named.
+
         Parameters:
-            selection: Which files to list.  Only ``roots`` and ``subtrees`` may
-                be set.
+            selection: Which files to list.  ``instrument``, ``start_et`` and
+                ``stop_et`` may not be set.  A selection naming stubs names the
+                files outright, and its ``subtrees`` narrow nothing further,
+                exactly as they narrow nothing for a stream of records or of
+                facts.
 
         Returns:
             One entry per recorded file, carrying its stub, where the ingest
             found it, and the two metrics that say whether it has changed since.
+            A named stub the index records no file for yields nothing: under a
+            root with a completed ingest that is an image nothing navigated.
 
         Raises:
-            ValueError: If the selection carries ``stubs``, ``instrument``,
-                ``start_et`` or ``stop_et``, naming which.  The index could
-                answer some of those from its columns and deliberately does not:
-                a call that meant one thing over one storage and another over
-                the next would not be a seam, and a listing that ignored a
-                restriction would answer for the whole root as though it were
-                the selection.  Also if the selection names a root this source
-                does not hold, or if the index cannot be read.
+            ValueError: If the selection carries ``instrument``, ``start_et`` or
+                ``stop_et``, naming which.  The index could answer those from
+                its columns and deliberately does not: a call that meant one
+                thing over one storage and another over the next would not be a
+                seam, and a listing that ignored a restriction would answer for
+                the whole root as though it were the selection.  Also if the
+                selection names a root this source does not hold, if it names
+                stubs without resolving to exactly one root, or if the index
+                cannot be read.
         """
         refuse_what_a_listing_cannot_answer(selection)
         roots = selected_roots(self._roots, selection.roots)
-        return self._listing_of(roots, selection.subtrees)
+        if not selection.stubs:
+            return self._listing_of(roots, selection.subtrees)
+        return self._listing_of_stubs(root_for_stubs(roots, selection.stubs), selection.stubs)
 
     def describe(self) -> str:
         """Return the roots and the index the records were read out of.
@@ -455,26 +463,87 @@ class IndexRecordSource:
         Yields:
             One entry per recorded file, in the order the server returned them.
         """
+        yield from self._listed(
+            self._scope(IMAGES, roots, subtrees), self._scope(FAILED_FILES, roots, subtrees)
+        )
+
+    def _listing_of_stubs(self, root_url: str, stubs: Sequence[str]) -> Iterator[ListedRecord]:
+        """List the files a selection named outright, in the order it named them.
+
+        Asked in batches for the reason every keyed read here is: a caller is
+        free to name a mission's worth of keys, and a statement binding every one
+        of them at once is one a driver refuses somewhere above its own parameter
+        limit.  One batch's answers are held so they can be put back into the
+        order the batch named, which is the order naming a file means.
+
+        Parameters:
+            root_url: The one normalized root those keys are under, which both
+                arms filter on: the index is keyed by root and stub together,
+                and a term asking about the stub alone would answer with another
+                root's files.
+            stubs: The stubs to answer about, in the order to answer them.
+
+        Yields:
+            One entry per named stub the index records a file for, in the order
+            named.  A stub it records none for yields nothing.
+        """
+        for batch in in_batches(iter(stubs), RETRIEVE_BATCH_SIZE):
+            found = {
+                entry.stub: entry
+                for entry in self._listed(
+                    [IMAGES.c.root_url == root_url, IMAGES.c.results_path_stub.in_(batch)],
+                    [
+                        FAILED_FILES.c.root_url == root_url,
+                        FAILED_FILES.c.results_path_stub.in_(batch),
+                    ],
+                )
+            }
+            for stub in batch:
+                if stub in found:
+                    yield found[stub]
+
+    def _listed(
+        self,
+        images: Sequence[sqlalchemy.ColumnElement[bool]],
+        refusals: Sequence[sqlalchemy.ColumnElement[bool]],
+    ) -> Iterator[ListedRecord]:
+        """Stream one query over both tables, yielding an entry per recorded file.
+
+        Both tables record a file, so both are read, whichever way the caller
+        narrowed them: the two conditions arrive already built because a listing
+        of a root narrows on its subtrees and a listing of named files narrows on
+        their keys, and everything after that is the same query.
+
+        Parameters:
+            images: What restricts the image rows, which is never empty: every
+                arm filters on the root.
+            refusals: What restricts the rows of the files the ingest refused,
+                to which the exclusion of a stub the images also record is
+                added.
+
+        Yields:
+            One entry per recorded file, in the order the server returned them.
+        """
         documents = sqlalchemy.select(
             IMAGES.c.root_url,
             IMAGES.c.results_path_stub,
             IMAGES.c.source_file,
             IMAGES.c.mtime_ns,
             IMAGES.c.size_bytes,
-        ).where(*self._scope(IMAGES, roots, subtrees))
+        ).where(*images)
         # The refusal table records no path, because the ingest refused the file
         # rather than reading it, so the arm supplies a typed absence and the
         # path is rebuilt from the key.  The cast is what keeps a union of the
         # two arms a union of two text columns on a server that types them.
-        refusals = sqlalchemy.select(
+        refused = sqlalchemy.select(
             FAILED_FILES.c.root_url,
             FAILED_FILES.c.results_path_stub,
             sqlalchemy.cast(sqlalchemy.null(), sqlalchemy.Text).label('source_file'),
             FAILED_FILES.c.mtime_ns,
             FAILED_FILES.c.size_bytes,
-        ).where(*self._scope(FAILED_FILES, roots, subtrees), _has_no_record_row())
+        ).where(*refusals, _has_no_record_row())
         with reporting_a_failed_read(self._raw_url), self._streaming() as connection:
-            for row in connection.execute(documents.union_all(refusals)):
+            for row in connection.execute(documents.union_all(refused)):
                 root_url = str(row.root_url)
                 stub = str(row.results_path_stub)
                 yield ListedRecord(
@@ -926,53 +995,3 @@ def _has_no_record_row() -> sqlalchemy.ColumnElement[bool]:
         IMAGES.c.root_url == FAILED_FILES.c.root_url,
         IMAGES.c.results_path_stub == FAILED_FILES.c.results_path_stub,
     )
-
-
-def open_record_source(
-    roots: Sequence[str | Path | FCPath],
-    *,
-    results_db_url: str | None = None,
-    columns: Sequence[sqlalchemy.Column[Any]] = (),
-    logger: PdsLogger | None = None,
-) -> RecordSource:
-    """Open the source a run reads its navigation records through.
-
-    With no index URL the source reads documents, which is every program's
-    default.  With one, the index is opened and every root is checked against its
-    ingest bookkeeping before anything is read: a root the index has not fully
-    ingested cannot say what it holds, so it is refused rather than read short.
-
-    Parameters:
-        roots: The results roots to read, in the order questions are answered
-            about them.  Two spellings of one root are one root.
-        results_db_url: Connection URL of the results index, or None to read the
-            documents.
-        columns: The columns of ``images`` a consumer's *records* are rebuilt
-            from.  Ignored when the documents are read, which carry every field
-            whatever is selected; ignored by a stream of facts, which is the
-            whole row over either storage; and needed by no caller that asks
-            only for a listing.
-        logger: The caller's own logger, lent to the source for the one line it
-            has to say: that it declined to descend a directory it had already
-            listed under another name.  None says nothing at all.  Nothing here
-            constructs one or reaches for a program's own, because a layer with
-            a voice its caller did not configure would report a run's work
-            somewhere the run does not control.
-
-    Returns:
-        The source, which the caller closes when it is done with it and which is
-        usable as a context manager.
-
-    Raises:
-        ValueError: If no root is named, or one of them is not a location; or if
-            the index cannot be opened, is not an index, or was written by
-            another version of the schema; or if a named root has no completed
-            ingest run in it.
-    """
-    root_urls = distinct_roots(roots)
-    if not root_urls:
-        raise ValueError('a record source needs at least one results root to read')
-    if results_db_url is None:
-        return TreeRecordSource(root_urls, logger=logger)
-    engine = open_index_for_roots(results_db_url, root_urls)
-    return IndexRecordSource(engine, root_urls, results_db_url, columns)

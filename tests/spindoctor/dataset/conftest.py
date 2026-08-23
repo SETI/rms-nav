@@ -407,12 +407,13 @@ def index_without_a_table(tmp_path: Path, root: Path, table: str) -> str:
 
 
 def reported_line(out: str) -> str:
-    """Return the line reporting what the index holds.
+    """Return the line reporting what the index answers about.
 
     Parameters:
         out: Everything the filter wrote.
 
     Returns:
-        The one line naming the counts and the age of the answer.
+        The one line naming the age of the answer, and the count of what the
+        root holds when the scan listed it.
     """
-    return next(line for line in out.splitlines() if 'Results index holds' in line)
+    return next(line for line in out.splitlines() if 'Results index' in line)

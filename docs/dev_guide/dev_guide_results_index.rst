@@ -161,6 +161,30 @@ ingest's discovery and its unchanged-file skip are both built on. What a listing
 cannot do is answer anything a document says, so a selection restricting on a
 mission or a span is refused rather than partly honored.
 
+**A selection naming stubs is not such a restriction.** A stub is the identity
+of a file rather than something the file says, so a listing answers it, and that
+is the question a caller enumerating candidate images asks: which of the ones
+this run might still keep has a document. The index answers it with one keyed
+query per batch. The tree has two ways to answer it and picks between them on
+whether the root is local, because what decides is not a ratio of files named to
+documents held but what one call costs. On a local root a check is a system
+call, and checking the named files beats walking their directories at every
+ratio worth having: ten files of a fifty-thousand-document volume by three
+orders of magnitude, a fifth of the volume by two and a half times, and only at
+something near the whole of it does the walk come back ahead. On a cloud root a check is a
+paid round trip per file against one per directory for a thousand entries, so
+the walk wins above roughly a thousandth of the root --- and one walk made for
+one batch answers every later batch of the same run, since a run asks in
+batches. The choice lives inside the seam, so a caller has one way to ask what a
+root holds; two shapes in the callers would be two answers to keep true of each
+other.
+
+**What a check cannot report is the size and the modification time.** Those come
+from a directory entry, and an entry a check produced carries neither and says
+so through :attr:`~spindoctor.nav_records.ListedRecord.has_metrics`. A consumer
+that decides whether a document has changed reads that rather than a stand-in
+value, which would make a changed document look unchanged.
+
 Two more methods hold the run together rather than answering a question:
 ``describe()`` says which storage answered, for the run log, and ``close()``
 releases what the source opened. A stream may hold a connection or a cursor, so

@@ -1088,6 +1088,59 @@ def test_the_listing_narrows_to_a_subtree_on_postgresql(postgres_url: str) -> No
     assert found == [THIRD_RECORD_STUB]
 
 
+def test_a_listing_of_named_stubs_answers_on_postgresql(postgres_url: str) -> None:
+    """The keyed form of the listing, on the server that types a union's columns.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        named = Selection(stubs=(THIRD_RECORD_STUB, FIRST_RECORD_STUB))
+        found = [entry.stub for entry in source.listing(named)]
+    assert found == [THIRD_RECORD_STUB, FIRST_RECORD_STUB]
+
+
+def test_a_listing_of_named_stubs_reads_the_refusal_arm_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """A file the ingest refused is a file that is there, on either server.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [entry.stub for entry in source.listing(Selection(stubs=(RECORD_REFUSED_STUB,)))]
+    assert found == [RECORD_REFUSED_STUB]
+
+
+def test_a_listing_of_named_stubs_reads_one_root_on_postgresql(postgres_url: str) -> None:
+    """The other root holds this stub, and this root has nothing to say about it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [entry.stub for entry in source.listing(Selection(stubs=(ONLY_OTHER_ROOT_STUB,)))]
+    assert found == []
+
+
+def test_a_listing_of_named_stubs_reads_one_roots_refusals_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """The refusal arm carries the root term as surely as the image arm does.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [entry.stub for entry in source.listing(Selection(stubs=(OTHER_REFUSED_STUB,)))]
+    assert found == []
+
+
 def test_the_stream_reads_one_roots_values_on_postgresql(postgres_url: str) -> None:
     """The other root records another offset for every one of these stubs.
 

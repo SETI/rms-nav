@@ -29,7 +29,7 @@ from spindoctor.nav_records import (
     UnlistableDirectoryError,
     UnlistableRootError,
 )
-from spindoctor.nav_records import tree as tree_module
+from spindoctor.nav_records import walk as walk_module
 
 from .conftest import (
     FIRST_STUB,
@@ -304,7 +304,7 @@ def test_a_cloud_directory_is_not_stat_ed_at_all(monkeypatch: pytest.MonkeyPatch
         raise AssertionError('the walk asked a cloud backend about a directory')
 
     monkeypatch.setattr(FCPath, 'stat', forbidden)
-    assert tree_module._directory_identity(FCPath('gs://rms-nav/nav-offset-results')) is None
+    assert walk_module._directory_identity(FCPath('gs://rms-nav/nav-offset-results')) is None
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +315,6 @@ def test_a_cloud_directory_is_not_stat_ed_at_all(monkeypatch: pytest.MonkeyPatch
 @pytest.mark.parametrize(
     ('selection', 'named'),
     [
-        pytest.param(Selection(stubs=('VOL1/N1',)), 'stubs', id='stubs'),
         pytest.param(Selection(instrument=MISSION), 'instrument', id='instrument'),
         pytest.param(Selection(start_et=0.0), 'start_et', id='start_et'),
         pytest.param(Selection(stop_et=1.0), 'stop_et', id='stop_et'),
@@ -347,12 +346,12 @@ def test_a_listing_refuses_a_restriction_it_cannot_honour(
 def test_a_listing_refusal_names_every_restriction_it_was_given(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """A refusal naming one of four would be corrected four times."""
+    """A refusal naming one of three would be corrected three times."""
     source = tree_source(two_volume_tree(tmp_path), quiet_logger)
-    selection = Selection(stubs=('VOL1/N1',), instrument=MISSION, start_et=0.0, stop_et=1.0)
+    selection = Selection(instrument=MISSION, start_et=0.0, stop_et=1.0)
     with pytest.raises(ValueError) as excinfo:
         list(source.listing(selection))
-    assert 'stubs, instrument, start_et, stop_et' in str(excinfo.value)
+    assert 'instrument, start_et, stop_et' in str(excinfo.value)
 
 
 def test_a_listing_refuses_before_it_walks_anything(
