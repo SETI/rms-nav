@@ -616,6 +616,63 @@ def _tree_with_a_refused_file(tmp_path: Path) -> Path:
     return root
 
 
+UNPARSEABLE_STUB = 'VOL/N1454725800_1_CALIB'
+"""A file no reader gets a JSON value out of at all."""
+
+NOT_AN_OBJECT_STUB = 'VOL/N1454725801_1_CALIB'
+"""A file that parses to a JSON value of some other kind."""
+
+ROOTLESS_STUB = 'N1454725802_1_CALIB'
+"""A file above every subtree, which no enumeration walks or queries."""
+
+
+def _tree_holding_one_of_each_refusal(root: Path) -> None:
+    """Write a root holding one file of every kind a pass refuses.
+
+    The four differ in why no record came out of them and in where they sit: a
+    JSON object of the wrong schema, a half-written file no JSON value comes out
+    of, a file holding a JSON list, and one above every subtree.
+
+    Parameters:
+        root: The results root to write under.
+    """
+    (root / 'VOL').mkdir(parents=True, exist_ok=True)
+    (root / f'VOL/N1454725799_1_CALIB{METADATA_SUFFIX}').write_text(
+        '{"edges": []}', encoding='utf-8'
+    )
+    (root / f'{UNPARSEABLE_STUB}{METADATA_SUFFIX}').write_text(
+        '{"status": "error"', encoding='utf-8'
+    )
+    (root / f'{NOT_AN_OBJECT_STUB}{METADATA_SUFFIX}').write_text('[1, 2, 3]', encoding='utf-8')
+    (root / f'{ROOTLESS_STUB}{METADATA_SUFFIX}').write_text('{"edges": []}', encoding='utf-8')
+
+
+def test_every_kind_of_refused_file_is_recorded(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """A file with no row is one the next pass pays to download and parse again.
+
+    The record is what stops that, so it is written for every file no record
+    came out of, whatever went wrong with it and wherever under the root it sits
+    -- including one above every subtree, which no enumeration ever asks about
+    but which a pass still meets and still has to remember refusing.
+    """
+    root = tmp_path / 'results'
+    _tree_holding_one_of_each_refusal(root)
+    url = index_url(tmp_path / 'index.sqlite3')
+    ingest_tree(url, [root], logger=quiet_logger)
+    engine = open_index(url)
+    try:
+        with engine.connect() as connection:
+            recorded = connection.execute(sqlalchemy.select(FAILED_FILES.c.results_path_stub))
+            stubs = sorted(str(row.results_path_stub) for row in recorded)
+    finally:
+        engine.dispose()
+    assert stubs == sorted(
+        ['VOL/N1454725799_1_CALIB', UNPARSEABLE_STUB, NOT_AN_OBJECT_STUB, ROOTLESS_STUB]
+    )
+
+
 def test_a_refused_file_is_not_read_again(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:

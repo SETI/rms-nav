@@ -19,12 +19,15 @@ alone answers from whichever schema happens to hold a table of that name.
 """
 
 import contextlib
+import uuid
 from collections.abc import Iterator, Sequence
 from typing import Any
 
+import pdslogger
 import psycopg
 import pytest
 import sqlalchemy
+from filecache import FCPath
 from sqlalchemy.engine import Connection
 from tests.spindoctor.results_index.conftest import (
     STUB,
@@ -35,6 +38,8 @@ from tests.spindoctor.results_index.conftest import (
 )
 
 from spindoctor.cli.ck.inputs import read_whole_mission
+from spindoctor.dataset.dataset import ImageFile
+from spindoctor.dataset.results_filter import ResultsFilter, SelectionError
 from spindoctor.nav_records import (
     ImageFacts,
     NavRecord,
@@ -55,7 +60,6 @@ from spindoctor.results_index import (
     open_record_source,
 )
 from spindoctor.results_index.facts_stream import _child_statement
-from spindoctor.results_index.selection import read_result_stubs
 
 pytestmark = pytest.mark.postgres
 
@@ -671,69 +675,107 @@ def _seed_selection_rows(url: str) -> None:
         )
 
 
+SELECTION_CANDIDATES = (STUB, NAVIGATED_STUB, REFUSED_STUB, OTHER_ROOT_REFUSED_STUB)
+"""Every stub either root records something for, in one fixed order.
+
+The answers below are stated as the whole selection out of these four rather
+than as one membership test each, so that a filter reading the other root's rows
+is caught by what it gains as well as by what it loses.
+"""
+
+
+def _selecting(url: str, **flags: bool) -> list[str]:
+    """Answer one filter combination over the seeded root, against the server.
+
+    Parameters:
+        url: The index to answer from.
+        flags: The selection flags to apply.
+
+    Returns:
+        The stubs that passed, in the order the candidates are listed.
+    """
+    with ResultsFilter(
+        [SELECTION_SUBTREE],
+        SELECTION_ROOT,
+        logger=pdslogger.NullLogger(),
+        results_db_url=url,
+        **flags,
+    ) as results_filter:
+        kept = [stub for stub in SELECTION_CANDIDATES if results_filter.passes(stub)]
+        batch = [
+            ImageFile(
+                image_file_url=FCPath(f'{SELECTION_ROOT}/{stub}.IMG'),
+                label_file_url=FCPath(f'{SELECTION_ROOT}/{stub}.LBL'),
+                results_path_stub=stub,
+            )
+            for stub in kept
+        ]
+        return [image.results_path_stub for image in results_filter.filter_batch(batch)]
+
+
 def test_the_selection_reads_a_document_and_a_refusal_on_postgresql(postgres_url: str) -> None:
     """The two tables are read as one, on the backend that types their columns.
+
+    A file the ingest could not read is still a file the results root holds, so
+    the presence filter reaches it as surely as it reaches a document, and the
+    two tables it reaches are joined on the backend that will not reconcile
+    columns of two types for a caller.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
-    assert stubs.with_metadata == frozenset({STUB, NAVIGATED_STUB, REFUSED_STUB})
+    assert _selecting(postgres_url, has_offset_file=True) == [
+        STUB,
+        NAVIGATED_STUB,
+        REFUSED_STUB,
+    ]
 
 
 def test_another_roots_refusal_is_not_this_roots_document_on_postgresql(
     postgres_url: str,
 ) -> None:
-    """The refusals arm is keyed by root and stub together, as the images arm is.
+    """The refusals are keyed by root and stub together, as the records are.
 
     The other root's refusal names a file the root under test holds nothing
-    for, so an arm reading the stub alone hands the enumeration a stub whose
-    document is under a different root -- and the enumeration would then read
-    it as an image of this root that has already been navigated.
+    for, so a query reading the stub alone hands the enumeration a stub whose
+    document is under a different root -- and the enumeration then reads it as
+    an image of this root that has already been navigated.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
-    assert OTHER_ROOT_REFUSED_STUB not in stubs.with_metadata
+    assert OTHER_ROOT_REFUSED_STUB not in _selecting(postgres_url, has_offset_file=True)
 
 
-def test_the_error_flag_survives_the_union_on_postgresql(postgres_url: str) -> None:
-    """The two arms' second column is one column of one type in the union.
+def test_the_error_filter_selects_on_postgresql(postgres_url: str) -> None:
+    """A fatal error is told from a run that finished, on the backend that types both.
 
-    PostgreSQL refuses a union whose columns disagree; SQLite reconciles them.
-    The image arm computes a predicate over the row and the refusal arm writes
-    a literal false, so the union is exercised from both sides, and the answer
-    is what says the predicate reached the row rather than the literal.
+    The two tables are read as one here as well, and the refusals arm records no
+    status at all: PostgreSQL refuses a union whose columns disagree, where
+    SQLite reconciles them, so this is where a status column and a column
+    holding nothing have to be one column of one type.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(
-        postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE], has_offset_error=True
-    )
-    assert stubs.matching_error == frozenset({STUB})
+    assert _selecting(postgres_url, has_offset_error=True) == [STUB]
 
 
 def test_the_negative_error_filter_selects_on_postgresql(postgres_url: str) -> None:
-    """The inequality is a predicate of the same type as the equality beside it.
+    """The filter phrased in the negative reaches the other side of the same column.
 
-    The image arm's second column is computed either way, so this is what says
-    a filter phrased in the negative unions with the refusal arm's literal on
-    the backend that types both -- and that the refusal, which records no
-    status at all, is on the same side of the answer as the fatal error.
+    A file the ingest refused is on neither side of it: it records no error and
+    records no outcome either, so it is excluded here as surely as it is
+    excluded from the filter above.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(
-        postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE], has_no_offset_error=True
-    )
-    assert stubs.matching_error == frozenset({NAVIGATED_STUB})
+    assert _selecting(postgres_url, has_no_offset_error=True) == [NAVIGATED_STUB]
 
 
 def test_a_fatal_error_with_no_cause_is_not_a_spice_error_on_postgresql(
@@ -741,14 +783,15 @@ def test_a_fatal_error_with_no_cause_is_not_a_spice_error_on_postgresql(
 ) -> None:
     """NULL is not equal to anything and not unequal to anything either.
 
+    A fatal error whose cause went unrecorded is the row an inequality drops
+    rather than keeps, which silently loses it from the filter that asks for
+    every fatal error that is not a SPICE one.
+
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(
-        postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE], has_offset_nonspice_error=True
-    )
-    assert stubs.matching_error == frozenset({STUB})
+    assert _selecting(postgres_url, has_offset_nonspice_error=True) == [STUB]
 
 
 def test_the_error_filter_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
@@ -758,21 +801,31 @@ def test_the_error_filter_answers_for_one_root_on_postgresql(postgres_url: str) 
         postgres_url: URL of an empty schema of this test's own.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(
-        postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE], has_offset_spice_error=True
-    )
-    assert stubs.matching_error == frozenset()
+    assert _selecting(postgres_url, has_offset_spice_error=True) == []
 
 
-def test_the_snapshot_time_answers_for_one_root_on_postgresql(postgres_url: str) -> None:
+def test_the_snapshot_time_answers_for_one_root_on_postgresql(
+    postgres_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     """How old this answer is, on the backend that returns the stamp as it typed it.
+
+    The other root was passed over afterwards, so a time read from the newest
+    run in the index rather than from the newest run over this root dates the
+    answer by an unrelated tree.
 
     Parameters:
         postgres_url: URL of an empty schema of this test's own.
+        capsys: Fixture the report is captured through.
     """
     _seed_selection_rows(postgres_url)
-    stubs = read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
-    assert stubs.ingested_utc == SELECTION_INGESTED
+    ResultsFilter(
+        [SELECTION_SUBTREE],
+        SELECTION_ROOT,
+        logger=pdslogger.PdsLogger(f'postgres_selection_{uuid.uuid4().hex}'),
+        results_db_url=postgres_url,
+        has_offset_file=True,
+    )
+    assert SELECTION_INGESTED in capsys.readouterr().out
 
 
 def _seeded_without_the_refusals(url: str) -> None:
@@ -802,8 +855,8 @@ def test_a_table_this_account_cannot_read_is_reported_on_postgresql(postgres_url
         postgres_url: URL of an empty schema of this test's own.
     """
     _seeded_without_the_refusals(postgres_url)
-    with pytest.raises(ValueError, match='could not be read'):
-        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
+    with pytest.raises(SelectionError, match='could not be read'):
+        _selecting(postgres_url, has_offset_file=True)
 
 
 def test_a_failing_query_raises_no_database_exception_on_postgresql(postgres_url: str) -> None:
@@ -813,8 +866,8 @@ def test_a_failing_query_raises_no_database_exception_on_postgresql(postgres_url
         postgres_url: URL of an empty schema of this test's own.
     """
     _seeded_without_the_refusals(postgres_url)
-    with pytest.raises(ValueError) as excinfo:
-        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
+    with pytest.raises(SelectionError) as excinfo:
+        _selecting(postgres_url, has_offset_file=True)
     assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
 
 
@@ -825,8 +878,8 @@ def test_a_failing_query_is_reported_without_its_sql_on_postgresql(postgres_url:
         postgres_url: URL of an empty schema of this test's own.
     """
     _seeded_without_the_refusals(postgres_url)
-    with pytest.raises(ValueError) as excinfo:
-        read_result_stubs(postgres_url, SELECTION_ROOT, [SELECTION_SUBTREE])
+    with pytest.raises(SelectionError) as excinfo:
+        _selecting(postgres_url, has_offset_file=True)
     assert 'SELECT' not in str(excinfo.value)
 
 
@@ -1033,6 +1086,59 @@ def test_the_listing_narrows_to_a_subtree_on_postgresql(postgres_url: str) -> No
     with _record_source(postgres_url, RECORD_ROOT) as source:
         found = sorted(entry.stub for entry in source.listing(Selection(subtrees=('COISS_2002',))))
     assert found == [THIRD_RECORD_STUB]
+
+
+def test_a_listing_of_named_stubs_answers_on_postgresql(postgres_url: str) -> None:
+    """The keyed form of the listing, on the server that types a union's columns.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        named = Selection(stubs=(THIRD_RECORD_STUB, FIRST_RECORD_STUB))
+        found = [entry.stub for entry in source.listing(named)]
+    assert found == [THIRD_RECORD_STUB, FIRST_RECORD_STUB]
+
+
+def test_a_listing_of_named_stubs_reads_the_refusal_arm_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """A file the ingest refused is a file that is there, on either server.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [entry.stub for entry in source.listing(Selection(stubs=(RECORD_REFUSED_STUB,)))]
+    assert found == [RECORD_REFUSED_STUB]
+
+
+def test_a_listing_of_named_stubs_reads_one_root_on_postgresql(postgres_url: str) -> None:
+    """The other root holds this stub, and this root has nothing to say about it.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [entry.stub for entry in source.listing(Selection(stubs=(ONLY_OTHER_ROOT_STUB,)))]
+    assert found == []
+
+
+def test_a_listing_of_named_stubs_reads_one_roots_refusals_on_postgresql(
+    postgres_url: str,
+) -> None:
+    """The refusal arm carries the root term as surely as the image arm does.
+
+    Parameters:
+        postgres_url: URL of an empty schema of this test's own.
+    """
+    _seed_record_rows(postgres_url)
+    with _record_source(postgres_url, RECORD_ROOT) as source:
+        found = [entry.stub for entry in source.listing(Selection(stubs=(OTHER_REFUSED_STUB,)))]
+    assert found == []
 
 
 def test_the_stream_reads_one_roots_values_on_postgresql(postgres_url: str) -> None:

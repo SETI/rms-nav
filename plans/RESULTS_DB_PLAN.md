@@ -47,8 +47,8 @@ index when it is given.
   included, must run correctly with no index at all, and that path stays the
   default.
 - Writing the index from the navigation pipeline. Navigation writes JSON;
-  ingest reads it. Nothing in the navigation path gains a database
-  dependency.
+  ingest reads it. No navigation run opens a database at all unless it was
+  given a `--results-db` URL to answer its selection from.
 - Automatic ingest. No batch driver invokes ingest as a side effect; an
   operator runs it.
 - Bundle generation (`spindoctor.cli.pds4.bundle_data`), which serializes the
@@ -613,10 +613,10 @@ PR body.
 document, and upserts its rows.
 
 **One walk feeds everything.** The recursive listing collects the
-`*_metadata.json` names in a single pass (the pattern
-`ResultsFilter._scan_volumes` already uses), and each metadata file's
-`mtime_ns` and `size_bytes` come from the same listing entries. Every other
-file the listing reports -- the `*_summary.png` beside each document, and
+`*_metadata.json` names in a single pass -- the seam's walk, which every reader
+of a results tree shares -- and each metadata file's `mtime_ns` and
+`size_bytes` come from the same listing entries. Every other file the listing
+reports -- the `*_summary.png` beside each document, and
 whatever else an operator has left under the root -- is passed over and enters
 no tally: not the count of files seen, not the count of directories the walk
 missed. There is no per-file `stat` call and no per-file `exists` call; a
@@ -647,46 +647,7 @@ row deleted as the refusal is written, since a row nothing backs would answer
 for an image nothing produced; and a file that was refused and now reads has
 its refusal deleted as its rows are written.
 
-**What a pass refused is not what the root holds refusals for.** A refused file
-is recorded and then skipped unchanged by every pass after it, so the pass's own
-tally counts it once and never again. An operator sent to that tally to measure how
-short an index-answered error filter comes therefore reads zero on a root that
-was ingested before, which is every root a consumer accepts. So each root's pass
-closes by counting rows of `failed_files` for that root and reporting that as a
-line of its own, named as the root's standing count rather than as this pass's,
-and a fan-out reports it the same way for each root it completes -- and only for
-a root it completed, since a run left unfinished is one every consumer refuses
-and a count beside it would read as an account of it. The count is also one
-query over `failed_files` away at any time, which is what the guide gives an
-operator first; the reported line is what makes the natural action -- run the
-ingest and read its log -- the correct one rather than merely the documented
-one. `--force` remains what puts the reasons and the example files back into the
-summary.
-
-**The count is the refusals a selection can be short by, not every refusal.**
-Three of the reasons -- `unreadable`, `not valid JSON`, `not a JSON object` --
-are a file no JSON object came out of, and the tree path excludes such a file
-from every error filter exactly as the index answers none for it, so the two
-agree and the row is no gap. The `not a current-schema navigation document`
-family is the divergence: a JSON object the tree reads a `status` out of and
-this index records no status for. A refusal whose `subtree` is NULL is left out
-for the second reason, that both arms of the selection query are restricted by
-`IN` over the enumerated subtrees and `IN` is false for NULL, so such a row is in
-no selection's answer either way. What remains is still the whole root's number
-where a selection enumerates subtrees, so the line says it bounds a shortfall
-rather than measuring one. A parse that fails in a way the decoder does not call
-a syntax error carries a parse reason rather than a schema one, so that the
-family boundary is the fact it states: no value came out of the file, and
-nothing reading the tree gets one out of it either.
-
-**A failure of the report costs the report.** The count is taken after the
-root's rows are written and its run is stamped, and its only product is a log
-line. Raised, it would skip every root after the one it fired on -- each of them
-left with a run row carrying no finish time, which every consumer refuses -- and
-discard the counts of the root that had just finished, so the run would end with
-no closing summary over work that completed. It is contained to a warning naming
-the root, which is the same containment every other error path in the ingest
-has.
+**What a pass refused is not what the root holds refusals for.** A refused file is recorded and then skipped unchanged by every pass after it, so the pass's own tally counts it once and never again, and a second pass over the same tree refuses nothing and tallies nothing. That is what the tally means and it is reported as such: what this pass read. `--force` is what puts the reasons and the example files back into it, and the root's whole set of refusals is one query over `failed_files` away at any time. No pass reports a standing count of them, because there is nothing about them for a consumer to act on: a file of either refusal family yields no per-image facts, so no report summarizes it and no error filter selects its image, whichever storage answers. The reason says what to fix rather than what a consumer will be short by.
 
 **A root the walk cannot list is not an empty root.** The walk reports whether
 the root itself could be listed. When it could not -- a mistyped root, an
@@ -769,8 +730,7 @@ the typed form would also record a relative `source_file` beside an absolute
 `root_url` for the same file.
 
 **Batched retrieval.** Metadata files are retrieved in batches through
-`FCPath.retrieve()` with `exception_on_fail=False`, the pattern
-`ResultsFilter.filter_batch` uses. The current code reads via
+`FCPath.retrieve()` with `exception_on_fail=False`. The current code reads via
 `get_local_path()`, which does not download on a cloud root and must be
 replaced. Batch and chunk sizes are constants, independent of one another:
 `RETRIEVE_BATCH_SIZE = 64` in `spindoctor/nav_records/tree.py`, so that the
@@ -1083,31 +1043,17 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 | `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no record row and a refusal row instead, and the lookup fails the image rather than classifying it |
 | `missing_offset_key`, `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | reported as `null_offset`: one column pair holds all five ways an offset can supply no pair, and none of them supplies a pointing |
 
-**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `facts_from_document` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is member 2 of the Phase 5 enumeration, and it is the same fact here.
+**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `facts_from_document` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is the first member of the Phase 5 enumeration, and it is the same fact here.
 
 **The rule the seam is held to: a record the two storages *classify* differently may differ in the reason and in nothing else.** The reason is a name a run-level tally counts under; the mechanism, the matrices, the midtime and the offset are what a product is built from. A difference in any of those is a defect in the reader or in what ingest stores, not an entry for the list. The list itself is derived by measurement rather than by argument: both sources are driven over every shape a record's fields can take -- absent, null, wrong type, over-long, non-finite, boolean, nested, ragged, and an integer too large for a float -- and what survives defines it.
 
 Nothing survives. The navigator's own types settle it: a `success` record carries an offset of two floats, a recorded attitude is validated as a proper rotation of finite numbers before it is written, and a pointing block always carries its baseline and both frame identities as integers. So for every record the navigator wrote and ingest stored, everything a product is built from -- the mechanism, the matrices, the midtime, the offset -- is identical in the two paths, and so is every field the readers report about it, the reason among them. The index path logs the same per-image `IMAGE_LOGGER` warnings, with the same message shapes; where a message names the storage that was searched, it names the one that actually was.
 
-**`ResultsFilter`.** When a URL is given, the presence, absence, and error
-filters become one query per enumeration instead of a walk per volume plus
-batched reads -- preserving the exact semantics of both existing modes (the
-walked-set mode and the absence-only batched-`exists()` mode) and every
-contradictory-pair rejection in the constructor, apart from the carve-out
-enumerated in section 4's Phase 5 entry. A file the ingest refused is
-still a file the walk finds, so the presence and absence filters read
-`failed_files` alongside `images`, and that table carries the subtree for the
-same reason. The carve-out is what one ingest pass
-could read and record, never a property of this query; it is enumerated in the
-Phase 5 entry, repeated in the module docstring and stated for an operator in
-the navigation guide's account of `--results-db`, each member has a test of its
-own, and a member found later is added in all four places in one commit.
-The enumeration is maintained rather than audited closed: it names what is known
-to differ, and a divergence nobody has found yet is not evidence that none
-exists. The guide is one of the four because the person a silently short
-selection is served to reads the guide and not the module: a divergence
-enumerated only where a maintainer meets it leaves a user with a selection that
-looks like the one they asked for.
+**`ResultsFilter`.** All six filters are answered through the record seam, by two of its questions, so one implementation serves both storages. A listing says which images have a document and costs no document read; a stream of per-image facts says what each document records, which answers the error filters and settles presence along with them. `open_record_source` decides which storage answers: a run naming an index reads rows, a run naming none reads the documents. Because the facts are the values the index holds in its columns, a document is narrowed on exactly what a row is narrowed on, and the two agree by construction rather than by two pieces of code that agree today. The constructor keeps every contradictory-pair rejection. A file the ingest refused is still a file the walk finds, so a listing of the index reads `failed_files` alongside `images`, and that table carries the subtree for the same reason.
+
+**The listing is asked in one of two ways, and which one is decided by what the run selects.** A run selecting images that *have* a document -- `--has-offset-file`, and every error filter, since each of those requires one to exist -- lists the selected subtrees once at construction, so `passes(stub)` is a set lookup and the same listing supplies the count the run log reports. A run selecting images that have *none* -- `--has-no-offset-file`, which contradicts all five of the others and is therefore always alone -- names its candidate images instead, a batch at a time, exactly as the error filters name theirs. It keeps the images the root holds nothing for, so every entry a listing of a whole volume produced would be one to reject from, and a run whose other constraints name ten images would pay for a volume to answer about ten. Such a run applies no subtree restriction and needs none: the candidates come from the volumes the enumeration walked. It reports the age of an index at construction, because that is what an index owes a run whatever it goes on to find, and reports what it asked about and how much of it was already navigated when it is closed.
+
+**What the index answers differently is what one ingest pass could read and record, never a property of the query.** It is enumerated in section 4's Phase 5 entry, restated as acceptance criterion 1, repeated in the `results_filter` module docstring and stated for an operator in the navigation guide's account of `--results-db`; each member has a test of its own, and a member found later is added in all four of those places in one commit. The enumeration-list guard reads the four and compares them; it is not itself one of them. The enumeration is maintained rather than audited closed: it names what is known to differ, and a divergence nobody has found yet is not evidence that none exists. The guide is one of the four because the person a silently short selection is served to reads the guide and not the module: a divergence enumerated only where a maintainer meets it leaves a user with a selection that looks like the one they asked for.
 
 **The filter vocabulary is six flags, and they conjoin.** `--has-offset-file`
 and `--has-no-offset-file` ask whether the document exists;
@@ -1121,22 +1067,7 @@ concluded" -- the selection that excludes the frames whose navigation died
 before it could read the image, which is a document with a fatal `status` and
 no summary picture beside it.
 
-**That pair is not the selection a picture-presence filter made, and the
-navigation guide says what each mode really selects.** The two differ in both
-directions, and neither is a defect of this vocabulary. A `*_summary.png` with
-no document beside it -- a PDS4 browse product, a document deleted from under
-its picture -- was a file a picture-presence filter selected, and neither mode
-selects it here, because both ask a question about a document and there is
-none. Read from an index, a document the ingest refused is one this pair drops
-(divergence member 1) where a picture-presence filter kept it, since the
-refusal is a fact about reading the document and the picture beside it is
-untouched by it. No image a navigation run wrote both files for falls in the
-first gap, since a picture is drawn only beside a document; the second is
-bounded by what an ingest accepts rather than by what a navigator wrote, and on
-a root whose documents carry less than the index requires it is most of the
-root. So the claim the guide makes is the narrow one: reading the tree the pair
-selects every image whose document parses to a JSON object without a fatal
-`status`, and reading an index it selects the accepted documents alone.
+**That pair is not the selection a picture-presence filter made, and the navigation guide says what it really selects.** The two differ in both directions, and neither is a defect of this vocabulary. A `*_summary.png` with no document beside it -- a PDS4 browse product, a document deleted from under its picture -- was a file a picture-presence filter selected, and this pair does not, because it asks a question about a document and there is none. A document no per-image facts come out of is one this pair drops where a picture-presence filter kept it, since the refusal is a fact about reading the document and the picture beside it is untouched by it. No image a navigation run wrote both files for falls in the first gap, since a picture is drawn only beside a document; the second is bounded by what the per-image shape accepts rather than by what a navigator wrote, and on a root whose documents carry less than that shape requires it is most of the root. So the claim the guide makes is the narrow one: the pair selects every image whose document yields per-image facts recording no fatal `status`, and it selects the same images whichever storage answers.
 
 Because the flags conjoin, a selection that is a union of two of them is two
 runs rather than one, and one such union is worth naming: "never navigated, or
@@ -1145,13 +1076,7 @@ separately, and no single flag combination expresses it. The vocabulary is
 deliberately a conjunction of questions about one document, not an expression
 language over the tree.
 
-`ResultsFilter` lives in
-`spindoctor.dataset`, which `sd_offset` imports on every run, so the
-index-backed implementation lives in `spindoctor/results_index/selection.py`
-and `results_filter.py` imports it **inside the branch where a URL was
-given**. This is a recorded exception to the top-of-file import rule,
-justified the same way the GUI imports are: it keeps SQLAlchemy off the
-navigation critical path, and it is noted in the dev guide.
+`ResultsFilter` lives in `spindoctor.dataset` and imports `open_record_source` at the top of its module like any other import. Keeping SQLAlchemy out of `spindoctor.dataset` was measured and protects nothing: importing that package already loads oops (+1695 modules, 0.790s) where `import sqlalchemy` adds 83 modules and 0.053s, on a path that then does SPICE and image work taking seconds per image, and `sqlalchemy>=2.0` is a hard runtime dependency rather than an optional extra. The database line that is load-bearing runs elsewhere, and section 4's Phase 7 entry states it: `spindoctor.nav_records` imports no database layer, because it is the storage-free half of the seam and every reader of a results tree goes through it whether or not its run can open an index. A subprocess probe pins that one, and the dev guide records it.
 
 ### 2.10 Logging
 
@@ -1303,13 +1228,14 @@ the messages and the exit status are the CLI's, in `spindoctor/cli/stats/drop.py
 - **A dropped index and one that never existed are the same thing to every
   consumer.** Both are "not ingested". There are five opener call sites:
   `cli/stats/report.py`, `sd_stats_ingest.py`, `sd_stats_ingest_cloud_tasks.py`
-  and `selection.py` through `open_index`, and `cli/stats/drop.py` through
-  `open_database`. `open_index` refuses both naming `sd_stats_ingest`, so the
-  report exits 1 on both, the cloud-task worker returns `index_unopenable` on
-  both, a completion exits 1 on both, and `read_result_stubs` -- which only
-  `selection.py` goes through -- refuses both; a creating ingest builds one over
-  either. On PostgreSQL they are literally the same database, and a test
-  compares the two refusals character for character over one URL. On SQLite the
+  and `results_index/record_source.py` through `open_index`, and
+  `cli/stats/drop.py` through `open_database`. `open_index` refuses both naming
+  `sd_stats_ingest`, so the report exits 1 on both, the cloud-task worker
+  returns `index_unopenable` on both, a completion exits 1 on both, and an
+  enumeration -- which reaches the opener through `open_record_source` --
+  refuses both; a creating ingest builds one over either. On PostgreSQL they are
+  literally the same database, and a test compares the two refusals character
+  for character over one URL. On SQLite the
   emptied file remains and the drop deliberately does not delete it, so that one
   flag means one thing on both backends; deleting the file removes the database
   rather than the index, which reads the same to every consumer but which a
@@ -1387,9 +1313,9 @@ schema the drop later removes it from. Only that schema is examined -- the rest
 of the database belongs to whoever made it and is neither read nor named.
 
 **What is left for #501.** The DDL names its schema; the queries beside it --
-the ingest's writes, `selection.py`, `roots.py` and the report's raw SQL -- still
-name their tables bare and let the server resolve them through the search path.
-Nothing can be adopted or destroyed through that any more, since the index is
+the ingest's writes, `record_source.py`, `roots.py` and the report's raw SQL --
+still name their tables bare and let the server resolve them through the search
+path. Nothing can be adopted or destroyed through that any more, since the index is
 built whole in one schema and the drop removes it from that same one; what
 remains is that a table of one of these names created in an earlier schema of
 the path *after* the index was built would shadow the index's own for those
@@ -1439,7 +1365,9 @@ per selected volume; absence-only filters skip the walk and use batched
 `exists()` calls driven from `dataset_pds3.py`'s 64-image batching loop.
 `_metadata_matches` requires `status == 'error'` and compares `status_error`
 against `missing_spice_data` verbatim -- the behavior the split columns
-preserve.
+preserve. Phase 5 makes this one implementation over the index, and the step
+after Phase 7 makes it one implementation over the seam; the Phase 7 paragraph
+below records where it ends up.
 
 **`spindoctor/cli/backplanes/backplanes.py`** reads one record per image by
 stub through a `PointingSource`; a stub nothing recorded raises and the caller
@@ -1462,9 +1390,17 @@ record types, the document rules, root identity, `Selection`, the
 `open_record_source`. There is one walk of a results tree, one spelling of the
 `_metadata.json` suffix and one rule about what makes a stub a key.
 `spindoctor/support/nav_document.py` and `spindoctor/cli/stats/ingest/walk.py`
-are gone. What has *not* moved onto the seam is the enumeration
-(`spindoctor/dataset/results_filter.py` still carries its own walk, its own
-parser, its own batching and its own copy of the suffix) and the ingest's
+are gone. The enumeration is on the seam too: `spindoctor/dataset/results_filter.py`
+carries no walk, no parser, no `exists()` probe and no copy of the suffix, and
+answers all six of its flags from `listing()` and `facts()`, whichever storage
+`open_record_source` resolved. The two are asked at different moments, because
+an error filter reads a document and the documents worth reading are the
+candidate images, which the enumeration's other constraints decide: the listing
+of the selected subtrees is taken once and settles presence and absence, and the
+facts are asked of each batch of candidates by name. Asked of the subtrees
+instead, a run whose other constraints keep one image in a hundred would read
+every document under them and discard almost all of it, which on a cloud results
+root is one paid download apiece. What is left off the seam is the ingest's
 retrieve-and-parse loop. The statistics report has moved:
 `spindoctor/cli/stats/report_accumulate.py` fills one set of accumulators from
 `facts(selection)`, and `report.py` and `report_sections.py` format every
@@ -2128,40 +2064,14 @@ Details settled during execution:
 
 ### Phase 5 — Selection filters
 
-`spindoctor/results_index/selection.py` and the `ResultsFilter` branch-local
-import per section 2.9.
+`ResultsFilter` answers all six flags through the record seam, per section 2.9.
 
-Tests: for every filter flag, both existing modes (walked and
-absence-only-batched) against the index-backed answer over a fixture tree whose
-malformed-metadata images are files the walk finds and the ingest refuses, so
-that the equivalence covers the refusal table; every contradictory-pair
-rejection, including the four `--has-no-offset-error` adds; the command-line
-surface of every program that declares `--results-db` and of every program
-section 1 keeps reading files; an exported URL answering an enumeration for the
-first and not for the second; and an import-time assertion that
-`import spindoctor.dataset` does not import `sqlalchemy`. **That assertion is
-criterion 2's only test and this phase owns it**: no earlier phase writes it,
-because the branch-local import it protects is added here, so it must not be
-assumed to exist already.
+Tests: for every filter flag, the answer over the documents against the answer over the index, over a fixture tree whose malformed-metadata images are files the walk finds and the ingest refuses, so that the equivalence covers the refusal table; every contradictory-pair rejection, including the four `--has-no-offset-error` adds; the command-line surface of every program that declares `--results-db` and of every program section 1 keeps reading files; an exported URL answering an enumeration for the first and not for the second; a selected subtree the results root holds no directory for, which contributes nothing, against one that is there and will not be listed, which ends the run; and the enumeration-list guard that binds the four statements of what the index answers differently to each other.
 
 Details settled during execution, none of them a change of intent:
 
-- **The selection layer hands back plain sets.** `read_result_stubs` opens the
-  index, asks it, disposes the engine and returns two frozen sets of stubs with
-  what the pass that recorded them reported about itself, so no SQLAlchemy
-  object and no SQLAlchemy type reaches `spindoctor.dataset` -- not even in an
-  annotation, which a branch-local import could not satisfy.
-- **A document recording no fatal error is a filter of its own.**
-  `--has-no-offset-error` is the negation the other three lacked, and the query
-  answers it with the same computed column: one more condition on the images
-  arm, and the refusals arm's literal false unchanged, since a file the ingest
-  refused records neither an error nor the absence of one. It contradicts the
-  three that name an error and, like them, contradicts `--has-no-offset-file`,
-  because it asks what a document records and a document that does not exist
-  records nothing. The tree path reads it out of the same batched retrieval the
-  other error filters already pay for, and excludes an unreadable document from
-  it exactly as they do, which is what keeps the two implementations answering
-  alike over the malformed-metadata images of the fixture tree.
+- **A run selecting images that have a document hands itself a plain set.** The constructor opens the source, reads the one stream it needs, and keeps a frozen set of stubs, so `passes(stub)` costs a hash lookup; where no further question is coming it closes the source at once rather than holding a connection pool across an enumeration. The stream is read inside the same guard as the open, because a source reading rows runs its query as the caller reads it: a storage that stops answering surfaces at the boundary that translates it rather than above.
+- **A document recording no fatal error is a filter of its own.** `--has-no-offset-error` is the negation the other three lacked, and it reads the same per-image facts they read: one more condition on the status those facts carry. A file no facts came out of matches it no more than it matches the other three, since such a file records neither an error nor the absence of one. It contradicts the three that name an error and, like them, contradicts `--has-no-offset-file`, because it asks what a document records and a document that does not exist records nothing.
 - **A refusal says which exclusion it means.** Two flags that exclude each other
   and nothing else are named as mutually exclusive. One flag that excludes
   several which are satisfiable together -- `--has-no-offset-file` against the
@@ -2173,11 +2083,7 @@ Details settled during execution, none of them a change of intent:
   needs in order to know which one to drop; what changes is the claim made about
   them. A test holds every "mutually exclusive" clause any combination can
   produce to a pair the constructor really does refuse.
-- **Presence is read from `failed_files` as well as `images`.** A
-  `*_metadata.json` the ingest refused is a file the walk finds, so without the
-  refusal table criterion 1's malformed-metadata image would be present in the
-  tree and absent in the index, for `--has-offset-file` and
-  `--has-no-offset-file` alike.
+- **Presence is read from `failed_files` as well as `images`.** A `*_metadata.json` the ingest refused is a file the walk finds, so without the refusal table criterion 1's malformed-metadata image would be present in the tree and absent in the index, for `--has-offset-file` and `--has-no-offset-file` alike. It is a listing of the index that has to say so, which is why the seam's listing reads both tables.
 - **`failed_files` carries the subtree**, which is a column-set change and so a
   schema version bump, to 5. It is a fact of the walk rather than of the
   document, so it is as knowable for a file nothing could be read from as for
@@ -2207,13 +2113,7 @@ Details settled during execution, none of them a change of intent:
   list is maintained rather than closed: it is what execution and code reading
   have found, and a divergence nobody has found yet would be a defect of this
   list rather than a departure from it.
-  1. **A document the ingest refused** -- a JSON object this index will not
-     accept -- records no status and so matches no error filter, where the tree
-     path reads `status` and `status_error` out of any JSON object it can
-     parse, one carrying no `status` at all included. A file no JSON object
-     came out of is refused too and is not one of these: the tree excludes such
-     a file from every error filter as well.
-  2. A file that exists and **has no row at all** reads as absent, which is what
+  1. A file that exists and **has no row at all** reads as absent, which is what
      the absence filters read as "this image was never navigated". One pass ends
      that way: a file the pass could not retrieve. That is deliberate -- a
      recorded row would be skipped for as long as the file did not change, and
@@ -2222,7 +2122,7 @@ Details settled during execution, none of them a change of intent:
      document whose rows the database would not store raises where it is written
      (section 2.7), so no root a consumer reads has a completed pass that skipped
      either.
-  3. A document **rewritten in place, keeping the length and the modification
+  2. A document **rewritten in place, keeping the length and the modification
      time it had before,** is skipped by the incremental comparison
      (`_is_unchanged`, which has only `(mtime_ns, size_bytes)` to go on), so its
      row goes on recording what the document before it said and an error filter
@@ -2239,19 +2139,16 @@ Details settled during execution, none of them a change of intent:
      age: a pass that finished a second ago answers from the document before
      the rewrite.
 - **The answer says how old it is, and what that does not cover.**
-  `ingest_runs.finished_utc` is read by the same query as the missed count and
-  returned with the stubs, and `ResultsFilter` reports it with the count of what
-  the index holds. The index detects no change since that moment, and a URL
-  resolved from the environment means an operator may not know which pass is
-  answering, so the moment travels with the answer rather than with whoever
-  exported the variable. Outside the enumeration above, the age is what decides
-  whether the answer is the answer the tree would give; members 2, 3 and 4
-  survive a pass that finished a second ago, which is why each is enumerated
+  `ingest_runs.finished_utc` is read by `snapshot_finish_time`, which opens the
+  index for that one question and closes it again, and `ResultsFilter` reports
+  it with the count of what the index holds. The index detects no change since
+  that moment, and a URL resolved from the environment means an operator may not
+  know which pass is answering, so the moment travels with the answer rather than
+  with whoever exported the variable. Outside the enumeration above, the age is
+  what decides whether the answer is the answer the tree would give; both
+  members above survive a pass that finished a second ago, which is why each is enumerated
   rather than left to be read off the stamp.
-- **The subtree restriction is one restriction in one query.** Both arms are
-  restricted, and a stub with no subtree above it is matched by neither, because
-  SQL's `IN` is false for NULL -- which is also how a bare scene name falls
-  outside a walk of the selected volumes' directories.
+- **The subtree restriction is one restriction, made once, above both storages.** It is a field of `Selection`, so a walk narrows to the directories it names and a query restricts both its arms by it. A stub with no subtree above it is matched by neither arm, because SQL's `IN` is false for NULL -- which is also how a bare scene name falls outside a walk of the selected volumes' directories. The subtrees are asked about one at a time rather than all at once, so that a subtree the results root holds no directory for costs only itself: a single request ends at the first subtree it cannot read, and on an enumeration over volumes nobody has navigated yet that would be every volume after the first.
 - **The URL reaches the filter through the dataset layer, and only from a
   program that declares the option.** `_yield_image_files_index` takes a
   `results_db_url` keyword; when its caller passes none it resolves one through
@@ -2271,19 +2168,12 @@ Details settled during execution, none of them a change of intent:
   saying what to change, and an index URL can carry a database password, so the
   enumeration is wrapped once and the message is reported through `MAIN_LOGGER`
   with an exit status. The refusal is a `ValueError` subclass of its own,
-  `SelectionError`, raised by `ResultsFilter` for the flags and at the
-  branch-local import boundary for everything the index refuses with: catching
-  plain `ValueError` around a whole enumeration would report a bad volume name,
+  `SelectionError`, raised by `ResultsFilter` for the flags and at its seam
+  boundary for everything the index refuses with: catching plain `ValueError`
+  around a whole enumeration would report a bad volume name,
   a value a label would not yield, or a caller error as advice about what to
   change, and would swallow the traceback that says where it is.
-- **Nothing from the database layer escapes the selection seam.** `open_index`
-  makes every way of failing to open the index a `ValueError`; the queries after
-  it are outside that guarantee, and a table the account may not read, a
-  partially restored database, or a connection lost between the open and the
-  query would otherwise reach `spindoctor.dataset` as `sqlalchemy.exc`'s own
-  types -- which the consumer that deliberately never imports SQLAlchemy cannot
-  name in an `except` clause. `read_result_stubs` translates them, masked URL and
-  driver message included.
+- **Nothing from the database layer escapes the seam into an enumeration.** `open_index` makes every way of failing to open the index a `ValueError`; the queries after it are outside that guarantee, and a table the account may not read, a partially restored database, or a connection lost between the open and the query would otherwise reach an enumeration as `sqlalchemy.exc`'s own types, which no caller should have to name in an `except` clause to report a bad `--results-db`. The seam translates them, masked URL and driver message included, and `ResultsFilter` turns the result into `SelectionError` at its own boundary, so that a program reporting a refused selection catches those and not every other `ValueError` an enumeration can raise.
 
 ### Phase 6 — Documentation
 
@@ -2299,9 +2189,9 @@ Phase 1, so the branch never carries an undocumented public package -- gains
 the modules the later phases add. Updates: `user_guide_statistics.rst` (per section 2.9),
 `user_guide_logging.rst` (program table), `introduction_configuration.rst`
 (`environment.results_db`), and a dev-guide section covering the Core
-layer, the concurrency model, the branch-local import exception, and how to
-add a column (raise the schema version, rebuild every index). No issue numbers
-in any of it.
+layer, the concurrency model, the database line the seam is split along, and
+how to add a column (raise the schema version, rebuild every index). No issue
+numbers in any of it.
 
 Details settled during execution, none of them a change of intent:
 
@@ -2333,25 +2223,45 @@ Details settled during execution, none of them a change of intent:
 
 ### Phase 7 — One record seam, over both storages
 
-`spindoctor/nav_records/` plus an index-backed half, answering the three
-questions the programs actually ask: `record(stub)` for one image,
-`records(selection)` yielding a stream, and `listing(selection)` yielding keys
-with the size and modification time of each. Above the seam, one implementation
-of everything; below it, batching. `volume -> subtree` folded in, since the
-schema version moves either way.
+`spindoctor/nav_records/` plus an index-backed half, answering the questions the
+programs actually ask: `record(stub)` for one image, `records(selection)`
+yielding a stream, `facts(selection)` yielding every field of every image, and
+`listing(selection)` yielding keys with the size and modification time of each.
+Above the seam, one implementation of everything; below it, batching.
+`volume -> subtree` folded in, since the schema version moves either way.
+
+**A listing answers a selection that names stubs, and picks its own way to.** A
+stub is the identity of a file rather than something the file says, so it is not
+a restriction a listing has to refuse, and it is the question a caller
+enumerating candidate images asks. The index answers it with one keyed query per
+batch. The tree answers it by checking the named files on a local root and by
+walking the directories they lie in on a remote one, and decides on
+`FCPath.is_local()` rather than on a ratio, because what differs is what one
+call costs: a syscall against a paid round trip. Measured on a local root over a
+volume of fifty thousand documents, checking beats walking by 600x or better at
+ten files named, by 200x at a hundred, by 24x at a thousand and by 2.6x at ten
+thousand, and loses by about half at every document in the volume; about seventy
+per cent of the check's cost is the storage layer's per-path machinery rather
+than the syscall. A walk made to answer one batch answers every later batch of
+the same run, keyed by root and by the directory walked, and is released when
+the source is closed. The choice lives inside the seam: a caller has one way to
+ask what a root holds, and two shapes in the callers would be two answers to
+keep true of each other. An entry a check produced carries neither metric and
+says so through `ListedRecord.has_metrics`, since a stand-in for either would
+make a changed document look unchanged.
 
 **The package is split along the database line, and the line is forced.**
-`import spindoctor.dataset` must not import SQLAlchemy, and the enumeration
-lives in that package and will read documents through this seam, so
-`spindoctor/nav_records/` -- the record types, the document rules, root
-identity, `Selection`, the `RecordSource` protocol and the tree backend --
-imports no database layer at all. `spindoctor/results_index/record_source.py`
-holds `IndexRecordSource` and `open_record_source`, which returns the tree
-backend when no index URL was resolved and the index backend when one was. A
-subprocess probe pins each half: one imports `spindoctor.dataset`, one imports
-`spindoctor.nav_records`, and the second also asserts that the walk itself
-loaded, since a guarantee about a package that imported almost nothing is a
-guarantee about nothing.
+`import spindoctor.nav_records` must not import SQLAlchemy: it is the
+storage-free half of the seam, so a program that can open no index still reads
+its records through it, and a database layer imported anywhere under it would be
+acquired by every one of them. So `spindoctor/nav_records/` -- the record types,
+the document rules, root identity, `Selection`, the `RecordSource` protocol and
+the tree backend -- imports no database layer at all.
+`spindoctor/results_index/record_source.py` holds `IndexRecordSource` and
+`open_record_source`, which returns the tree backend when no index URL was
+resolved and the index backend when one was. A subprocess probe pins the rule,
+and also asserts that the walk itself loaded, since a guarantee about a package
+that imported almost nothing is a guarantee about nothing.
 
 **`Selection` is where a caller is refused.** It is frozen, and its constructor
 checks everything it carries: each subtree one directory immediately under a
@@ -2394,7 +2304,12 @@ the kernel writer read one rule.
 **A directory nobody can list ends a walk; a root nobody can list is charged to
 that root.** `UnlistableRootError` is a subclass of `UnlistableDirectoryError`,
 which is what lets the ingest catch the second to keep its per-root accounting
-while every other consumer lets either end its run.
+while every other consumer lets either end its run. Both carry the directory
+they are about, so a caller can tell the directory it asked about from one
+further down: a listing of named stubs answers "no document" for a directory the
+root does not hold, which is what a check of a file under it answers, and still
+refuses one further down, where the stubs it did find would be read as the whole
+of a directory it did list.
 
 Tests: the three calls against both backends over one fixture tree and the index
 ingested from it, with the declared disagreements between them each pinned
@@ -2498,11 +2413,9 @@ Behavior changes review must see:
    enumerates, restated here member for member and in its order, so that a
    reader of this criterion sees the list rather than a sample of it:
 
-   1. a document the ingest refused, which is a file that exists but records no
-      status;
-   2. a file that has no row at all in the index, because no pass could read or
+   1. a file that has no row at all in the index, because no pass could read or
       record it;
-   3. a document rewritten in place with the length and the modification time it
+   2. a document rewritten in place with the length and the modification time it
       had before, whose row goes on recording what the document before it said.
 
    Each carve-out is stated in the plan, in the module docstring, in the
@@ -2517,9 +2430,11 @@ Behavior changes review must see:
    differ.
    `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
    byte-identical report.
-2. No pipeline program requires an index, and `import spindoctor.dataset`
-   (the `sd_offset` critical path) does not import `sqlalchemy`. Asserted by
-   a test.
+2. No pipeline program requires an index, and `import spindoctor.nav_records`
+   -- the storage-free half of the record seam, which every reader of a results
+   tree goes through -- does not import `sqlalchemy`. Asserted by a subprocess
+   probe, which also asserts that the walk itself loaded, since a guarantee
+   about a package that imported almost nothing is a guarantee about nothing.
 3. A program given an unopenable, nonexistent, or version-mismatched index,
    or a root the index has not fully ingested, fails with a message naming
    the cause; it does not fall back to reading files and does not create an
@@ -2577,9 +2492,15 @@ multiple local writers safe; it does not make a shared network filesystem
 safe. The cross-machine case is PostgreSQL, and the lockability probe
 refuses the SQLite URL rather than corrupting the file.
 
-**A new required dependency.** SQLAlchemy is imported by the statistics
-programs and by `results_index` whether or not an index is used, and by
-nothing on the navigation critical path -- criterion 2 pins that.
+**A required dependency.** `sqlalchemy>=2.0` is a runtime dependency rather
+than an optional extra. The statistics programs and `results_index` import it
+whether or not an index is used, and so does `spindoctor.dataset`, which answers
+a selection through the seam. That last one was measured rather than assumed:
+importing `spindoctor.dataset` already loads oops (+1695 modules, 0.790s) where
+`import sqlalchemy` adds 83 modules and 0.053s, on a path that then does SPICE
+and image work taking seconds per image. The one package that must not acquire
+it is `spindoctor.nav_records`, because it is the storage-free half of the seam
+and has to work where no index exists -- criterion 2 pins that.
 
 **Schema changes cost every user a rebuild.** That is the accepted trade for
 having no migration machinery, and the reason the schema carries the

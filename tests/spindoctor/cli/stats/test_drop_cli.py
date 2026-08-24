@@ -27,7 +27,8 @@ from tests.spindoctor.conftest import (
 
 from spindoctor.cli.stats.drop import _because
 from spindoctor.cli.stats.report import main_report
-from spindoctor.results_index import IMAGES, SCHEMA_VERSION, index_table_names, read_result_stubs
+from spindoctor.dataset.results_filter import ResultsFilter
+from spindoctor.results_index import IMAGES, SCHEMA_VERSION, index_table_names
 from spindoctor.results_index import engine as engine_module
 
 from .conftest import (
@@ -792,6 +793,23 @@ def _dropped_and_never_built(
     return dropped, index_url(tmp_path / 'never-built.sqlite3')
 
 
+def _selecting_against(url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogger) -> None:
+    """Ask one index for the images of a volume that have been navigated.
+
+    Parameters:
+        url: The index to answer from.
+        tmp_path: Directory the results tree lives under.
+        quiet_logger: Logger the filter reports through.
+    """
+    ResultsFilter(
+        ['VOL'],
+        tmp_path / 'results',
+        logger=quiet_logger,
+        results_db_url=url,
+        has_offset_file=True,
+    )
+
+
 def test_neither_a_dropped_index_nor_an_absent_one_answers_a_selection(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -803,8 +821,8 @@ def test_neither_a_dropped_index_nor_an_absent_one_answers_a_selection(
         monkeypatch: Fixture the driver is run through.
     """
     for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch):
-        with pytest.raises(ValueError):
-            read_result_stubs(url, tmp_path / 'results', ['VOL'])
+        with pytest.raises(ValueError, match='sd_stats_ingest'):
+            _selecting_against(url, tmp_path, quiet_logger)
 
 
 def test_both_send_the_reader_to_the_ingest(
@@ -820,7 +838,7 @@ def test_both_send_the_reader_to_the_ingest(
     said = []
     for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch):
         with pytest.raises(ValueError) as excinfo:
-            read_result_stubs(url, tmp_path / 'results', ['VOL'])
+            _selecting_against(url, tmp_path, quiet_logger)
         said.append('sd_stats_ingest' in str(excinfo.value))
     assert said == [True, True]
 

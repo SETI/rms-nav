@@ -31,11 +31,6 @@ from tests.spindoctor.conftest import (
 from spindoctor.cli import sd_stats_ingest
 from spindoctor.config import MAIN_LOGGER
 
-from .conftest import (
-    REFUSAL_REPORT_LEAD,
-    refusal_report,
-)
-
 PASSWORD = 'sup3rs3cr3t'
 """A password distinctive enough that finding it anywhere is proof of a leak."""
 
@@ -449,26 +444,10 @@ def test_a_second_pass_tallies_none_of_the_refusals_the_first_one_recorded(
     """The pass's own tally answers "what did this pass read", and nothing else.
 
     A refused file that has not changed is skipped without being read, so it
-    never reaches the tally again.  Read as what an error filter answered from
-    this index comes up short by, that zero is the one conclusion the standing
-    count exists to prevent, on the only kind of root a consumer accepts.
+    never reaches the tally again.  The tally is therefore an account of one
+    pass rather than of what the root holds, and an operator reading it as the
+    second would conclude that a root full of refused files holds none.
     """
     _root, passes = _two_passes(tmp_path, monkeypatch)
     _status, written = passes[1]
     assert [line for line in written if line.startswith('Not ingestible')] == ['Not ingestible: 0']
-
-
-def test_a_second_pass_still_reports_the_refusals_the_root_holds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """What the index refuses to answer for is reported however old the refusal.
-
-    It is the root's standing total rather than the pass's tally, so an operator
-    who runs the ingest to find out how short a selection came is told, on a root
-    that was ingested long ago and has not changed since.
-    """
-    root, passes = _two_passes(tmp_path, monkeypatch)
-    _status, written = passes[1]
-    assert [line for line in written if line.startswith(REFUSAL_REPORT_LEAD)] == [
-        refusal_report(root, 2)
-    ]

@@ -50,8 +50,3 @@ spindoctor.results_index
    :members:
    :undoc-members:
    :show-inheritance:
-
-.. automodule:: spindoctor.results_index.selection
-   :members:
-   :undoc-members:
-   :show-inheritance:

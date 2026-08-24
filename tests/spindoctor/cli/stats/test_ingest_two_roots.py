@@ -18,7 +18,6 @@ The other reads are covered where they are used: a share's lookup in
 from pathlib import Path
 
 import pdslogger
-import pytest
 import sqlalchemy
 from tests.spindoctor.conftest import (
     index_url,
@@ -32,9 +31,6 @@ from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url, o
 
 from .conftest import (
     FIRST_STUB,
-    REFUSAL_REPORT_LEAD,
-    recorded_lines,
-    refusal_report,
 )
 
 SECOND_STUB = 'VOL/N1454725800_1_CALIB'
@@ -152,27 +148,3 @@ def test_a_prune_keeps_another_roots_refusal_of_a_stub_it_removed(
     refused.unlink()
     ingest_tree(url, [emptying], logger=quiet_logger)
     assert stubs_under(url, FAILED_FILES, staying) == [FIRST_STUB]
-
-
-def test_a_pass_reports_the_refusals_of_the_root_it_walked(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The standing count is a read, and a read of one root is keyed on it too.
-
-    Read without its root, one number answers for the whole index: an operator
-    measuring how short an error filter comes on this root is handed the sum of
-    every root anybody ingested, and a root holding no refusal at all reports
-    another root's.  The two roots are built to disagree about it, which a count
-    over both cannot report as either.
-    """
-    written = recorded_lines(quiet_logger, monkeypatch)
-    first = tmp_path / 'first'
-    second = tmp_path / 'second'
-    write_refusal(first, FIRST_STUB)
-    write_refusal(second, FIRST_STUB)
-    write_refusal(second, SECOND_STUB)
-    ingest_tree(index_url(tmp_path / 'index.sqlite3'), [first, second], logger=quiet_logger)
-    assert [line for line in written if line.startswith(REFUSAL_REPORT_LEAD)] == [
-        refusal_report(first, 1),
-        refusal_report(second, 2),
-    ]

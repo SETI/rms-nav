@@ -26,8 +26,10 @@ rather than finishing, so a run that has a finish time listed the whole root.
 """
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import sqlalchemy
+from filecache import FCPath
 from sqlalchemy.engine import Engine
 
 from spindoctor.nav_records import normalize_root_url
@@ -42,6 +44,7 @@ __all__ = [
     'normalize_root_url',
     'open_index_for_roots',
     'require_ingested_roots',
+    'snapshot_finish_time',
     'unfinished_roots',
 ]
 
@@ -149,6 +152,48 @@ def newest_finish_time(connection: sqlalchemy.Connection, root_url: str) -> str 
     if row is None or row.finished_utc is None:
         return None
     return str(row.finished_utc)
+
+
+def snapshot_finish_time(url: str, root: str | FCPath | Path) -> str | None:
+    """Return when the newest pass over one root finished, opening the index for it.
+
+    The shape :func:`newest_finish_time` is asked in by a consumer that holds no
+    connection of its own: it has read its records through the seam, which opens
+    and closes whatever it needed, and the one thing left to say about them is
+    how old they are.  The index is opened, asked and closed here, so the caller
+    holds no database object and no connection outlives the answer.  One
+    connection serves both the check and the read, so the root that satisfies
+    the first is the root the second reports on.
+
+    Parameters:
+        url: Connection URL of the results index.
+        root: The results root to ask about, in whatever spelling its holder
+            has; it is normalized here, so a relative path or a trailing
+            separator names the root the ingest recorded.
+
+    Returns:
+        The finish time the newest pass over that root stamped, or None when
+        there is none to give.  A root the index holds no completed ingest of
+        is refused rather than answered about, and the check and the read share
+        one connection so that a root passing the first is the root read by the
+        second.  What remains is a pass over this root that starts between the
+        two statements: the root had a finished run when it was checked and has
+        an unfinished one by the time it is read, and the age of an answer being
+        rewritten underneath the reader is a thing nobody can state.
+
+    Raises:
+        ValueError: If the index cannot be opened, is stamped with another
+            schema version, holds no completed ingest of this root, or fails
+            the query this asks it.
+    """
+    root_url = normalize_root_url(root)
+    engine = open_index(url, create=False)
+    try:
+        with reporting_a_failed_read(url), engine.connect() as connection:
+            require_ingested_roots(connection, [root_url], url=url)
+            return newest_finish_time(connection, root_url)
+    finally:
+        engine.dispose()
 
 
 def require_ingested_roots(

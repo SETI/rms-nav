@@ -794,6 +794,97 @@ def test_a_listing_narrows_to_a_subtree(two_roots: TwoRoots) -> None:
     assert sorted(found) == sorted([FIRST_STUB, OTHER_MISSION_STUB, FIRST_REFUSAL_STUB])
 
 
+def test_a_listing_of_named_stubs_covers_only_those_named(two_roots: TwoRoots) -> None:
+    """The question a caller enumerating candidates asks: which of these is recorded.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    with _index_over(two_roots, two_roots.first) as source:
+        found = _stubs(source.listing(Selection(stubs=(FIRST_STUB,))))
+    assert found == [FIRST_STUB]
+
+
+def test_a_listing_of_named_stubs_answers_in_the_order_it_was_asked(two_roots: TwoRoots) -> None:
+    """Naming files is asking about them in that order, whichever storage answers.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    with _index_over(two_roots, two_roots.first) as source:
+        found = _stubs(source.listing(Selection(stubs=(SECOND_STUB, FIRST_STUB))))
+    assert found == [SECOND_STUB, FIRST_STUB]
+
+
+def test_a_named_stub_the_index_records_nothing_for_is_absent(two_roots: TwoRoots) -> None:
+    """Under a root with a completed ingest that is an image nothing navigated.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    with _index_over(two_roots, two_roots.first) as source:
+        found = _stubs(source.listing(Selection(stubs=(FIRST_STUB, 'VOL1/never_navigated'))))
+    assert found == [FIRST_STUB]
+
+
+def test_a_listing_of_named_stubs_reports_a_file_the_ingest_refused(two_roots: TwoRoots) -> None:
+    """A document the ingest refused is a file that is there, and a listing says what is.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    with _index_over(two_roots, two_roots.first) as source:
+        found = _stubs(source.listing(Selection(stubs=(FIRST_REFUSAL_STUB,))))
+    assert found == [FIRST_REFUSAL_STUB]
+
+
+def test_a_listing_of_named_stubs_reads_only_the_selected_root(two_roots: TwoRoots) -> None:
+    """One stub is a key under every root, so a query without its root answers wrongly.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    with _index_over(two_roots, two_roots.first) as source:
+        found = _stubs(source.listing(Selection(stubs=('VOL2/N9999999999_1_CALIB',))))
+    assert found == []
+
+
+def test_a_listing_of_named_stubs_reads_only_the_selected_roots_refusals(
+    two_roots: TwoRoots,
+) -> None:
+    """The refusal arm carries the root term as surely as the image arm does.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    with _index_over(two_roots, two_roots.first) as source:
+        found = _stubs(source.listing(Selection(stubs=(SECOND_REFUSAL_STUB,))))
+    assert found == []
+
+
+def test_the_second_root_answers_a_listing_of_named_stubs_for_itself(two_roots: TwoRoots) -> None:
+    """The other side of the same key, so neither answer would survive dropping it.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    with _index_over(two_roots, two_roots.second) as source:
+        found = _stubs(source.listing(Selection(stubs=('VOL2/N9999999999_1_CALIB',))))
+    assert found == ['VOL2/N9999999999_1_CALIB']
+
+
+def test_the_two_storages_answer_a_listing_of_named_stubs_alike(two_roots: TwoRoots) -> None:
+    """A caller cannot see which half answered, so the two must cover the same files.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+    """
+    named = Selection(stubs=(FIRST_STUB, FIRST_REFUSAL_STUB, 'VOL1/never_navigated'))
+    with _index_over(two_roots, two_roots.first) as source:
+        from_index = _stubs(source.listing(named))
+    assert from_index == _stubs(_tree_over(two_roots).listing(named))
+
+
 def test_a_listing_carries_the_metrics_the_skip_rule_needs(two_roots: TwoRoots) -> None:
     """Without both of them a later pass cannot tell a changed file from one that is not.
 
@@ -905,7 +996,6 @@ def test_a_stream_names_each_roots_refusal_under_its_own_root(two_roots: TwoRoot
 @pytest.mark.parametrize(
     ('selection', 'named'),
     [
-        pytest.param(Selection(stubs=('a',)), 'stubs', id='stubs'),
         pytest.param(Selection(instrument=MISSION), 'instrument', id='instrument'),
         pytest.param(Selection(start_et=0.0), 'start_et', id='start_et'),
         pytest.param(Selection(stop_et=0.0), 'stop_et', id='stop_et'),

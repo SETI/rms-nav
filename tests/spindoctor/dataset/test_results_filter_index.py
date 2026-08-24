@@ -1,31 +1,25 @@
 """The selection filters answered from a results index, against the same tree.
 
 The parity matrix is here: every filter flag asked of the tree and of the index
-over the one fixture tree, each held to a stated answer, plus the assertions
-that the index path reads no file at all and leaves nothing for the batch stage.
-So is every document shape the two paths could plausibly read differently and do
-not, each asked of both over a tree of its own.  The refusals are here too,
-because a filter that cannot answer has to say so in one type a program can
-catch, and so is the guarantee that the navigation critical path never imports
-the database layer.
+over the one fixture tree, each held to a stated answer, plus the assertions that
+the index path reads no file at all and leaves nothing of the index open.  So is
+every document shape the two storages could plausibly read differently and do
+not, each asked of both over a tree of its own.
 
-Two files carry the rest: the answers the index gives differently from the tree,
+Four files carry the rest: which records the filter asks each storage about,
+what it refuses outright, the answers the index gives differently from the tree,
 each with a test of its own, and what the filter reports about the pass that
 filled the index.
 """
 
-import itertools
-import json
-import subprocess
-import sys
-from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 import sqlalchemy
 from filecache import FCPath
-from tests.conftest import child_interpreter_environment
+from sqlalchemy.pool import QueuePool
 from tests.spindoctor.conftest import (
     index_url,
     ingest_tree,
@@ -42,8 +36,6 @@ from tests.spindoctor.dataset.conftest import (
     VOLUMES,
     WITH_A_DOCUMENT,
     WITHOUT_A_FATAL_ERROR,
-    candidate_files,
-    index_without_a_table,
     null_logger,
     one_image_tree,
     select_from,
@@ -52,13 +44,7 @@ from tests.spindoctor.dataset.conftest import (
 
 from spindoctor.cli.stats.ingest import UnwritableRowError, store
 from spindoctor.dataset.dataset import ImageFile
-from spindoctor.dataset.results_filter import (
-    _SPICE_STATUS_ERROR,
-    ResultsFilter,
-    SelectionError,
-)
-from spindoctor.results_index import SPICE_STATUS_ERROR, selection
-from spindoctor.results_index.selection import ResultStubs
+from spindoctor.dataset.results_filter import SPICE_STATUS_ERROR, ResultsFilter, SelectionError
 
 _MATRIX = [
     pytest.param({'has_offset_file': True}, list(WITH_A_DOCUMENT), id='offset-file'),
@@ -89,13 +75,11 @@ _MATRIX = [
 ]
 """Every filter flag, alone and paired, with the selection it makes.
 
-The flags reach the tree two ways, and both have to land on the index path's
-one answer: the absence filter alone takes the batched ``exists()`` path and
-never walks the tree, while the presence and error filters walk it.  The
-presence filter is answered from the walked set; an error filter is answered
-from the document itself, the walked set only pruning the candidates it is then
-retrieved for.  No error filter can reach the batched ``exists()`` path at all:
-each folds presence in, which is what asks for the walk.
+The flags ask the seam one of two questions, and both have to land on the same
+answer whichever storage answers them: the presence and absence filters are
+settled by a listing, which opens no document, and the error filters are settled
+by what each document records.  An error filter folds presence in, since a
+document that is not there records nothing.
 
 The pairings are the combinations a user has a reason to write.  ``images this
 run navigated to a result`` is the last of them, and it is the pair rather than
@@ -131,15 +115,23 @@ def test_the_index_path_reads_no_file_at_all(
 ) -> None:
     """Every route to the results tree is broken, and the answer is unchanged.
 
-    The saving is the whole point of the index: no walk per volume, no batched
+    The saving is the whole point of the index: no directory listed, no
     existence check, no metadata download.  Counting round trips would prove the
     same thing more weakly, since a path taken once still costs a round trip per
     enumeration on a cloud root.
+
+    Parameters:
+        tree: The results root under test.
+        indexed: The index answering the filters.
+        flags: The selection flags to apply.
+        expected: The stubs the filter selects.
+        monkeypatch: Fixture the storage layer is broken through.
     """
 
     def refuse(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError('the index path must not read the results tree')
 
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', refuse)
     monkeypatch.setattr(FCPath, 'walk', refuse)
     monkeypatch.setattr(FCPath, 'exists', refuse)
     monkeypatch.setattr(FCPath, 'retrieve', refuse)
@@ -157,27 +149,25 @@ def test_an_image_with_no_document_is_not_one_recording_no_error_in_the_tree(tre
     assert NO_RESULT not in kept
 
 
-@pytest.mark.parametrize(
-    'flag',
-    [
-        'has_offset_error',
-        'has_no_offset_error',
-        'has_offset_spice_error',
-        'has_offset_nonspice_error',
-    ],
-)
-def test_an_error_filter_prunes_a_missing_document_against_the_walked_set(
-    tree: Path, flag: str
-) -> None:
+ERROR_FLAGS = [
+    'has_offset_error',
+    'has_no_offset_error',
+    'has_offset_spice_error',
+    'has_offset_nonspice_error',
+]
+"""Every flag that asks what a document records rather than whether one is there."""
+
+
+@pytest.mark.parametrize('flag', ERROR_FLAGS)
+def test_an_error_filter_passes_over_an_image_with_no_document(tree: Path, flag: str) -> None:
     """Every error filter folds presence in, and this is where that shows.
 
-    The fold-in changes no answer: without it the retrieval of a document that
-    is not there fails and the batch stage drops the image anyway.  What it
-    changes is the cost, and only here -- an image nothing has been written for
-    is settled by a set already in memory rather than by one retrieval per
-    candidate, which on a cloud root is a paid round trip per image.  The
-    population that pays it is every image the run has yet to navigate, so it
-    is the common case rather than the corner.
+    An image nothing has been written for records no error and records no
+    outcome either, so it belongs to none of the four selections.  The filter
+    phrased in the negative is the one that would otherwise take it: read as
+    "records no fatal error", absence would put an image in this selection and
+    in the one ``has_no_offset_file`` makes, leaving no way to ask for either
+    without the other.
 
     Parameters:
         tree: The results root under test.
@@ -186,7 +176,7 @@ def test_an_error_filter_prunes_a_missing_document_against_the_walked_set(
     results_filter = ResultsFilter(
         VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **{flag: True}
     )
-    assert results_filter.passes_presence(NO_RESULT) is False
+    assert results_filter.passes(NO_RESULT) is False
 
 
 def test_an_image_with_no_row_is_not_one_recording_no_error_in_the_index(
@@ -324,499 +314,111 @@ def test_the_index_reads_a_document_naming_no_outcome_the_same_way(
     assert select_from(results_filter, images) == expected
 
 
-_FLAG_CASES = [pytest.param(case.values[0], id=case.id) for case in _MATRIX]
-"""The same filter combinations, for the assertions that do not need the answer."""
+# ---------------------------------------------------------------------------
+# A JSON object that is not a navigation document
+# ---------------------------------------------------------------------------
 
-
-@pytest.mark.parametrize('flags', _FLAG_CASES)
-def test_the_index_path_leaves_nothing_for_the_batch_stage(
-    tree: Path, indexed: str, flags: dict[str, bool]
-) -> None:
-    """The enumeration buffers images only to amortize round trips an index has none of."""
-    results_filter = ResultsFilter(
-        VOLUMES, str(tree), logger=null_logger(), results_db_url=indexed, **flags
-    )
-    assert results_filter.needs_batch_filtering is False
-
-
-CONTRADICTORY_PAIRS = [
-    pytest.param({'has_offset_file': True, 'has_no_offset_file': True}, id='offset-file-pair'),
-    pytest.param(
-        {'has_offset_spice_error': True, 'has_offset_nonspice_error': True}, id='error-pair'
-    ),
-    pytest.param(
-        {'has_offset_error': True, 'has_no_offset_file': True}, id='error-and-no-offset-file'
-    ),
-    pytest.param({'has_offset_error': True, 'has_no_offset_error': True}, id='error-and-no-error'),
-    pytest.param(
-        {'has_offset_spice_error': True, 'has_no_offset_error': True},
-        id='spice-error-and-no-error',
-    ),
-    pytest.param(
-        {'has_offset_nonspice_error': True, 'has_no_offset_error': True},
-        id='nonspice-error-and-no-error',
-    ),
-    pytest.param(
-        {'has_no_offset_error': True, 'has_no_offset_file': True},
-        id='no-error-and-no-offset-file',
-    ),
-    pytest.param(
-        {'has_offset_spice_error': True, 'has_no_offset_file': True},
-        id='spice-error-and-no-offset-file',
-    ),
-    pytest.param(
-        {'has_offset_nonspice_error': True, 'has_no_offset_file': True},
-        id='nonspice-error-and-no-offset-file',
-    ),
+NOT_A_NAVIGATION_DOCUMENT = [
+    pytest.param({'status': 'error', 'status_error': SPICE_STATUS_ERROR}, id='fatal-error'),
+    pytest.param({'status': 'success'}, id='plain-outcome'),
 ]
-"""Every pair of selection flags no image could satisfy.
+"""Two JSON objects that read perfectly and are no navigation result of any schema.
 
-That it is every one of them is asserted rather than claimed: the six flags make
-fifteen pairs, and the test below puts each of the fifteen to the constructor and
-holds the ones it refuses to exactly this list.  A list short by a pair leaves
-the message that pair produces unasserted, which is how two of the four
-contradictions came to have a path through the message builder nothing read.
+Each carries the fields the error filters name and nothing else a document has
+-- no image, no mission, no navigation result -- and between them they carry
+both sides of the vocabulary, so a filter phrased in the positive and one
+phrased in the negative each have a candidate that would satisfy them if the two
+fields were read out of whatever could be parsed.
 """
 
-CONTRADICTION_REFUSAL = r'mutually exclusive|cannot be combined with'
-"""The two shapes a refusal of contradictory selection flags takes.
+STORAGES = [pytest.param(False, id='tree'), pytest.param(True, id='index')]
+"""Whether the filter is answered from an ingested index rather than the tree.
 
-Two flags that exclude each other and nothing else are mutually exclusive.  One
-flag that excludes several which are satisfiable together is named against the
-ones it excludes instead: ``has_offset_error`` and ``has_offset_spice_error``
-are a pair the constructor accepts, so a message calling the three of them
-mutually exclusive would assert an exclusion between two flags that have none.
-"""
-
-SELECTION_FLAGS = (
-    'has_offset_file',
-    'has_no_offset_file',
-    'has_offset_error',
-    'has_no_offset_error',
-    'has_offset_spice_error',
-    'has_offset_nonspice_error',
-)
-"""The six results-file selection flags."""
-
-COMBINATIONS = [
-    names
-    for size in range(2, len(SELECTION_FLAGS) + 1)
-    for names in itertools.combinations(SELECTION_FLAGS, size)
-]
-"""Every combination of two or more of them, which is what a user may type.
-
-A user types flags rather than pairs, and a refusal is about the combination
-they typed: three of these carry two contradictions at once, and the
-contradiction a run happens to notice first is not the whole of what is wrong
-with the selection.
+Both halves are asked, and each is held to the stated answer rather than to the
+other's: two storages that are wrong in the same way agree.
 """
 
 
-def _contradicted_within(names: Sequence[str]) -> set[str]:
-    """Return the flags of one combination that another flag of it contradicts.
+def _selecting_one_object(
+    tmp_path: Path, document: dict[str, Any], *, from_an_index: bool, **flags: bool
+) -> list[str]:
+    """Write one JSON object as an image's metadata file and answer one filter.
 
     Parameters:
-        names: The flags the user typed.
+        tmp_path: Directory the root and any index are written under.
+        document: Exactly what the metadata file holds.
+        from_an_index: Whether the filter reads an ingested index rather than
+            the tree.
+        flags: The selection flags to apply.
 
     Returns:
-        Every flag belonging to a contradictory pair both of whose flags are in
-        the combination.  A flag that contradicts nothing else present is not
-        one of them: it is a narrowing the selection could have satisfied, and
-        naming it in a refusal would send its user to change the wrong thing.
+        The stubs that passed.
     """
-    given = set(names)
-    return {
-        name
-        for case in CONTRADICTORY_PAIRS
-        for pair in [set(cast(dict[str, bool], case.values[0]))]
-        if pair <= given
-        for name in pair
-    }
-
-
-def _refusal_of(tree: Path, names: Sequence[str]) -> str | None:
-    """Build a filter over the given flags and return what it refused, if it did.
-
-    Parameters:
-        tree: The results root, read only by the combinations that are not
-            refused.
-        names: The flags to turn on.
-
-    Returns:
-        The refusal's message, or None when the combination was accepted.
-    """
-    flags = dict.fromkeys(names, True)
-    try:
-        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **flags)
-    except SelectionError as exc:
-        return str(exc)
-    return None
-
-
-def test_exactly_the_combinations_holding_a_contradictory_pair_are_refused(tree: Path) -> None:
-    """The list of contradictions is the whole of what the constructor refuses.
-
-    Asserted over every combination rather than over the pairs alone, so that a
-    contradiction reachable only by three flags together, and a combination
-    refused for no pair anybody wrote down, are both failures here.
-    """
-    refused = {names for names in COMBINATIONS if _refusal_of(tree, names) is not None}
-    assert refused == {names for names in COMBINATIONS if _contradicted_within(names)}
-
-
-def test_a_refusal_names_every_flag_of_the_combination_it_cannot_satisfy(tree: Path) -> None:
-    """A flag left out of the message reads as one the run accepted.
-
-    A combination carrying two contradictions is refused for both, because a
-    user who removes the flag the first one named and runs again would otherwise
-    meet the second, and a run refused a pair at a time costs a run per pair.
-    """
-    unnamed = {
-        names: sorted(name for name in _contradicted_within(names) if name not in (message or ''))
-        for names in COMBINATIONS
-        if (message := _refusal_of(tree, names)) is not None
-    }
-    assert {names: missing for names, missing in unnamed.items() if missing} == {}
-
-
-def _pairs_called_mutually_exclusive(tree: Path) -> set[frozenset[str]]:
-    """Return every pair of flags a refusal claims cannot hold together.
-
-    "Mutually exclusive" is a claim about each pair of the flags it leads, so a
-    clause leading three of them claims three pairs.
-
-    Parameters:
-        tree: The results root the combinations are put to.
-
-    Returns:
-        One frozen pair per claim any refusal makes.
-    """
-    claimed: set[frozenset[str]] = set()
-    for names in COMBINATIONS:
-        message = _refusal_of(tree, names)
-        if message is None:
-            continue
-        for clause in message.split('; '):
-            if 'mutually exclusive' not in clause:
-                continue
-            lead = clause.split(':')[0]
-            named = sorted(name for name in SELECTION_FLAGS if name in lead)
-            claimed.update(frozenset(pair) for pair in itertools.combinations(named, 2))
-    return claimed
-
-
-def test_no_refusal_calls_a_satisfiable_pair_mutually_exclusive(tree: Path) -> None:
-    """A refusal that says more than it means sends its user to change the wrong flag.
-
-    ``has_offset_error`` and ``has_offset_spice_error`` are a pair the
-    constructor accepts, so a message that named them and
-    ``has_no_offset_file`` together as mutually exclusive would tell a user that
-    a selection this program answers is impossible.  The refusal that names one
-    flag against the ones it excludes says only what is true, and this is what
-    holds every "mutually exclusive" clause to a pair that really is one.
-    """
-    exclusive = {frozenset(cast(dict[str, bool], case.values[0])) for case in CONTRADICTORY_PAIRS}
-    unfounded = _pairs_called_mutually_exclusive(tree) - exclusive
-    assert sorted(sorted(pair) for pair in unfounded) == []
-
-
-@pytest.mark.parametrize('flags', CONTRADICTORY_PAIRS)
-def test_a_contradictory_pair_is_refused_before_the_index_is_opened(
-    tree: Path, tmp_path: Path, flags: dict[str, bool]
-) -> None:
-    """The flags are validated first, so the refusal is the same with or without one.
-
-    The URL names a database that does not exist, so a constructor that opened
-    the index before checking its flags would report that instead.
-    """
-    absent = index_url(tmp_path / 'not-an-index.sqlite3')
-    with pytest.raises(ValueError, match=CONTRADICTION_REFUSAL) as excinfo:
-        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=absent, **flags)
-    assert 'not-an-index.sqlite3' not in str(excinfo.value)
-
-
-@pytest.mark.parametrize('flags', CONTRADICTORY_PAIRS)
-def test_a_refusal_names_every_flag_that_made_the_selection_impossible(
-    tree: Path, flags: dict[str, bool]
-) -> None:
-    """The message is the whole diagnosis, so it names what the user typed.
-
-    A message naming a category rather than a flag -- "the offset-error
-    filters" -- leaves the user to work out which of six flags belongs to it,
-    and one of the six is named for the absence of an error, so the category
-    reads as something they did not ask for.
-
-    Parameters:
-        tree: The results root, which is never read: the flags are refused
-            first.
-        flags: The contradictory pair.
-    """
-    with pytest.raises(SelectionError) as excinfo:
-        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **flags)
-    assert [name for name in flags if name not in str(excinfo.value)] == []
-
-
-def test_a_root_with_no_completed_ingest_is_refused(tree: Path, indexed: str) -> None:
-    """Absence of a row is only an answer under a root somebody ingested."""
-    other_root = tree.parent / 'never-ingested'
-    with pytest.raises(ValueError, match='no completed ingest') as excinfo:
-        ResultsFilter(
-            VOLUMES,
-            str(other_root),
-            logger=null_logger(),
-            results_db_url=indexed,
-            has_offset_file=True,
+    root = tmp_path / 'results'
+    write_metadata(root, SPICE_ERROR, document)
+    images = [
+        ImageFile(
+            image_file_url=FCPath(root / f'{SPICE_ERROR}.IMG'),
+            label_file_url=FCPath(root / f'{SPICE_ERROR}.LBL'),
+            results_path_stub=SPICE_ERROR,
         )
-    assert other_root.as_posix() in str(excinfo.value)
-
-
-def test_an_index_that_cannot_be_opened_is_not_a_reason_to_read_files(
-    tree: Path, tmp_path: Path
-) -> None:
-    """A misconfigured run fails; it does not become a slow, silently different one."""
-    absent = index_url(tmp_path / 'not-an-index.sqlite3')
-    with pytest.raises(ValueError, match='sd_stats_ingest') as excinfo:
-        ResultsFilter(
-            VOLUMES, str(tree), logger=null_logger(), results_db_url=absent, has_offset_file=True
-        )
-    assert 'not-an-index.sqlite3' in str(excinfo.value)
-
-
-def test_both_paths_match_the_same_spice_error() -> None:
-    """The two implementations tell a SPICE failure apart by the same value.
-
-    They hold it separately because the tree path may not import the index
-    package, so nothing but this holds the two spellings together.
-    """
-    assert SPICE_STATUS_ERROR == _SPICE_STATUS_ERROR
-
-
-def test_importing_the_dataset_package_does_not_import_sqlalchemy() -> None:
-    """The navigation critical path stays free of the database layer.
-
-    Every navigation run imports :mod:`spindoctor.dataset`, and most of them
-    name no index at all.  The index-backed filter is therefore imported inside
-    the branch that has a URL, and this is what says so.
-
-    It runs in a subprocess because the assertion is about a fresh interpreter:
-    anything else in the test session has already imported SQLAlchemy, and the
-    same check inside this process would pass no matter what the package does.
-    """
-    probe = (
-        'import json, sys\n'
-        'import spindoctor.dataset\n'
-        'print(json.dumps(sorted(name for name in sys.modules '
-        'if name.split(".")[0] == "sqlalchemy")))\n'
-    )
-    completed = subprocess.run(
-        [sys.executable, '-c', probe],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=child_interpreter_environment(),
-    )
-    assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout) == []
-
-
-def test_an_index_that_will_not_answer_refuses_the_selection(tmp_path: Path) -> None:
-    """An index that opened and then failed is a misconfigured run like any other.
-
-    The type is the one a program reporting the message catches, so a database
-    failure reaches an operator as the sentence that says what to change rather
-    than as a traceback out of an enumeration.
-    """
-    root, _images = one_image_tree(tmp_path)
-    url = index_without_a_table(tmp_path, root, 'failed_files')
-    with pytest.raises(SelectionError, match='could not be read'):
-        ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-        )
-
-
-def test_an_index_that_will_not_answer_raises_no_database_exception(tmp_path: Path) -> None:
-    """This module never imports the database layer, so it may not raise its types."""
-    root, _images = one_image_tree(tmp_path)
-    url = index_without_a_table(tmp_path, root, 'failed_files')
-    with pytest.raises(SelectionError) as excinfo:
-        ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-        )
-    assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
-
-
-def test_an_index_that_cannot_be_opened_refuses_the_selection(tmp_path: Path) -> None:
-    """The three refusals are one type, so a program catches one and reports all three."""
-    root, _images = one_image_tree(tmp_path)
-    absent = index_url(tmp_path / 'not-an-index.sqlite3')
-    with pytest.raises(SelectionError, match='sd_stats_ingest'):
-        ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=absent, has_offset_file=True
-        )
-
-
-def test_a_root_the_index_does_not_cover_refuses_the_selection(tree: Path, indexed: str) -> None:
-    """Absence under a root nobody ingested is the third of the three."""
-    with pytest.raises(SelectionError, match='no completed ingest'):
-        ResultsFilter(
-            VOLUMES,
-            str(tree.parent / 'never-ingested'),
-            logger=null_logger(),
-            results_db_url=indexed,
-            has_offset_file=True,
-        )
-
-
-def test_a_contradictory_pair_refuses_the_selection(tree: Path) -> None:
-    """The flags are the fourth, and the one that needs no index at all."""
-    with pytest.raises(SelectionError, match='mutually exclusive'):
-        ResultsFilter(
-            VOLUMES,
-            str(tree),
-            logger=null_logger(),
-            has_offset_file=True,
-            has_no_offset_file=True,
-        )
-
-
-def test_the_volumes_are_fixed_at_the_boundary_for_the_index(tree: Path, indexed: str) -> None:
-    """A caller is free to hand over an iterator, which one read would empty.
-
-    Which path reads the volumes depends on the flags and on whether a URL was
-    given, so the sequence is fixed once at the constructor rather than left to
-    whichever path happens to consume it.
-    """
+    ]
+    url = None
+    if from_an_index:
+        url = index_url(tmp_path / 'index.sqlite3')
+        ingest_tree(url, [root], logger=null_logger())
     results_filter = ResultsFilter(
-        VOLUMES, str(tree), logger=null_logger(), results_db_url=indexed, has_offset_file=True
+        VOLUMES, str(root), logger=null_logger(), results_db_url=url, **flags
     )
-    from_iterator = ResultsFilter(
-        iter(VOLUMES), str(tree), logger=null_logger(), results_db_url=indexed, has_offset_file=True
-    )
-    images = candidate_files(tree)
-    assert select_from(from_iterator, images) == select_from(results_filter, images)
+    return select_from(results_filter, images)
 
 
-def test_the_volumes_are_fixed_at_the_boundary_for_the_tree(tree: Path) -> None:
-    """The walked path is handed the same fixed sequence, for the same reason."""
-    results_filter = ResultsFilter(VOLUMES, str(tree), logger=null_logger(), has_offset_file=True)
-    from_iterator = ResultsFilter(
-        iter(VOLUMES), str(tree), logger=null_logger(), has_offset_file=True
-    )
-    images = candidate_files(tree)
-    assert select_from(from_iterator, images) == select_from(results_filter, images)
+@pytest.mark.parametrize('document', NOT_A_NAVIGATION_DOCUMENT)
+@pytest.mark.parametrize('from_an_index', STORAGES)
+def test_an_object_that_is_no_navigation_document_is_present_to_both_storages(
+    tmp_path: Path, from_an_index: bool, document: dict[str, Any]
+) -> None:
+    """Presence is a question about the file, so whatever is in it, it is there.
 
-
-def _reads_recorded_by(reads: list[list[str]]) -> Any:
-    """Return a stand-in read that reads its selected directories twice and records both.
-
-    Reading twice is the contract under test.  The argument arrives here as
-    whatever the constructor passed on, and an iterator passed through would be
-    empty the second time -- which is exactly what the boundary exists to stop,
-    and what an end-to-end comparison of a list against an iterator cannot see,
-    since a single read serves both correctly.
+    A results root holds whatever an operator has put there, and the presence
+    filters are what a resume idiom is spelled from: a file that exists and
+    reads as nothing has still been written, and offering its image up to be
+    navigated again would overwrite it.
 
     Parameters:
-        reads: List each read appends its result to.
-
-    Returns:
-        A callable with the signature of
-        :func:`~spindoctor.results_index.selection.read_result_stubs`.
+        tmp_path: Directory the root and any index are written under.
+        from_an_index: Whether the filter reads an index rather than the tree.
+        document: The object the metadata file holds.
     """
-
-    def recording(
-        url: str, nav_results_root: Any, subtrees: Iterable[str], **flags: bool
-    ) -> ResultStubs:
-        reads.append(list(subtrees))
-        reads.append(list(subtrees))
-        return ResultStubs(with_metadata=frozenset(), matching_error=frozenset())
-
-    return recording
-
-
-def test_the_index_path_is_handed_volumes_it_can_be_read_twice_from(
-    tree: Path, indexed: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The boundary hands on a sequence, not whatever iterable it was given."""
-    reads: list[list[str]] = []
-    monkeypatch.setattr(selection, 'read_result_stubs', _reads_recorded_by(reads))
-    ResultsFilter(
-        iter(VOLUMES), str(tree), logger=null_logger(), results_db_url=indexed, has_offset_file=True
+    kept = _selecting_one_object(
+        tmp_path, document, from_an_index=from_an_index, has_offset_file=True
     )
-    assert reads[1] == VOLUMES
+    assert kept == [SPICE_ERROR]
 
 
-def test_the_tree_path_is_handed_volumes_it_can_be_read_twice_from(
-    tree: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize('document', NOT_A_NAVIGATION_DOCUMENT)
+@pytest.mark.parametrize('from_an_index', STORAGES)
+@pytest.mark.parametrize('flag', ERROR_FLAGS)
+def test_an_object_that_is_no_navigation_document_matches_no_error_filter(
+    tmp_path: Path, flag: str, from_an_index: bool, document: dict[str, Any]
 ) -> None:
-    """The walked path is handed the same fixed sequence, for the same reason."""
-    reads: list[list[str]] = []
+    """What such a file records is unknown, not known to be an outcome.
 
-    def recording(self: ResultsFilter, volumes: Sequence[str]) -> None:
-        reads.append(list(volumes))
-        reads.append(list(volumes))
+    The error filters ask what a document records about its image, and nothing
+    here records anything about an image: the fields are two words that happen
+    to be spelled like a navigator's.  The filter phrased in the negative is one
+    of the four for that reason -- selecting this image would claim its
+    navigation ran to a result, and nothing in the file says an image was
+    navigated at all.
 
-    monkeypatch.setattr(ResultsFilter, '_scan_volumes', recording)
-    ResultsFilter(iter(VOLUMES), str(tree), logger=null_logger(), has_offset_file=True)
-    assert reads[1] == VOLUMES
-
-
-def test_the_refusal_does_not_repeat_the_query_that_failed(tmp_path: Path) -> None:
-    """The wrapper exists so that the sentence to act on is what a reader meets.
-
-    The database layer renders a failed statement with its SQL, its bound
-    parameters and a link to its own documentation.  Reported through a program
-    that catches this type, that puts the advice under a page of machinery.
+    Parameters:
+        tmp_path: Directory the root and any index are written under.
+        flag: The error filter, one per flag that reads a document.
+        from_an_index: Whether the filter reads an index rather than the tree.
+        document: The object the metadata file holds.
     """
-    root, _images = one_image_tree(tmp_path)
-    url = index_without_a_table(tmp_path, root, 'failed_files')
-    with pytest.raises(SelectionError) as excinfo:
-        ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-        )
-    assert 'SELECT' not in str(excinfo.value)
-
-
-def test_the_refusal_carries_what_the_driver_said(tmp_path: Path) -> None:
-    """Which table is missing is the whole of what makes the failure actionable."""
-    root, _images = one_image_tree(tmp_path)
-    url = index_without_a_table(tmp_path, root, 'failed_files')
-    with pytest.raises(SelectionError, match='no such table: failed_files'):
-        ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-        )
-
-
-def test_a_database_failure_of_another_class_is_translated_too(tmp_path: Path) -> None:
-    """Every way the layer fails is one type at this seam, not the operational ones.
-
-    A missing table raises one class on SQLite and another on PostgreSQL, and a
-    value the driver will not bind raises a third on both.  A caller that never
-    imports the database layer cannot name any of them, so the guarantee is the
-    family and not a member of it.
-    """
-    root, _images = one_image_tree(tmp_path)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    unbindable = cast(list[str], [object()])
-    with pytest.raises(SelectionError, match='could not be read'):
-        ResultsFilter(
-            unbindable, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-        )
-
-
-def test_a_database_failure_of_another_class_raises_no_database_exception(
-    tmp_path: Path,
-) -> None:
-    """This module never imports the database layer, so it may not raise its types."""
-    root, _images = one_image_tree(tmp_path)
-    url = index_url(tmp_path / 'index.sqlite3')
-    ingest_tree(url, [root], logger=null_logger())
-    unbindable = cast(list[str], [object()])
-    with pytest.raises(SelectionError) as excinfo:
-        ResultsFilter(
-            unbindable, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
-        )
-    assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
+    kept = _selecting_one_object(tmp_path, document, from_an_index=from_an_index, **{flag: True})
+    assert kept == []
 
 
 # ---------------------------------------------------------------------------
@@ -955,3 +557,117 @@ def test_a_document_the_database_would_not_store_leaves_the_root_unreadable(
         ResultsFilter(
             VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
         )
+
+
+# ---------------------------------------------------------------------------
+# What the answer leaves open
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _EngineBuilt:
+    """One engine built to answer a filter, and what became of the pool it started with.
+
+    Parameters:
+        engine: The engine, as answering the filter left it.
+        pool: The pool it held when it was built.
+        checked_out_at_disposal: How many connections were still out of that pool
+            at the moment disposal was asked for, and None if it was never
+            disposed of.  Disposal installs a fresh pool and leaves whatever is
+            checked out of the old one checked out, so this is the last moment at
+            which a connection the answer kept is visible at all.
+    """
+
+    engine: sqlalchemy.Engine
+    pool: QueuePool
+    checked_out_at_disposal: int | None = None
+
+
+def _engines_built_answering(
+    tree: Path, indexed: str, monkeypatch: pytest.MonkeyPatch
+) -> list[_EngineBuilt]:
+    """Answer a filter, recording every engine built for it and how the answer left it.
+
+    Parameters:
+        tree: The results root under test.
+        indexed: The index answering the filter.
+        monkeypatch: Fixture the recording hooks are installed through.
+
+    Returns:
+        One record per engine, in the order they were built.  There is always at
+        least one, since a filter answered from an index opens one.
+    """
+    built: list[_EngineBuilt] = []
+    create_engine = sqlalchemy.create_engine
+    disposing = sqlalchemy.Engine.dispose
+
+    def recording(*args: Any, **kwargs: Any) -> sqlalchemy.Engine:
+        made = create_engine(*args, **kwargs)
+        # A file-backed SQLite engine pools its connections, and only a pooling
+        # implementation can report what it is holding.
+        assert isinstance(made.pool, QueuePool)
+        built.append(_EngineBuilt(made, made.pool))
+        return made
+
+    def counting(engine: sqlalchemy.Engine, *args: Any, **kwargs: Any) -> None:
+        # What is checked out has to be counted before the pool goes, and
+        # disposal is where it goes: it installs a fresh one and leaves whatever
+        # was checked out of the old one checked out, so afterwards neither pool
+        # reports a connection the answer kept.
+        for record in built:
+            if record.engine is engine:
+                record.checked_out_at_disposal = record.pool.checkedout()
+        disposing(engine, *args, **kwargs)
+
+    monkeypatch.setattr(sqlalchemy, 'create_engine', recording)
+    monkeypatch.setattr(sqlalchemy.Engine, 'dispose', counting)
+    ResultsFilter(
+        VOLUMES, str(tree), logger=null_logger(), results_db_url=indexed, has_offset_file=True
+    )
+    assert built != []
+    return built
+
+
+def test_answering_the_filter_leaves_no_index_open(
+    tree: Path, indexed: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The answer outlives the connection, and nothing else does.
+
+    A filter is built once per enumeration and holds its answer for the whole of
+    it, so an undisposed pool keeps a SQLite connection, or a server session, for
+    the length of a navigation run.  Disposal replaces the pool, which is the
+    observable proof that it happened.
+
+    Parameters:
+        tree: The results root under test.
+        indexed: The index answering the filter.
+        monkeypatch: Fixture the recording hooks are installed through.
+    """
+    left_open = [
+        record.engine
+        for record in _engines_built_answering(tree, indexed, monkeypatch)
+        if record.engine.pool is record.pool
+    ]
+    assert left_open == []
+
+
+def test_answering_the_filter_returns_every_connection(
+    tree: Path, indexed: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stream holding a cursor has to release it, or a run leaks one per query.
+
+    The count is read at the moment disposal is asked for, which is the last
+    moment it says anything: disposal replaces the pool without reclaiming what
+    is checked out of it, so afterwards neither the old pool nor the new one
+    reports the connection the answer kept.
+
+    Parameters:
+        tree: The results root under test.
+        indexed: The index answering the filter.
+        monkeypatch: Fixture the recording hooks are installed through.
+    """
+    checked_out = [
+        record.checked_out_at_disposal
+        for record in _engines_built_answering(tree, indexed, monkeypatch)
+    ]
+    assert checked_out == [0] * len(checked_out)

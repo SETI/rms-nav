@@ -1,8 +1,10 @@
 """What importing the record seam must not drag in.
 
-The enumeration lives in the dataset package, which every navigation run imports
-and most of which name no index at all, so a database layer imported here would
-be imported by every run.
+This package is the half of the seam that reads documents, and reading a
+document needs no database at all.  A checkout with no index anywhere, and a
+machine with no server to reach, still has to be able to import it and read
+every record a results root holds, so a database layer imported here would make
+the storage that needs none depend on the one that does.
 
 Reading the source cannot prove that, since the offending import could be two
 modules deep, so the check runs a fresh interpreter and looks at what actually

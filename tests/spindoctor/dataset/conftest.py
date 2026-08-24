@@ -43,13 +43,12 @@ from tests.spindoctor.conftest import (
 
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
-from spindoctor.dataset.results_filter import RESULTS_FILTER_BATCH_SIZE, ResultsFilter
-from spindoctor.results_index import (
-    INGEST_RUNS,
+from spindoctor.dataset.results_filter import (
+    RESULTS_FILTER_BATCH_SIZE,
     SPICE_STATUS_ERROR,
-    normalize_root_url,
-    open_index,
+    ResultsFilter,
 )
+from spindoctor.results_index import INGEST_RUNS, normalize_root_url, open_index
 
 VOLUMES = ['COISS_2001', 'COISS_2002']
 """The volumes the enumeration selected."""
@@ -277,7 +276,7 @@ def select_from(results_filter: ResultsFilter, images: list[ImageFile]) -> list[
     Returns:
         The stubs that passed, in enumeration order.
     """
-    kept = [image for image in images if results_filter.passes_presence(image.results_path_stub)]
+    kept = [image for image in images if results_filter.passes(image.results_path_stub)]
     selected: list[ImageFile] = []
     for start in range(0, len(kept), RESULTS_FILTER_BATCH_SIZE):
         batch = kept[start : start + RESULTS_FILTER_BATCH_SIZE]
@@ -408,12 +407,13 @@ def index_without_a_table(tmp_path: Path, root: Path, table: str) -> str:
 
 
 def reported_line(out: str) -> str:
-    """Return the line reporting what the index holds.
+    """Return the line reporting what the index answers about.
 
     Parameters:
         out: Everything the filter wrote.
 
     Returns:
-        The one line naming the counts and the age of the answer.
+        The one line naming the age of the answer, and the count of what the
+        root holds when the scan listed it.
     """
-    return next(line for line in out.splitlines() if 'Results index holds' in line)
+    return next(line for line in out.splitlines() if 'Results index' in line)

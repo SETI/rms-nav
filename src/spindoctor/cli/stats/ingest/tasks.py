@@ -90,7 +90,7 @@ from spindoctor.cli.stats.ingest.runs import (
     _start_run,
     _unfinished_run,
 )
-from spindoctor.cli.stats.ingest.store import _recorded_files, _report_refusals
+from spindoctor.cli.stats.ingest.store import _recorded_files
 from spindoctor.nav_records import ListedRecord, distinct_roots, document_path, normalize_root_url
 
 __all__ = [
@@ -908,7 +908,6 @@ def complete_ingest_tasks(
             counts.files_failed,
             counts.files_seen,
         )
-        _report_refusals(engine, root_url, logger=logger)
         completion.counts.add(counts)
     claimed_runs = {run_id for run_id, _root_url in claimed}
     for key, count in results_of_share.items():

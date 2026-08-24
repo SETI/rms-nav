@@ -45,3 +45,8 @@ spindoctor.nav_records
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: spindoctor.nav_records.walk
+   :members:
+   :undoc-members:
+   :show-inheritance:
