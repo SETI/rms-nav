@@ -85,9 +85,9 @@ def _resolve_pointing_source(cli_args: argparse.Namespace) -> PointingSource:
         The source, which the task closes when it is done with it.
 
     Raises:
-        ValueError: If a named index cannot be opened, is not an index, was
-            written by another version of the schema, or has not fully ingested
-            this root.
+        ValueError: If a level names the index with an empty value, or if a named
+            index cannot be opened, is not an index, was written by another
+            version of the schema, or has not fully ingested this root.
     """
     try:
         nav_results_root_str: str | None = get_nav_results_root(cli_args, DEFAULT_CONFIG)
@@ -153,9 +153,10 @@ def process_task(
         Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result``
         is ``{'status': 'error', 'status_error': ...}`` (and optionally
         ``status_exception``) when the task itself could not run -- including
-        ``unusable_results_db`` when an index was named that cannot be opened or
-        has not ingested this root, which fails the task rather than letting it
-        reproject a whole batch on uncorrected pointing.  Otherwise it
+        ``unusable_results_db`` when a level named the index with an empty
+        value, or an index was named that cannot be opened or has not ingested
+        this root, which fails the task rather than letting it reproject a whole
+        batch on uncorrected pointing.  Otherwise it
         is ``{'status': 'success'}`` with ``n_done``, ``n_skipped`` and
         ``n_failed``: an individual image is allowed to fail without failing
         the task, so the counts are what distinguish a task that reprojected

@@ -495,7 +495,14 @@ def main() -> None:
         MAIN_LOGGER.fatal('%s', refusal)
         sys.exit(1)
 
-    url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    # A level that names the index with an empty value is a different failure from
+    # naming none at all, and its message names that level, so it is reported as
+    # itself rather than as the "no index was named" refusal below.
+    try:
+        url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    except ValueError as exc:
+        MAIN_LOGGER.fatal('%s', exc)
+        sys.exit(1)
     if url is None:
         MAIN_LOGGER.fatal(
             'No results index was named. Give one with --results-db, the '

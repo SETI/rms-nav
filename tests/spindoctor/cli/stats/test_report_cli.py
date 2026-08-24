@@ -170,31 +170,100 @@ def test_main_report_with_neither_names_the_tree_flag(
     assert '--nav-results-root' in capsys.readouterr().err
 
 
+def _empty_variable_over_a_readable_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[int, Path]:
+    """Run the driver with an empty index variable and a tree it could report over.
+
+    The tree is what makes the refusal mean something: read as naming no index,
+    the empty value would send this run to the documents and it would exit 0
+    with a report written, which is exactly the outcome the refusal exists to
+    prevent.
+
+    Parameters:
+        tmp_path: Directory the tree and the report live under.
+        monkeypatch: Fixture the exported variable is set through.
+
+    Returns:
+        The exit code, and where the report would have been written.
+    """
+    monkeypatch.setenv('NAV_RESULTS_DB', '')
+    root = tmp_path / 'results'
+    write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
+    output_dir = tmp_path / 'report'
+    exit_code = main_report(['--nav-results-root', str(root), '--output-dir', str(output_dir)])
+    return exit_code, output_dir
+
+
+def test_main_report_refuses_an_empty_index_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exported variable carrying no URL stops the run rather than steering it.
+
+    Parameters:
+        tmp_path: Directory the tree and the report live under.
+        monkeypatch: Fixture the exported variable is set through.
+    """
+    exit_code, _output_dir = _empty_variable_over_a_readable_tree(tmp_path, monkeypatch)
+    assert exit_code == 1
+
+
 def test_main_report_says_an_empty_index_variable_named_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An operator who exported the variable is told the value carries no URL.
 
-    Without it the refusal beside this line says to name an index with
-    ``NAV_RESULTS_DB``, which is what they believe they did.
+    Parameters:
+        tmp_path: Directory the tree and the report live under.
+        monkeypatch: Fixture the exported variable is set through.
+        capsys: Fixture the refusal is read back from.
     """
-    monkeypatch.setenv('NAV_RESULTS_DB', '')
-    main_report(['--output-dir', str(tmp_path / 'report')])
+    _empty_variable_over_a_readable_tree(tmp_path, monkeypatch)
     assert 'is set to an empty value' in capsys.readouterr().err
+
+
+def test_main_report_names_the_variable_the_empty_value_came_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One unset fixes it, and only the named level says which one to unset.
+
+    Parameters:
+        tmp_path: Directory the tree and the report live under.
+        monkeypatch: Fixture the exported variable is set through.
+        capsys: Fixture the refusal is read back from.
+    """
+    _empty_variable_over_a_readable_tree(tmp_path, monkeypatch)
+    assert 'NAV_RESULTS_DB' in capsys.readouterr().err
 
 
 def test_main_report_says_it_through_its_own_output_rather_than_a_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """This program's output is terminal text, and both lines are part of it.
+    """This program's output is terminal text, and the refusal is part of it.
 
     Written through the main log instead, the line arrives wrapped in run-log
-    machinery and after the refusal it explains, because the two then travel by
-    different routes.
+    machinery and on the stream the report itself is announced on.
+
+    Parameters:
+        tmp_path: Directory the tree and the report live under.
+        monkeypatch: Fixture the exported variable is set through.
+        capsys: Fixture the streams are read back from.
     """
-    monkeypatch.setenv('NAV_RESULTS_DB', '')
-    main_report(['--output-dir', str(tmp_path / 'report')])
-    assert 'NAV_RESULTS_DB' not in capsys.readouterr().out
+    _empty_variable_over_a_readable_tree(tmp_path, monkeypatch)
+    assert 'is set to an empty value' not in capsys.readouterr().out
+
+
+def test_main_report_writes_no_report_from_an_empty_index_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused run produces nothing, so no report is mistaken for an answer.
+
+    Parameters:
+        tmp_path: Directory the tree and the report live under.
+        monkeypatch: Fixture the exported variable is set through.
+    """
+    _exit_code, output_dir = _empty_variable_over_a_readable_tree(tmp_path, monkeypatch)
+    assert not output_dir.exists()
 
 
 def test_main_report_refuses_an_index_that_is_not_there(

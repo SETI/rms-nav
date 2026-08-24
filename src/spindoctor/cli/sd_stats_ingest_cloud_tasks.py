@@ -77,7 +77,17 @@ def process_task(
     # value.
     build_cloud_task_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
 
-    url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    try:
+        url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    except ValueError as exc:
+        # A level that names the index with an empty value fails the share
+        # naming that level, which is a different thing from naming no index at
+        # all and is reported as its own status so a tally can tell them apart.
+        return False, {
+            'status': 'error',
+            'status_error': 'unusable_results_db',
+            'status_exception': str(exc),
+        }
     if url is None:
         return False, {'status': 'error', 'status_error': 'no_results_db'}
 

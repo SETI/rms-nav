@@ -9,8 +9,11 @@ the current directory).
 The results-root getters and the results-index getter share that order and part
 ways at the end of it: an unresolved root is an error, while an unresolved index
 URL is an answer -- no index was resolved -- and each caller decides for itself
-whether it can proceed without one. ``sd_stats_ingest`` and ``sd_stats_report``
-cannot, and both refuse; the pipeline programs read files instead.
+whether it can proceed without one. ``sd_stats_ingest`` writes an index and
+refuses without one; every other consumer reads the results tree instead. A
+value that is empty, or nothing but spaces, is the exception to that answer: it
+is neither a URL nor the ``none`` that names no index, and is refused at
+whichever level carries it.
 
 The tests are hermetic: every test clears the results-root and results-index
 environment variables via ``monkeypatch``, seeds ``Config`` instances
@@ -22,6 +25,7 @@ lookup so the repository's real user-config file is never picked up.
 from __future__ import annotations
 
 import argparse
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -486,19 +490,19 @@ def test_results_db_sentinel_is_the_exact_literal() -> None:
 
 
 @pytest.mark.parametrize('empty', ['', '   '])
-def test_results_db_set_to_nothing_names_no_index(empty: str) -> None:
-    """An empty value names no index, and is not passed on as one.
+def test_results_db_set_to_nothing_is_refused(empty: str) -> None:
+    """An empty value is never a value anyone meant to write.
 
-    A URL parser handed it refuses with a message that begins with the colon
-    after a name it does not have, and on a machine exporting an empty
-    NAV_RESULTS_DB that refusal stops every navigation run.
+    The sentinel is how a level says "no index" on purpose, so an empty one is a
+    typo, a script that computed nothing, or a variable half unset.
 
     Parameters:
         empty: A value carrying no URL.
     """
 
     config = _config_with_environment(None)
-    assert get_results_db_url(argparse.Namespace(results_db=empty), config) is None
+    with pytest.raises(ValueError, match='empty value'):
+        get_results_db_url(argparse.Namespace(results_db=empty), config)
 
 
 @pytest.mark.parametrize('empty', ['', '   '])
@@ -508,7 +512,7 @@ def test_results_db_set_to_nothing_does_not_fall_through_to_the_next_level(
     """The level that set it said something, so a lower level does not answer for it.
 
     An operator who writes an empty option is not asking for whatever the
-    machine exports.
+    machine exports, and the refusal names the option rather than the variable.
 
     Parameters:
         empty: A value carrying no URL.
@@ -517,83 +521,86 @@ def test_results_db_set_to_nothing_does_not_fall_through_to_the_next_level(
 
     monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
     config = _config_with_environment(None)
-    assert get_results_db_url(argparse.Namespace(results_db=empty), config) is None
+    with pytest.raises(ValueError, match='--results-db'):
+        get_results_db_url(argparse.Namespace(results_db=empty), config)
 
 
-def test_results_db_set_to_nothing_says_which_level_set_it(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_results_db_set_to_nothing_names_the_environment_variable_that_set_it(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reading files because a variable expanded empty is not something to do silently.
+    """A refusal that does not say which level carries the value is a hunt.
 
     Parameters:
         monkeypatch: Fixture the exported variable is set through.
-        capsys: Fixture the warning is read back from.
     """
 
     monkeypatch.setenv('NAV_RESULTS_DB', '')
     config = _config_with_environment(None)
-    get_results_db_url(argparse.Namespace(), config)
-    assert 'NAV_RESULTS_DB' in capsys.readouterr().out
+    with pytest.raises(ValueError, match='NAV_RESULTS_DB'):
+        get_results_db_url(argparse.Namespace(), config)
 
 
-def test_results_db_set_to_nothing_says_how_to_ask_for_it(
-    capsys: pytest.CaptureFixture[str],
+def test_results_db_set_to_nothing_names_the_configuration_variable_that_set_it(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The sentinel is what an operator writes to mean this on purpose.
+    """The middle level is named the same way, since one unset does not fix it.
+
+    A URL is exported below it so that a resolver falling through to the
+    environment would answer with that URL instead of refusing, which is the
+    regression this would otherwise pass over.
 
     Parameters:
-        capsys: Fixture the warning is read back from.
+        monkeypatch: Fixture the exported variable is set through.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_db': ''})
+    with pytest.raises(ValueError, match=re.escape('environment.results_db')):
+        get_results_db_url(argparse.Namespace(), config)
+
+
+def test_results_db_set_to_nothing_says_how_to_ask_for_no_index() -> None:
+    """The sentinel is what an operator writes to mean this on purpose."""
+
+    config = _config_with_environment({'results_db': ''})
+    with pytest.raises(ValueError, match=RESULTS_DB_NONE):
+        get_results_db_url(argparse.Namespace(), config)
+
+
+def test_results_db_set_to_nothing_is_reported_by_the_caller_and_nowhere_else(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A refusal that also logged itself would print twice, once out of order.
+
+    Parameters:
+        capsys: Fixture the main log would be read back from.
     """
 
     config = _config_with_environment({'results_db': ''})
-    get_results_db_url(argparse.Namespace(), config)
-    assert RESULTS_DB_NONE in capsys.readouterr().out
-
-
-def test_results_db_set_to_nothing_reports_through_the_reporter_it_was_given() -> None:
-    """A program whose output is terminal text supplies the stream it prints to."""
-
-    written: list[str] = []
-    config = _config_with_environment({'results_db': ''})
-    get_results_db_url(argparse.Namespace(), config, warn=written.append)
-    assert len(written) == 1
-
-
-def test_results_db_set_to_nothing_writes_nowhere_else(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """One diagnostic goes to one place, or a run-log line lands in a report.
-
-    Parameters:
-        capsys: Fixture the main log is read back from.
-    """
-
-    written: list[str] = []
-    config = _config_with_environment({'results_db': ''})
-    get_results_db_url(argparse.Namespace(), config, warn=written.append)
+    with pytest.raises(ValueError, match='empty value'):
+        get_results_db_url(argparse.Namespace(), config)
     assert capsys.readouterr().out == ''
 
 
 def test_results_db_set_to_nothing_leaves_what_follows_to_the_caller() -> None:
     """Two of the three programs that resolve a URL have no file-reading mode.
 
-    One resolver serves all of them, so a warning saying what this run will do
-    next is false for the two that refuse, and reaches them one line before
-    their own refusal says the opposite.
+    One resolver serves all of them, so a message saying what this run will do
+    next is false for the two that refuse.
     """
 
-    written: list[str] = []
     config = _config_with_environment({'results_db': ''})
-    get_results_db_url(argparse.Namespace(), config, warn=written.append)
-    assert 'reads the navigation results files' not in written[0]
+    with pytest.raises(ValueError) as refusal:
+        get_results_db_url(argparse.Namespace(), config)
+    assert 'reads the navigation results files' not in str(refusal.value)
 
 
 @pytest.mark.parametrize('spaced', [' none', 'none ', '  none  '])
 def test_results_db_sentinel_written_with_spaces_around_it_opts_out(spaced: str) -> None:
     """The spaces a shell or a configuration file leaves behind are not the value.
 
-    An empty value is already read through the spaces around it, so the sentinel
-    is read the same way rather than passed on as a URL that cannot be parsed.
+    The value is read through the spaces around it, so the sentinel is recognized
+    rather than passed on as a URL that cannot be parsed.
 
     Parameters:
         spaced: The sentinel as some level wrote it.
