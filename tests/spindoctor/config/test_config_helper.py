@@ -540,9 +540,20 @@ def test_results_db_set_to_nothing_names_the_environment_variable_that_set_it(
         get_results_db_url(argparse.Namespace(), config)
 
 
-def test_results_db_set_to_nothing_names_the_configuration_variable_that_set_it() -> None:
-    """The middle level is named the same way, since one unset does not fix it."""
+def test_results_db_set_to_nothing_names_the_configuration_variable_that_set_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The middle level is named the same way, since one unset does not fix it.
 
+    A URL is exported below it so that a resolver falling through to the
+    environment would answer with that URL instead of refusing, which is the
+    regression this would otherwise pass over.
+
+    Parameters:
+        monkeypatch: Fixture the exported variable is set through.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_DB', POSTGRES_URL)
     config = _config_with_environment({'results_db': ''})
     with pytest.raises(ValueError, match=re.escape('environment.results_db')):
         get_results_db_url(argparse.Namespace(), config)
