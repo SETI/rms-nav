@@ -574,5 +574,5 @@ def test_an_image_carrying_no_record_needs_the_document(tmp_path: Path) -> None:
     env = make_bundle_env(tmp_path)
     write_nav_inputs(env)
     (env.nav_root / f'{env.results_path_stub}_metadata.json').unlink()
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match=r'_metadata\.json'):
         _generate(env)

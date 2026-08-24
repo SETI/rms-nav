@@ -251,12 +251,7 @@ def indexed(results_root: Path, tmp_path: Path) -> str:
 def test_an_image_an_error_filter_kept_carries_the_record_of_its_document(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path
 ) -> None:
-    """The record travels with the image, and it is the document's own content.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-    """
+    """The record travels with the image, and it is the document's own content."""
     kept = enumerate_images(ds_with_an_index, results_root, has_no_offset_error=True)
 
     assert [image.nav_record for image in kept] == [documents()[SUCCEEDED]]
@@ -265,12 +260,7 @@ def test_an_image_an_error_filter_kept_carries_the_record_of_its_document(
 def test_the_carried_record_is_what_the_file_on_disk_holds(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path
 ) -> None:
-    """Compared against the bytes rather than against the factory that wrote them.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-    """
+    """Compared against the bytes rather than against the factory that wrote them."""
     kept = enumerate_images(ds_with_an_index, results_root, has_no_offset_error=True)
     on_disk = json.loads((results_root / f'{SUCCEEDED}_metadata.json').read_text())
 
@@ -280,12 +270,7 @@ def test_the_carried_record_is_what_the_file_on_disk_holds(
 def test_every_image_an_error_filter_kept_carries_one(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path
 ) -> None:
-    """Two kept images, two records: nothing is carried for the first alone.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-    """
+    """Two kept images, two records: nothing is carried for the first alone."""
     kept = enumerate_images(ds_with_an_index, results_root, has_offset_error=True)
 
     assert [image.results_path_stub for image in kept if image.nav_record is not None] == [
@@ -297,12 +282,7 @@ def test_every_image_an_error_filter_kept_carries_one(
 def test_a_filter_that_reads_no_document_carries_nothing(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path
 ) -> None:
-    """A presence filter is settled by a listing, so no document is parsed.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-    """
+    """A presence filter is settled by a listing, so no document is parsed."""
     kept = enumerate_images(ds_with_an_index, results_root, has_offset_file=True)
 
     assert [image.nav_record for image in kept] == [None, None, None]
@@ -311,12 +291,7 @@ def test_a_filter_that_reads_no_document_carries_nothing(
 def test_a_run_with_no_results_filter_at_all_carries_nothing(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path
 ) -> None:
-    """Nothing asked what any document records, so nothing read one.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-    """
+    """Nothing asked what any document records, so nothing read one."""
     kept = enumerate_images(ds_with_an_index, results_root)
 
     assert [image.nav_record for image in kept] == [None, None, None]
@@ -334,11 +309,6 @@ def test_the_enumeration_reads_each_candidates_document_once(
 
     Stated on its own so that an assertion of one read after the per-image stage
     means one read in total rather than one read that never happened.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-        count_reads: The list of documents read.
     """
     enumerate_images(ds_with_an_index, results_root, has_no_offset_error=True)
 
@@ -348,13 +318,7 @@ def test_the_enumeration_reads_each_candidates_document_once(
 def test_reading_the_record_of_a_kept_image_reads_nothing_further(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path, count_reads: list[str]
 ) -> None:
-    """What ``sd_backplanes`` does per image, counted across the whole run.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-        count_reads: The list of documents read.
-    """
+    """What ``sd_backplanes`` does per image, counted across the whole run."""
     kept = enumerate_images(ds_with_an_index, results_root, has_no_offset_error=True)
     source = FilePointingSource(FCPath(results_root))
     for image in kept:
@@ -366,13 +330,7 @@ def test_reading_the_record_of_a_kept_image_reads_nothing_further(
 def test_loading_the_pointing_of_a_kept_image_reads_nothing_further(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path, count_reads: list[str]
 ) -> None:
-    """What ``sd_mosaic`` does per image, counted across the whole run.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-        count_reads: The list of documents read.
-    """
+    """What ``sd_mosaic`` does per image, counted across the whole run."""
     kept = enumerate_images(ds_with_an_index, results_root, has_no_offset_error=True)
     source = FilePointingSource(FCPath(results_root))
     for image in kept:
@@ -388,11 +346,6 @@ def test_an_image_carrying_no_record_is_still_read_from_storage(
 
     Without it, "one read" could be satisfied by a per-image stage that had
     stopped reading documents altogether.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-        count_reads: The list of documents read.
     """
     kept = enumerate_images(ds_with_an_index, results_root, has_offset_file=True)
     source = FilePointingSource(FCPath(results_root))
@@ -410,13 +363,7 @@ def test_an_image_carrying_no_record_is_still_read_from_storage(
 def test_an_index_backed_run_carries_no_record(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path, indexed: str
 ) -> None:
-    """A row is narrowed on columns, and the record a consumer wants is another read.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-        indexed: The index the filter answers from.
-    """
+    """A row is narrowed on columns, and the record a consumer wants is another read."""
     kept = enumerate_images(
         ds_with_an_index, results_root, results_db_url=indexed, has_no_offset_error=True
     )
@@ -427,13 +374,7 @@ def test_an_index_backed_run_carries_no_record(
 def test_an_index_backed_run_selects_the_same_images(
     ds_with_an_index: DataSetPDS3CassiniISS, results_root: Path, indexed: str
 ) -> None:
-    """Stated so that the assertion above is about an image the run kept.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-        indexed: The index the filter answers from.
-    """
+    """Stated so that the assertion above is about an image the run kept."""
     kept = enumerate_images(
         ds_with_an_index, results_root, results_db_url=indexed, has_no_offset_error=True
     )
@@ -447,14 +388,7 @@ def test_an_index_backed_run_reads_no_document_at_all(
     indexed: str,
     count_reads: list[str],
 ) -> None:
-    """The filter reads rows, so the enumeration opens none of the documents.
-
-    Parameters:
-        ds_with_an_index: The dataset, serving the three fixture frames.
-        results_root: The fixture results root.
-        indexed: The index the filter answers from.
-        count_reads: The list of documents read.
-    """
+    """The filter reads rows, so the enumeration opens none of the documents."""
     enumerate_images(
         ds_with_an_index, results_root, results_db_url=indexed, has_no_offset_error=True
     )
@@ -492,9 +426,6 @@ def test_a_candidate_the_filter_dropped_is_left_carrying_nothing(results_root: P
     An attach made before the keep decision would put a record on every
     candidate the batch was asked about, including the ones the run will never
     process.
-
-    Parameters:
-        results_root: The fixture results root.
     """
     offered = candidates(results_root)
     results_filter = ResultsFilter(
@@ -506,11 +437,7 @@ def test_a_candidate_the_filter_dropped_is_left_carrying_nothing(results_root: P
 
 
 def test_the_candidate_the_filter_kept_does_carry_one(results_root: Path) -> None:
-    """Stated so the assertion above is about a batch that read anything at all.
-
-    Parameters:
-        results_root: The fixture results root.
-    """
+    """Stated so the assertion above is about a batch that read anything at all."""
     offered = candidates(results_root)
     results_filter = ResultsFilter(
         [VOLUME], str(results_root), logger=null_logger(), has_no_offset_error=True

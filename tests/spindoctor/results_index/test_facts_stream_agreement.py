@@ -267,36 +267,21 @@ def test_the_other_roots_extra_image_is_not_this_roots(two_roots: TwoRoots) -> N
 def test_the_documents_hand_back_the_record_they_were_read_out_of(
     two_roots: TwoRoots, which: str
 ) -> None:
-    """A document is already read and already parsed, so it travels with the facts.
-
-    Parameters:
-        two_roots: The two ingested roots and their index.
-        which: The root to read.
-    """
+    """A document is already read and already parsed, so it travels with the facts."""
     from_tree = _records(facts_from_tree(two_roots, which, Selection()))
     assert [record for record in from_tree if record is None] == []
 
 
 @pytest.mark.parametrize('which', BOTH_ROOTS)
 def test_the_index_hands_back_no_record(two_roots: TwoRoots, which: str) -> None:
-    """A row is narrowed on columns the facts hold; a record is another read.
-
-    Parameters:
-        two_roots: The two ingested roots and their index.
-        which: The root to read.
-    """
+    """A row is narrowed on columns the facts hold; a record is another read."""
     from_index = _records(facts_from_index(two_roots, which, Selection()))
     assert from_index == [None] * len(from_index)
 
 
 @pytest.mark.parametrize('which', BOTH_ROOTS)
 def test_the_comparison_covers_at_least_one_image(two_roots: TwoRoots, which: str) -> None:
-    """Both statements above are vacuous over an empty stream, so it is not one.
-
-    Parameters:
-        two_roots: The two ingested roots and their index.
-        which: The root to read.
-    """
+    """Both statements above are vacuous over an empty stream, so it is not one."""
     assert len(_records(facts_from_index(two_roots, which, Selection()))) > 0
 
 
@@ -304,12 +289,7 @@ def test_the_comparison_covers_at_least_one_image(two_roots: TwoRoots, which: st
 def test_the_record_the_documents_hand_back_belongs_to_that_image(
     two_roots: TwoRoots, which: str
 ) -> None:
-    """One record per image rather than one shared across the stream.
-
-    Parameters:
-        two_roots: The two ingested roots and their index.
-        which: The root to read.
-    """
+    """One record per image rather than one shared across the stream."""
     found = facts_from_tree(two_roots, which, Selection())
     carried = [
         (one.record.stub if one.record is not None else None)

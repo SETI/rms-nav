@@ -218,7 +218,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     return cmdparser.parse_args(command_list)
 
 
-def _log_removals(files_removed: int, *, pruned: bool) -> None:
+def _log_removals(files_removed: int, *, pruned: bool | None) -> None:
     """Say what became of the rows whose documents have left the tree.
 
     A pass that removed them reports how many, which is a number an operator
@@ -227,10 +227,21 @@ def _log_removals(files_removed: int, *, pruned: bool) -> None:
     that records which guarantee the index was built under and a zero reads
     exactly like a tree nothing has left.
 
+    A count added up from somewhere else is reported as one, without saying
+    which of the two produced it.  Adding up what the workers did reads the
+    number off the run row the fan-out wrote it to, and nothing recorded there
+    says whether that fan-out was removing rows at all, so a zero there means
+    either that nothing had left the tree or that nobody looked.
+
     Parameters:
-        files_removed: How many image rows the pass deleted.
-        pruned: Whether it was removing them at all.
+        files_removed: How many image rows were deleted.
+        pruned: Whether the pass reporting this was removing them, or None where
+            the count comes from a pass other than this one and which it was is
+            not recorded.
     """
+    if pruned is None:
+        MAIN_LOGGER.info('Rows removed before the fan-out: %d', files_removed)
+        return
     if pruned:
         MAIN_LOGGER.info('Rows removed, their document gone from the tree: %d', files_removed)
         return
@@ -242,7 +253,7 @@ def _log_removals(files_removed: int, *, pruned: bool) -> None:
     )
 
 
-def _log_outcome(counts: IngestCounts, *, pruned: bool) -> None:
+def _log_outcome(counts: IngestCounts, *, pruned: bool | None) -> None:
     """Write the closing summary of an ingest pass to the main log.
 
     The failures are tallied by reason as well as counted, because a results
@@ -256,7 +267,8 @@ def _log_outcome(counts: IngestCounts, *, pruned: bool) -> None:
     Parameters:
         counts: What the pass did.
         pruned: Whether it removed the rows of documents that have left the
-            tree.
+            tree, or None where the count was added up from a pass other than
+            this one, which does not record which it was doing.
     """
     MAIN_LOGGER.info('Metadata files seen: %d', counts.files_seen)
     MAIN_LOGGER.info('Ingested: %d', counts.files_ingested)
@@ -283,11 +295,7 @@ def _log_completion(completion: TaskCompletion) -> None:
     Parameters:
         completion: What adding the shares up did.
     """
-    # The removals reported here are the fan-out's, read back off the run row it
-    # wrote them to; a completion removes no row of its own and refuses
-    # --no-prune for that reason.  Which guarantee a root's rows were built
-    # under is stated in the log of the pass that listed the root.
-    _log_outcome(completion.counts, pruned=True)
+    _log_outcome(completion.counts, pruned=None)
     MAIN_LOGGER.info('Ingest runs completed: %d', completion.runs_completed)
     for root in completion.roots_unaccounted:
         MAIN_LOGGER.error(

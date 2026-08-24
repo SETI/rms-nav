@@ -172,12 +172,7 @@ def _counting_recorded_files(monkeypatch: pytest.MonkeyPatch, module: Any) -> li
 def test_a_pass_that_does_not_prune_keeps_the_row_of_a_deleted_document(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The relaxation itself: a row is allowed to outlive its document.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The relaxation itself: a row is allowed to outlive its document."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -189,12 +184,7 @@ def test_a_pass_that_does_not_prune_keeps_the_row_of_a_deleted_document(
 def test_a_pass_that_prunes_removes_the_row_of_a_deleted_document(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The control: the same tree and the same deletion, pruned.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The control: the same tree and the same deletion, pruned."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -206,12 +196,7 @@ def test_a_pass_that_prunes_removes_the_row_of_a_deleted_document(
 def test_a_pass_that_does_not_prune_reports_no_removals(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The count is of rows this pass deleted, and it deleted none.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The count is of rows this pass deleted, and it deleted none."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -223,12 +208,7 @@ def test_a_pass_that_does_not_prune_reports_no_removals(
 def test_a_pass_that_prunes_reports_the_removal(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The control for the count.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The control for the count."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -245,10 +225,6 @@ def test_a_pass_that_does_not_prune_keeps_the_refusal_of_a_deleted_file(
     A refusal that outlives its file is what makes the next pass go on skipping
     a file the tree no longer holds, which is the same relaxation seen from the
     bookkeeping side.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
     """
     root, _leaving = _tree_of_two(tmp_path)
     refused = root / 'edges_metadata.json'
@@ -263,12 +239,7 @@ def test_a_pass_that_does_not_prune_keeps_the_refusal_of_a_deleted_file(
 def test_a_pass_that_prunes_removes_the_refusal_of_a_deleted_file(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The control for the refusal.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The control for the refusal."""
     root, _leaving = _tree_of_two(tmp_path)
     refused = root / 'edges_metadata.json'
     refused.write_text('{"edges": []}', encoding='utf-8')
@@ -287,13 +258,7 @@ def test_a_pass_that_prunes_removes_the_refusal_of_a_deleted_file(
 def test_a_forced_pass_that_does_not_prune_reads_no_recorded_rows(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Nothing is left to want the answer, so the query over the root is not run.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-        monkeypatch: Fixture the recorded-rows query is replaced through.
-    """
+    """Nothing is left to want the answer, so the query over the root is not run."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -305,13 +270,7 @@ def test_a_forced_pass_that_does_not_prune_reads_no_recorded_rows(
 def test_an_unforced_pass_that_does_not_prune_still_reads_the_recorded_rows(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The skip rule is the other reader, and it is still asking.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-        monkeypatch: Fixture the recorded-rows query is replaced through.
-    """
+    """The skip rule is the other reader, and it is still asking."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -323,13 +282,7 @@ def test_an_unforced_pass_that_does_not_prune_still_reads_the_recorded_rows(
 def test_a_forced_pass_that_prunes_still_reads_the_recorded_rows(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The prune is the other reader, and a forced pass that prunes needs it.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-        monkeypatch: Fixture the recorded-rows query is replaced through.
-    """
+    """The prune is the other reader, and a forced pass that prunes needs it."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -341,12 +294,7 @@ def test_a_forced_pass_that_prunes_still_reads_the_recorded_rows(
 def test_a_forced_pass_that_prunes_still_removes_a_deleted_documents_row(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """What the reading is for: a forced pass deletes exactly as an ordinary one does.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """What the reading is for: a forced pass deletes exactly as an ordinary one does."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -358,12 +306,7 @@ def test_a_forced_pass_that_prunes_still_removes_a_deleted_documents_row(
 def test_a_pass_that_does_not_prune_still_skips_an_unchanged_document(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The saving must not reach the skip rule, which is what makes a re-ingest cheap.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The saving must not reach the skip rule, which is what makes a re-ingest cheap."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -379,12 +322,7 @@ def test_a_pass_that_does_not_prune_still_skips_an_unchanged_document(
 def test_a_fan_out_that_does_not_prune_keeps_the_row_of_a_deleted_document(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The one step of a queue-divided pass that removes a row does not.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The one step of a queue-divided pass that removes a row does not."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -396,12 +334,7 @@ def test_a_fan_out_that_does_not_prune_keeps_the_row_of_a_deleted_document(
 def test_a_fan_out_that_prunes_removes_the_row_of_a_deleted_document(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The control for the fan-out.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The control for the fan-out."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -413,13 +346,7 @@ def test_a_fan_out_that_prunes_removes_the_row_of_a_deleted_document(
 def test_a_fan_out_that_does_not_prune_reads_no_recorded_rows(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A fan-out reads them for the delete alone, so the query goes with it.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-        monkeypatch: Fixture the recorded-rows query is replaced through.
-    """
+    """A fan-out reads them for the delete alone, so the query goes with it."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -431,13 +358,7 @@ def test_a_fan_out_that_does_not_prune_reads_no_recorded_rows(
 def test_a_fan_out_that_prunes_reads_the_recorded_rows(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The control: an unforced fan-out that prunes still runs the query.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-        monkeypatch: Fixture the recorded-rows query is replaced through.
-    """
+    """The control: an unforced fan-out that prunes still runs the query."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -449,12 +370,7 @@ def test_a_fan_out_that_prunes_reads_the_recorded_rows(
 def test_a_fan_out_that_does_not_prune_still_cuts_every_document_into_a_share(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger
 ) -> None:
-    """The shares come from the listing, which the flag does not touch.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the passes report through.
-    """
+    """The shares come from the listing, which the flag does not touch."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     tasks = _fan_out(url, root, logger=quiet_logger, prune=False)
@@ -491,13 +407,7 @@ def _run(
 def test_the_command_line_leaves_the_row_of_a_deleted_document(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The flag reaches the pass rather than being parsed and dropped.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the logs live under.
-        quiet_logger: Logger the first pass reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The flag reaches the pass rather than being parsed and dropped."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -509,13 +419,7 @@ def test_the_command_line_leaves_the_row_of_a_deleted_document(
 def test_the_command_line_says_the_pass_did_not_prune(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A log read later has to say which guarantee the index was built under.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the logs live under.
-        quiet_logger: Logger the first pass reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """A log read later has to say which guarantee the index was built under."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -527,13 +431,7 @@ def test_the_command_line_says_the_pass_did_not_prune(
 def test_a_pass_that_prunes_says_how_many_rows_it_removed(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The control for the summary line, which the flag chooses between.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the logs live under.
-        quiet_logger: Logger the first pass reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The control for the summary line, which the flag chooses between."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -545,12 +443,7 @@ def test_a_pass_that_prunes_says_how_many_rows_it_removed(
 def test_a_fan_out_from_the_command_line_says_it_did_not_prune(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The other pass that prunes reports the same way.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the logs live under.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The other pass that prunes reports the same way."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _status, written = _run(
@@ -568,13 +461,7 @@ def test_a_fan_out_from_the_command_line_says_it_did_not_prune(
 def test_a_fan_out_from_the_command_line_leaves_the_row_of_a_deleted_document(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The flag has to reach the fan-out too, not only the summary it writes.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the logs live under.
-        quiet_logger: Logger the first pass reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The flag has to reach the fan-out too, not only the summary it writes."""
     root, leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -646,12 +533,7 @@ def _complete(
 def test_a_completion_that_would_otherwise_finish_refuses_the_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A completion removes no row, so an operator who typed it meant something else.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the log live under.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """A completion removes no row, so an operator who typed it meant something else."""
     url = _a_completed_fan_out(tmp_path, monkeypatch)
     status, _written = _complete(tmp_path, monkeypatch, url, '--no-prune')
     assert status == 1
@@ -660,26 +542,36 @@ def test_a_completion_that_would_otherwise_finish_refuses_the_flag(
 def test_the_same_completion_without_the_flag_finishes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The control that makes the refusal above a refusal rather than a coincidence.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the log live under.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The control that makes the refusal above a refusal rather than a coincidence."""
     url = _a_completed_fan_out(tmp_path, monkeypatch)
     status, _written = _complete(tmp_path, monkeypatch, url)
     assert status == 0
 
 
+def test_a_completion_reports_the_removals_without_claiming_it_made_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A count added up from a fan-out is not reported as this pass's own removal."""
+    url = _a_completed_fan_out(tmp_path, monkeypatch)
+    _status, written = _complete(tmp_path, monkeypatch, url)
+    removals = [line for line in written if 'Rows removed before the fan-out' in line]
+    assert len(removals) == 1
+
+
+def test_a_completion_does_not_say_a_document_left_the_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing recorded at a fan-out says whether it was removing rows at all."""
+    url = _a_completed_fan_out(tmp_path, monkeypatch)
+    _status, written = _complete(tmp_path, monkeypatch, url)
+    claims = [line for line in written if 'their document gone from the tree' in line]
+    assert claims == []
+
+
 def test_a_completion_that_refuses_the_flag_says_where_it_belongs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A refusal nobody can act on is only half a refusal.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the log live under.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """A refusal nobody can act on is only half a refusal."""
     url = _a_completed_fan_out(tmp_path, monkeypatch)
     _status, written = _complete(tmp_path, monkeypatch, url, '--no-prune')
     refusals = [line for line in written if '--no-prune has no meaning' in line]
@@ -693,11 +585,6 @@ def test_a_drop_that_would_otherwise_run_refuses_the_flag(
 
     The index is a real one, because a drop pointed at a database that is not
     there exits 1 of its own accord and could not tell a refusal from that.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the logs live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
     """
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
@@ -711,13 +598,7 @@ def test_a_drop_that_would_otherwise_run_refuses_the_flag(
 def test_the_same_drop_without_the_flag_runs(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The control that makes the refusal above a refusal rather than a coincidence.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the logs live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The control that makes the refusal above a refusal rather than a coincidence."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
@@ -730,13 +611,7 @@ def test_the_same_drop_without_the_flag_runs(
 def test_a_drop_that_refuses_the_flag_names_it(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The refusal names the option it will not combine with, as it does for the others.
-
-    Parameters:
-        tmp_path: Directory the tree, the index and the logs live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The refusal names the option it will not combine with, as it does for the others."""
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)

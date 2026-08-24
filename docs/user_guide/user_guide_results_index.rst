@@ -292,16 +292,19 @@ enough to offer, and it holds only because a pass covers a whole root -- there i
 no way to ingest part of one, so a pass that gets as far as removing rows listed
 everything.
 
-**What it saves is a query and some deletes, and never any part of the walk.**
-The listing is discovery and happens either way. The deletes go in both modes.
-The query -- one statement over every row the root holds -- goes only where
-nothing else wants the answer:
+**What it saves is the deletes and, in some modes, a query, and never any part
+of the walk.** The listing is discovery and happens either way. The deletes are
+what the flag always saves, since removing nothing is the whole of what it asks
+for. The query -- one statement over every row the root holds -- is saved only
+where nothing else wants the answer:
 
-* An ordinary pass reads it twice over: once to decide which documents to skip
-  as unchanged, and once for the removals. ``--no-prune`` alone therefore saves
-  the deletes only. ``--no-prune --force`` saves the query as well, since a
-  forced pass reads every document regardless.
-* ``--output-cloud-tasks-file`` reads it for the removals alone; each worker
+* An ordinary pass issues that query once and reads the answer twice over: to
+  decide which documents to skip as unchanged, and to decide which rows to
+  remove. Only the second of those goes with the flag, so ``--no-prune`` alone
+  saves the deletes and still runs the query. ``--no-prune --force`` saves the
+  query as well, since a forced pass reads every document regardless and so has
+  nothing to skip.
+* ``--output-cloud-tasks-file`` issues it for the removals alone; each worker
   decides what to skip from the metrics its own share carries. So ``--no-prune``
   saves the query there whether or not ``--force`` is given.
 

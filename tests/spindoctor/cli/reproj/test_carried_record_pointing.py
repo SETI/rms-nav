@@ -101,11 +101,7 @@ def carried_document() -> dict[str, Any]:
 def test_the_whole_record_comes_back_as_it_was_carried(
     file_source: FilePointingSource,
 ) -> None:
-    """``read_record`` hands back the carried record itself.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """``read_record`` hands back the carried record itself."""
     record = carried_document()
 
     assert file_source.read_record(carrying(CMATRIX_STUB, record)) == record
@@ -114,11 +110,7 @@ def test_the_whole_record_comes_back_as_it_was_carried(
 def test_the_carried_record_is_answered_rather_than_the_document(
     file_source: FilePointingSource,
 ) -> None:
-    """The tree holds a different offset for this stub, and it is not read.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """The tree holds a different offset for this stub, and it is not read."""
     carried = file_source.read_record(carrying(CMATRIX_STUB, carried_document()))
 
     assert carried['offset'] == CARRIED_OFFSET
@@ -127,11 +119,7 @@ def test_the_carried_record_is_answered_rather_than_the_document(
 def test_the_document_is_still_read_for_an_image_carrying_nothing(
     file_source: FilePointingSource,
 ) -> None:
-    """The other half of the pair: nothing carried, so storage answers.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """The other half of the pair: nothing carried, so storage answers."""
     read = file_source.read_record(image_file(CMATRIX_STUB))
 
     assert read['offset'] == OFFSET
@@ -140,11 +128,7 @@ def test_the_document_is_still_read_for_an_image_carrying_nothing(
 def test_a_carried_record_supplies_the_pointing_it_records(
     file_source: FilePointingSource,
 ) -> None:
-    """``load_pointing`` classifies the carried record rather than the document.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """``load_pointing`` classifies the carried record rather than the document."""
     selection = file_source.load_pointing(carrying(CMATRIX_STUB, carried_document()))
 
     assert selection.offset == (CARRIED_OFFSET[0], CARRIED_OFFSET[1])
@@ -158,10 +142,6 @@ def test_a_record_carried_for_a_deleted_document_is_still_answered(
     A document that leaves the tree between the selection and the per-image
     stage is no longer noticed, which narrows a window every run has rather than
     opening a new one.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-        tree: The results root, whose document is removed.
     """
     (tree / f'{CMATRIX_STUB}_metadata.json').unlink()
 
@@ -173,12 +153,7 @@ def test_a_record_carried_for_a_deleted_document_is_still_answered(
 def test_that_deleted_document_has_no_record_for_an_image_carrying_none(
     file_source: FilePointingSource, tree: Path
 ) -> None:
-    """Stated so the assertion above is about the carry and not about the tree.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-        tree: The results root, whose document is removed.
-    """
+    """Stated so the assertion above is about the carry and not about the tree."""
     (tree / f'{CMATRIX_STUB}_metadata.json').unlink()
 
     selection = file_source.load_pointing(image_file(CMATRIX_STUB))
@@ -215,9 +190,6 @@ def test_the_comparison_is_over_a_record_that_supplies_a_cmatrix(
     A pair of ``NONE`` selections agrees about the mechanism, and their matrices
     and midtimes are all None, which compares equal.  So the shape of what is
     being compared is stated first.
-
-    Parameters:
-        file_source: The source over the fixture tree.
     """
     carried, _read = _both_ways(file_source)
 
@@ -225,22 +197,14 @@ def test_the_comparison_is_over_a_record_that_supplies_a_cmatrix(
 
 
 def test_a_carried_record_selects_the_same_mechanism(file_source: FilePointingSource) -> None:
-    """The ladder ends in the same arm whichever way the record arrived.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """The ladder ends in the same arm whichever way the record arrived."""
     carried, read = _both_ways(file_source)
 
     assert carried.mechanism is read.mechanism
 
 
 def test_a_carried_record_carries_the_same_cmatrix(file_source: FilePointingSource) -> None:
-    """Bit for bit, since a corrected attitude is what a product is built on.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """Bit for bit, since a corrected attitude is what a product is built on."""
     carried, read = _both_ways(file_source)
     assert carried.cmatrix is not None
     assert read.cmatrix is not None
@@ -249,11 +213,7 @@ def test_a_carried_record_carries_the_same_cmatrix(file_source: FilePointingSour
 
 
 def test_a_carried_record_carries_the_same_baseline(file_source: FilePointingSource) -> None:
-    """Bit for bit, since the gates compare the baseline to the furnished pool.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """Bit for bit, since the gates compare the baseline to the furnished pool."""
     carried, read = _both_ways(file_source)
     assert carried.cmatrix_original is not None
     assert read.cmatrix_original is not None
@@ -262,33 +222,21 @@ def test_a_carried_record_carries_the_same_baseline(file_source: FilePointingSou
 
 
 def test_a_carried_record_carries_the_same_midtime(file_source: FilePointingSource) -> None:
-    """Exactly, because the C-matrix gates compare it to a microsecond.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """Exactly, because the C-matrix gates compare it to a microsecond."""
     carried, read = _both_ways(file_source)
 
     assert carried.midtime_et == read.midtime_et
 
 
 def test_a_carried_record_carries_the_same_offset(file_source: FilePointingSource) -> None:
-    """The fallback a gate refusal degrades to is the same pair either way.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """The fallback a gate refusal degrades to is the same pair either way."""
     carried, read = _both_ways(file_source)
 
     assert carried.offset == read.offset
 
 
 def test_a_carried_record_carries_the_same_reason(file_source: FilePointingSource) -> None:
-    """What a run-level tally counts this image under does not change.
-
-    Parameters:
-        file_source: The source over the fixture tree.
-    """
+    """What a run-level tally counts this image under does not change."""
     carried, read = _both_ways(file_source)
 
     assert carried.reason == read.reason
@@ -302,11 +250,7 @@ def test_a_carried_record_carries_the_same_reason(file_source: FilePointingSourc
 def test_the_index_source_reads_its_row_rather_than_a_carried_record(
     sources: dict[str, PointingSource],
 ) -> None:
-    """A record on the image does not reach the index path, which reads its row.
-
-    Parameters:
-        sources: The pair of sources over the fixture tree.
-    """
+    """A record on the image does not reach the index path, which reads its row."""
     record = sources['index'].read_record(carrying(CMATRIX_STUB, carried_document()))
 
     assert record['offset'] == OFFSET
@@ -315,11 +259,7 @@ def test_the_index_source_reads_its_row_rather_than_a_carried_record(
 def test_the_index_source_classifies_its_row_rather_than_a_carried_record(
     sources: dict[str, PointingSource],
 ) -> None:
-    """And the classified selection is the row's, not the carried record's.
-
-    Parameters:
-        sources: The pair of sources over the fixture tree.
-    """
+    """And the classified selection is the row's, not the carried record's."""
     selection = sources['index'].load_pointing(carrying(CMATRIX_STUB, carried_document()))
 
     assert selection.offset == (OFFSET[0], OFFSET[1])
