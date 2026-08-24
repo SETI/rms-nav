@@ -46,9 +46,17 @@ def generate_bundle_data_files(
     )
 
     with logger.open(f'Generating PDS4 bundle data files for {image_path!s}'):
-        # Read navigation metadata
-        metadata_text = metadata_file.read_text()
-        nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
+        # The record the enumeration already read, when there is one.  A run
+        # whose selection names an error filter has retrieved and parsed the
+        # document of every image it kept in order to decide, and the
+        # enumeration hands that record on with the image; the two readers hold
+        # caches of their own, so reading it again is a second download of the
+        # same file on a cloud results root rather than a second look at one
+        # already local.
+        nav_metadata = image_file.nav_record
+        if nav_metadata is None:
+            metadata_text = metadata_file.read_text()
+            nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
 
         status = nav_metadata.get('status', None)
         if status != 'success':

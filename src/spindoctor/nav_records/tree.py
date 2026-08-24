@@ -66,6 +66,7 @@ either storage.
 """
 
 from collections.abc import Iterator, Sequence
+from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
 from typing import cast
@@ -346,6 +347,11 @@ class TreeRecordSource:
         A selection naming its own stubs did no walk, so those images carry
         neither metric.
 
+        Every set of facts carries the record it was read out of, since this
+        source has one in hand by the time it has any facts at all.  A consumer
+        that narrows on what a document says and then wants that document reads
+        it once.
+
         Parameters:
             selection: Which images to yield.  A selection naming stubs reads
                 exactly those, in the order it names them; one naming none takes
@@ -463,18 +469,26 @@ class TreeRecordSource:
                 instead.
 
         Returns:
-            The facts, or the unreadable file.  A document that is no
-            current-schema navigation document becomes one of those, carrying
-            the reason the document reader states for it, so this source and an
-            index ingested from the same tree refuse the same files for the same
-            reason.
+            The facts, carrying the record they were read out of, or the
+            unreadable file.  A document that is no current-schema navigation
+            document becomes one of those, carrying the reason the document
+            reader states for it, so this source and an index ingested from the
+            same tree refuse the same files for the same reason.
+
+            The record travels with the facts because it is already read and
+            already parsed: a consumer that narrows on what a document says and
+            then wants the document itself would otherwise retrieve and parse it
+            a second time, which on a cloud root is a second download.  This is
+            the one place the field is filled, so a set of facts carrying a
+            record came from a document and one carrying none came from a row.
         """
         if isinstance(found, UnreadableFile):
             return found
         try:
-            return facts_from_document(found.metadata, origin)
+            facts = facts_from_document(found.metadata, origin)
         except MetadataDocumentError as exc:
             return UnreadableFile(path=found.path, stub=found.stub, reason=exc.reason)
+        return replace(facts, record=found)
 
     def _listing_of_named(self, root_url: str, stubs: Sequence[str]) -> Iterator[ListedRecord]:
         """Say which of the named documents are there, by whichever call is cheap.

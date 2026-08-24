@@ -36,6 +36,11 @@ completion instead would mean listing the whole root a second time -- the most
 expensive thing an ingest does, and a paid round trip per directory on a cloud
 root -- to act on evidence no share ever came from.
 
+A fan-out told not to remove them reads nothing about the root at all.  The
+recorded rows have one reader here -- the prune; a worker decides for itself
+what its own files are worth reading -- so declining the delete drops the query
+with it, whether or not the shares are to be read in full.
+
 That disjointness is a claim about one fan-out.  Two overlapping fan-outs
 against one root can leave a stale row behind -- a worker of the first writes a
 stub after the second has read what is recorded and before it deletes, for a
@@ -336,6 +341,7 @@ def fan_out_ingest_tasks(
     roots: list[str],
     *,
     force: bool = False,
+    prune: bool = True,
     share_size: int = INGEST_TASK_SHARE_SIZE,
     logger: PdsLogger,
 ) -> FanOut:
@@ -351,6 +357,12 @@ def fan_out_ingest_tasks(
     exactly as it does in a pass that reads the documents itself: a mistyped or
     unmounted root is not an empty one.
 
+    A fan-out told not to remove those rows reads nothing about the root, since
+    the prune is the only thing here that asks what the index already holds: a
+    worker decides what its own files are worth reading from the metrics its
+    share carries.  A row may then outlive its document, while absence of a row
+    keeps exactly the meaning it had.
+
     Two spellings of one root are one root, and are listed and divided up once.
 
     Parameters:
@@ -358,6 +370,8 @@ def fan_out_ingest_tasks(
         roots: Navigation results roots, each normalized to the form the rows
             record and consumers compare against.
         force: Have the workers read every document, ignoring what is recorded.
+        prune: Delete the rows of one root whose documents the listing did not
+            find.  False keeps them and reads nothing about the root.
         share_size: How many files one task is handed.
         logger: Logger for the per-root scan summary.
 
@@ -384,9 +398,10 @@ def fan_out_ingest_tasks(
             fan_out.counts.add(counts)
             continue
         counts.files_seen = len(listing.documents)
-        with engine.connect() as connection:
-            recorded = _recorded_files(connection, root_url)
-        counts.files_removed = _prune_missing(engine, listing, recorded, logger=logger)
+        if prune:
+            with engine.connect() as connection:
+                recorded = _recorded_files(connection, root_url)
+            counts.files_removed = _prune_missing(engine, listing, recorded, logger=logger)
         _record_fan_out(engine, run_id, counts)
         tasks_of_root = [
             {

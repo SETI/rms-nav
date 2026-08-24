@@ -10,6 +10,14 @@ changes when an operator points it at a database.
 Every comparison is made against each of the two roots in turn, and the files
 neither storage reads are named one at a time as well, so that an agreement here
 is an agreement about something rather than about an empty stream.
+
+One field is deliberately not the same, and it is the last section here: the
+record the facts were read out of.  A source reading documents has one in hand
+and hands it back, so a consumer wanting both what the document says and the
+document itself reads the file once; a source reading rows has none, because a
+record is rebuilt there from the column set its consumer declares rather than
+from the columns the facts hold.  It is not part of what a consumer reads out of
+the facts, and every field that is agrees.
 """
 
 from typing import Any
@@ -32,6 +40,7 @@ from spindoctor.nav_records import (
     NOT_A_NAVIGATION_DOCUMENT,
     NOT_VALID_JSON,
     ImageFacts,
+    NavRecord,
     Selection,
     UnreadableFile,
 )
@@ -48,6 +57,18 @@ def _feature_key(row: dict[str, Any]) -> tuple[str, str, str]:
         offered it under.
     """
     return str(row['feature_type']), str(row['source_model']), str(row['source_name'])
+
+
+def _records(found: list[ImageFacts | UnreadableFile]) -> list[NavRecord | None]:
+    """Return the record each image's facts were read out of, in stream order.
+
+    Parameters:
+        found: What a stream yielded, sorted.
+
+    Returns:
+        One entry per image: the record, or None when the storage has none.
+    """
+    return [one.record for one in found if isinstance(one, ImageFacts)]
 
 
 def _images(found: list[ImageFacts | UnreadableFile]) -> list[dict[str, Any]]:
@@ -235,3 +256,64 @@ def test_the_other_roots_extra_image_is_not_this_roots(two_roots: TwoRoots) -> N
     """
     stubs = [stub_of(one) for one in facts_from_index(two_roots, 'first', Selection())]
     assert EXTRA_STUB not in stubs
+
+
+# ---------------------------------------------------------------------------
+# The one field the two storages do not answer alike
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('which', BOTH_ROOTS)
+def test_the_documents_hand_back_the_record_they_were_read_out_of(
+    two_roots: TwoRoots, which: str
+) -> None:
+    """A document is already read and already parsed, so it travels with the facts.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+        which: The root to read.
+    """
+    from_tree = _records(facts_from_tree(two_roots, which, Selection()))
+    assert [record for record in from_tree if record is None] == []
+
+
+@pytest.mark.parametrize('which', BOTH_ROOTS)
+def test_the_index_hands_back_no_record(two_roots: TwoRoots, which: str) -> None:
+    """A row is narrowed on columns the facts hold; a record is another read.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+        which: The root to read.
+    """
+    from_index = _records(facts_from_index(two_roots, which, Selection()))
+    assert from_index == [None] * len(from_index)
+
+
+@pytest.mark.parametrize('which', BOTH_ROOTS)
+def test_the_comparison_covers_at_least_one_image(two_roots: TwoRoots, which: str) -> None:
+    """Both statements above are vacuous over an empty stream, so it is not one.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+        which: The root to read.
+    """
+    assert len(_records(facts_from_index(two_roots, which, Selection()))) > 0
+
+
+@pytest.mark.parametrize('which', BOTH_ROOTS)
+def test_the_record_the_documents_hand_back_belongs_to_that_image(
+    two_roots: TwoRoots, which: str
+) -> None:
+    """One record per image rather than one shared across the stream.
+
+    Parameters:
+        two_roots: The two ingested roots and their index.
+        which: The root to read.
+    """
+    found = facts_from_tree(two_roots, which, Selection())
+    carried = [
+        (one.record.stub if one.record is not None else None)
+        for one in found
+        if isinstance(one, ImageFacts)
+    ]
+    assert carried == [stub_of(one) for one in found if isinstance(one, ImageFacts)]

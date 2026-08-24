@@ -28,6 +28,14 @@ an index, because the ingest deliberately records no refusal for a retrieval
 that failed once. The **Files that yielded no record** entry below says what
 that means for the number printed.
 
+An index built by an ingest run with ``--no-prune`` is the other way the two can
+differ, and it is a choice somebody made rather than a property of the storages:
+that ingest leaves in place the rows of documents that have left the tree, so
+the report from it counts images the tree no longer holds and the report over
+the tree does not. Running ``sd_stats_ingest`` again without the flag removes
+them. :doc:`user_guide_results_index` says what the flag gives up and what it
+saves.
+
 An index is optional here exactly as it is everywhere else, and
 ``--results-db`` is resolved the same way: from the command line, then the
 ``environment.results_db`` configuration variable, then the ``NAV_RESULTS_DB``

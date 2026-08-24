@@ -50,6 +50,19 @@ right one.
 """
 
 
+def test_the_document_reader_attaches_no_record() -> None:
+    """One producer of the carried record, and this is not it.
+
+    A set of facts carrying a record came from a source that read a document and
+    still holds it.  This function is handed the parsed document by that source
+    and by nothing else, so filling the field here would put a second producer
+    beside it and make "carries a record" stop meaning "came from a document".
+
+    """
+    rows = facts_from_document(metadata_document(), SOURCE)
+    assert rows.record is None
+
+
 def test_the_stub_and_root_key_the_row() -> None:
     """The key comes from where the file is, never from the document."""
     rows = facts_from_document(metadata_document(), SOURCE)

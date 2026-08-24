@@ -199,6 +199,58 @@ def test_the_facts_of_a_document_carry_every_column_the_index_holds(
     assert set(_facts_of(found, FIRST_STUB).image) == {column.name for column in IMAGES.columns}
 
 
+def test_the_facts_carry_the_record_they_were_read_out_of(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """The document is already read and already parsed, so it travels with the facts.
+
+    A consumer that narrows on what a document says and then wants the document
+    itself reads it once.  This is the one place the field is filled, so what is
+    handed back is the record this source built.
+
+    Parameters:
+        tmp_path: Directory the tree is written under.
+        quiet_logger: Logger the walk reports through.
+    """
+    root = two_volume_tree(tmp_path)
+    found = list(tree_source(root, quiet_logger).facts(Selection()))
+    carried = _facts_of(found, FIRST_STUB).record
+    assert carried is not None
+    assert carried.metadata == document()
+
+
+def test_the_record_the_facts_carry_names_the_document_it_came_from(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """So a consumer handed the record can still say which file it is.
+
+    Parameters:
+        tmp_path: Directory the tree is written under.
+        quiet_logger: Logger the walk reports through.
+    """
+    root = two_volume_tree(tmp_path)
+    found = list(tree_source(root, quiet_logger).facts(Selection()))
+    carried = _facts_of(found, FIRST_STUB).record
+    assert carried is not None
+    assert carried.stub == FIRST_STUB
+
+
+def test_each_image_carries_its_own_record(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger
+) -> None:
+    """One record per image rather than one for the whole stream.
+
+    Parameters:
+        tmp_path: Directory the tree is written under.
+        quiet_logger: Logger the walk reports through.
+    """
+    root = two_volume_tree(tmp_path)
+    found = list(tree_source(root, quiet_logger).facts(Selection()))
+    carried = _facts_of(found, SECOND_STUB).record
+    assert carried is not None
+    assert carried.stub == SECOND_STUB
+
+
 def test_each_document_is_read_once(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
