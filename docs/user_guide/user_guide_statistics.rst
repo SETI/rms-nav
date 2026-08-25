@@ -33,8 +33,8 @@ An index built by an ingest run with ``--no-prune`` is the other way the two can
 differ, and it is a choice somebody made rather than a property of the storages:
 that ingest leaves in place the rows of documents that have left the tree, so
 the report from it counts images the tree no longer holds and the report over
-the tree does not. Running ``sd_results_index`` again without the flag removes
-them. :doc:`user_guide_results_index` says what the flag gives up and what it
+the tree does not. Running ``sd_results_index ingest`` again without the flag
+removes them. :doc:`user_guide_results_index` says what the flag gives up and what it
 saves.
 
 An index is optional here exactly as it is everywhere else, and
@@ -42,14 +42,14 @@ An index is optional here exactly as it is everywhere else, and
 ``environment.results_index_db`` configuration variable, then the
 ``NAV_RESULTS_INDEX_DB`` environment variable, with the literal ``none`` at any
 level meaning no index. The index is a database built from the navigation
-results tree by a separate pass, ``sd_results_index``, and
+results tree by a separate pass, ``sd_results_index ingest``, and
 :doc:`user_guide_results_index` is where it is documented: how it is named and
 resolved, how to build and rebuild one, the tables it holds, and how to query it
 directly for the questions this report does not answer.
 
 .. code-block:: bash
 
-    sd_results_index --nav-results-root /data/nav-offset-results \
+    sd_results_index ingest --nav-results-root /data/nav-offset-results \
         --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
     sd_stats_report \
         --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
@@ -70,7 +70,7 @@ every report run.** That is exactly the cost an index exists to remove -- a
 Cassini-scale root is several hundred thousand documents, and on a cloud root
 each one is a paid round trip. For a local tree and a single report that is
 the right trade; for a cloud root, or for a report you will run more than
-once, build an index with ``sd_results_index`` first and name it.
+once, build an index with ``sd_results_index ingest`` first and name it.
 
 A root, or a directory under one, that cannot be listed fails the run, and no
 report is written. A report that quietly covered less than the tree could not

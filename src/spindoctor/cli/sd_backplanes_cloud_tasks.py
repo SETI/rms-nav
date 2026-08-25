@@ -64,7 +64,7 @@ def _task_pointing_source(
             version of the schema, or has not fully ingested this root.
     """
     return build_pointing_source(
-        nav_results_root, results_db_url=get_results_index_db_url(arguments, DEFAULT_CONFIG)
+        nav_results_root, results_index_db_url=get_results_index_db_url(arguments, DEFAULT_CONFIG)
     )
 
 
@@ -82,7 +82,7 @@ def process_task(
     Returns:
         Tuple of ``(retry, result)``.  ``retry`` is always False.  ``result``
         names the error when the task could not run -- including
-        ``unusable_results_db`` when a level named the index with an empty
+        ``unusable_results_index_db`` when a level named the index with an empty
         value, or an index was named that cannot be opened or has not ingested
         this root, which fails the task rather than falling back to reading
         files -- and otherwise reports whether the image was processed or
@@ -161,7 +161,7 @@ def process_task(
     except ValueError as exc:
         return False, {
             'status': 'error',
-            'status_error': 'unusable_results_db',
+            'status_error': 'unusable_results_index_db',
             'status_exception': str(exc),
         }
 

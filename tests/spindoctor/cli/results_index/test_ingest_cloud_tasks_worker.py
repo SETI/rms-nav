@@ -44,11 +44,12 @@ def test_the_fan_out_creates_the_index(tmp_path: Path, monkeypatch: pytest.Monke
     database = tmp_path / 'index.sqlite3'
     run_driver(
         [
+            'divide',
             '--results-index-db',
             index_url(database),
             '--nav-results-root',
             root.as_posix(),
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,
@@ -136,7 +137,7 @@ def test_a_worker_with_no_index_url_reports_it() -> None:
     _retry, result = sd_results_index_cloud_tasks.process_task(
         'ingest-1-000000', {}, worker_data(results_index_db=None)
     )
-    assert result['status_error'] == 'no_results_db'
+    assert result['status_error'] == 'no_results_index_db'
 
 
 def test_a_worker_given_an_empty_index_url_reports_it_as_unusable() -> None:
@@ -148,7 +149,7 @@ def test_a_worker_given_an_empty_index_url_reports_it_as_unusable() -> None:
     _retry, result = sd_results_index_cloud_tasks.process_task(
         'ingest-1-000000', {}, worker_data(results_index_db='')
     )
-    assert result['status_error'] == 'unusable_results_db'
+    assert result['status_error'] == 'unusable_results_index_db'
 
 
 def test_such_a_worker_says_which_level_named_the_empty_value() -> None:
@@ -171,7 +172,7 @@ def test_a_worker_told_to_use_no_index_reports_it(
     _retry, result = sd_results_index_cloud_tasks.process_task(
         'ingest-1-000000', {}, worker_data(results_index_db='none')
     )
-    assert result['status_error'] == 'no_results_db'
+    assert result['status_error'] == 'no_results_index_db'
 
 
 # ---------------------------------------------------------------------------

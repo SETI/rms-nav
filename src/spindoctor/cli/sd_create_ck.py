@@ -730,7 +730,7 @@ def main() -> None:
         load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     nav_results_root = FileCache(None).new_path(get_nav_results_root(arguments, DEFAULT_CONFIG))
-    results_db_url = get_results_index_db_url(arguments, DEFAULT_CONFIG)
+    results_index_db_url = get_results_index_db_url(arguments, DEFAULT_CONFIG)
     # Resolved to absolute, both of them, because the meta-kernel names the
     # kernels it furnishes by these paths and SPICE resolves a relative name
     # against the *consumer's* working directory.  A meta-kernel written with
@@ -756,7 +756,7 @@ def main() -> None:
     # instead.
     with open_record_source(
         [nav_results_root],
-        results_db_url=results_db_url,
+        results_index_db_url=results_index_db_url,
         columns=RECORD_COLUMNS,
         logger=MAIN_LOGGER,
     ) as source:

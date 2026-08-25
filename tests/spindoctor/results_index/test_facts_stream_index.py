@@ -271,7 +271,7 @@ def test_a_selection_naming_a_root_the_source_does_not_hold_is_refused(
     """
     with (
         open_record_source(
-            [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
+            [two_roots.first], results_index_db_url=two_roots.url, columns=COLUMNS
         ) as source,
         pytest.raises(ValueError, match='does not hold'),
     ):

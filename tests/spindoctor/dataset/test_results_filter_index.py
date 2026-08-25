@@ -94,7 +94,7 @@ def test_the_tree_answers_each_filter(
     tree: Path, flags: dict[str, bool], expected: list[str]
 ) -> None:
     """What reading the results tree selects, stated rather than compared."""
-    assert selection_of(tree, flags, results_db_url=None) == expected
+    assert selection_of(tree, flags, results_index_db_url=None) == expected
 
 
 @pytest.mark.parametrize(('flags', 'expected'), _MATRIX)
@@ -102,7 +102,7 @@ def test_the_index_answers_each_filter_the_same_way(
     tree: Path, indexed: str, flags: dict[str, bool], expected: list[str]
 ) -> None:
     """One query reaches the answer the walk and the per-image reads reach."""
-    assert selection_of(tree, flags, results_db_url=indexed) == expected
+    assert selection_of(tree, flags, results_index_db_url=indexed) == expected
 
 
 @pytest.mark.parametrize(('flags', 'expected'), _MATRIX)
@@ -135,7 +135,7 @@ def test_the_index_path_reads_no_file_at_all(
     monkeypatch.setattr(FCPath, 'walk', refuse)
     monkeypatch.setattr(FCPath, 'exists', refuse)
     monkeypatch.setattr(FCPath, 'retrieve', refuse)
-    assert selection_of(tree, flags, results_db_url=indexed) == expected
+    assert selection_of(tree, flags, results_index_db_url=indexed) == expected
 
 
 def test_an_image_with_no_document_is_not_one_recording_no_error_in_the_tree(tree: Path) -> None:
@@ -145,7 +145,7 @@ def test_an_image_with_no_document_is_not_one_recording_no_error_in_the_tree(tre
     selects.  Reading its absence as an outcome would put it in both selections
     at once and leave no way to ask for either without the other.
     """
-    kept = selection_of(tree, {'has_no_offset_error': True}, results_db_url=None)
+    kept = selection_of(tree, {'has_no_offset_error': True}, results_index_db_url=None)
     assert NO_RESULT not in kept
 
 
@@ -174,7 +174,7 @@ def test_an_error_filter_passes_over_an_image_with_no_document(tree: Path, flag:
         flag: The error filter, one per flag that reads a document.
     """
     results_filter = ResultsFilter(
-        VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **{flag: True}
+        VOLUMES, str(tree), logger=null_logger(), results_index_db_url=None, **{flag: True}
     )
     assert results_filter.passes(NO_RESULT) is False
 
@@ -183,7 +183,7 @@ def test_an_image_with_no_row_is_not_one_recording_no_error_in_the_index(
     tree: Path, indexed: str
 ) -> None:
     """Absence of a row is absence of a document, and reads the same way here."""
-    kept = selection_of(tree, {'has_no_offset_error': True}, results_db_url=indexed)
+    kept = selection_of(tree, {'has_no_offset_error': True}, results_index_db_url=indexed)
     assert NO_RESULT not in kept
 
 
@@ -279,7 +279,7 @@ def test_the_tree_reads_a_document_naming_no_outcome(
     root = tmp_path / 'results'
     images = _naming_no_outcome(root, status)
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=None, **flags
+        VOLUMES, str(root), logger=null_logger(), results_index_db_url=None, **flags
     )
     assert select_from(results_filter, images) == expected
 
@@ -309,7 +309,7 @@ def test_the_index_reads_a_document_naming_no_outcome_the_same_way(
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=null_logger())
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, **flags
+        VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, **flags
     )
     assert select_from(results_filter, images) == expected
 
@@ -368,7 +368,7 @@ def _selecting_one_object(
         url = index_url(tmp_path / 'index.sqlite3')
         ingest_tree(url, [root], logger=null_logger())
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, **flags
+        VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, **flags
     )
     return select_from(results_filter, images)
 
@@ -476,7 +476,7 @@ def test_a_document_that_left_the_tree_reads_as_absent_in_the_index(tmp_path: Pa
     """
     root, images, url = _index_after_a_document_left_the_tree(tmp_path)
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+        VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
     )
     assert select_from(results_filter, images) == [SECOND_SUCCESS]
 
@@ -500,7 +500,7 @@ def test_the_index_offers_a_document_that_left_the_tree_to_the_absence_filter(
     """
     root, images, url = _index_after_a_document_left_the_tree(tmp_path)
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
+        VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_no_offset_file=True
     )
     assert select_from(results_filter, images) == [SPICE_ERROR]
 
@@ -555,7 +555,7 @@ def test_a_document_the_database_would_not_store_leaves_the_root_unreadable(
     monkeypatch.undo()
     with pytest.raises(SelectionError, match='no completed ingest'):
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+            VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
         )
 
 
@@ -622,7 +622,7 @@ def _engines_built_answering(
     monkeypatch.setattr(sqlalchemy, 'create_engine', recording)
     monkeypatch.setattr(sqlalchemy.Engine, 'dispose', counting)
     ResultsFilter(
-        VOLUMES, str(tree), logger=null_logger(), results_db_url=indexed, has_offset_file=True
+        VOLUMES, str(tree), logger=null_logger(), results_index_db_url=indexed, has_offset_file=True
     )
     assert built != []
     return built

@@ -147,8 +147,8 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
        See :doc:`/user_guide/user_guide_ck_kernels`.
    * - ``sd_results_index`` / ``sd_results_index_cloud_tasks``
      - Read a navigation-results tree into the results index, in one process or
-       over a queue of workers. ``sd_results_index --drop-index`` empties the
-       index instead. See :doc:`/user_guide/user_guide_results_index`.
+       over a queue of workers. ``sd_results_index drop`` empties the index
+       instead. See :doc:`/user_guide/user_guide_results_index`.
    * - ``sd_stats_report``
      - Write the navigation statistics report and its charts, over a
        navigation-results tree or over the index. See

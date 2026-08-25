@@ -60,7 +60,7 @@ def test_a_file_the_pass_could_not_retrieve_reads_as_absent(
     ingest_tree(url, [root], logger=null_logger())
     monkeypatch.undo()
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+        VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
     )
     assert select_from(results_filter, images) == []
 
@@ -166,7 +166,11 @@ def test_a_document_rewritten_in_place_reads_as_its_previous_self_in_the_index(
     """
     root, images, url = _index_after_a_document_was_rewritten_in_place(tmp_path)
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_spice_error=True
+        VOLUMES,
+        str(root),
+        logger=null_logger(),
+        results_index_db_url=url,
+        has_offset_spice_error=True,
     )
     assert select_from(results_filter, images) == [SPICE_ERROR]
 
@@ -181,7 +185,11 @@ def test_a_rewrite_that_changes_the_length_is_read_again(tmp_path: Path) -> None
         tmp_path, keeping_its_size=False
     )
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_spice_error=True
+        VOLUMES,
+        str(root),
+        logger=null_logger(),
+        results_index_db_url=url,
+        has_offset_spice_error=True,
     )
     assert select_from(results_filter, images) == []
 
@@ -195,6 +203,10 @@ def test_a_forced_pass_corrects_a_document_rewritten_in_place(tmp_path: Path) ->
     root, images, url = _index_after_a_document_was_rewritten_in_place(tmp_path)
     ingest_tree(url, [root], logger=null_logger(), force=True)
     results_filter = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_spice_error=True
+        VOLUMES,
+        str(root),
+        logger=null_logger(),
+        results_index_db_url=url,
+        has_offset_spice_error=True,
     )
     assert select_from(results_filter, images) == []

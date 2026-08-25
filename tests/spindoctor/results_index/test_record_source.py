@@ -232,7 +232,7 @@ def _index_over(held: TwoRoots, *which: Path) -> IndexRecordSource:
     Returns:
         The source, which the caller closes.
     """
-    source = open_record_source(list(which), results_db_url=held.url, columns=COLUMNS)
+    source = open_record_source(list(which), results_index_db_url=held.url, columns=COLUMNS)
     assert isinstance(source, IndexRecordSource)
     return source
 
@@ -543,7 +543,7 @@ def test_a_time_bound_drops_a_row_recording_no_midtime(
     write_metadata(root, FIRST_STUB, metadata_document(instrument=MISSION, times=None))
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
-    with open_record_source([root], results_db_url=url, columns=COLUMNS) as source:
+    with open_record_source([root], results_index_db_url=url, columns=COLUMNS) as source:
         found = list(source.records(Selection(start_et=0.0)))
     assert found == []
 
@@ -1335,7 +1335,7 @@ def test_an_index_url_reads_the_index(two_roots: TwoRoots) -> None:
         two_roots: The two ingested roots and their index.
     """
     with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
+        [two_roots.first], results_index_db_url=two_roots.url, columns=COLUMNS
     ) as source:
         assert isinstance(source, IndexRecordSource)
 
@@ -1367,7 +1367,7 @@ def test_every_root_is_checked_before_anything_is_read(
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [first], logger=quiet_logger)
     with pytest.raises(ValueError, match='no completed ingest'):
-        open_record_source([first, second], results_db_url=url, columns=COLUMNS)
+        open_record_source([first, second], results_index_db_url=url, columns=COLUMNS)
 
 
 def test_opening_for_a_root_nobody_ingested_is_refused(tmp_path: Path) -> None:
@@ -1381,7 +1381,7 @@ def test_opening_for_a_root_nobody_ingested_is_refused(tmp_path: Path) -> None:
     url = index_url(tmp_path / 'index.sqlite3')
     open_index(url, create=True).dispose()
     with pytest.raises(ValueError, match='no completed ingest'):
-        open_record_source([root], results_db_url=url, columns=COLUMNS)
+        open_record_source([root], results_index_db_url=url, columns=COLUMNS)
 
 
 class _WatchedEngine:
@@ -1471,7 +1471,7 @@ def test_an_index_backed_run_reads_the_columns_it_declared(two_roots: TwoRoots) 
         two_roots: The two ingested roots and their index.
     """
     with open_record_source(
-        [two_roots.first], results_db_url=two_roots.url, columns=(IMAGES.c.status,)
+        [two_roots.first], results_index_db_url=two_roots.url, columns=(IMAGES.c.status,)
     ) as source:
         rebuilt = source.record(FIRST_STUB).metadata
     assert 'offset' not in rebuilt

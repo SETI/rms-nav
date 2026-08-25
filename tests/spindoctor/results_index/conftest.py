@@ -804,7 +804,9 @@ def facts_from_index(
     Returns:
         What the stream yielded, in stub order.
     """
-    with open_record_source([held.root(which)], results_db_url=held.url, columns=COLUMNS) as source:
+    with open_record_source(
+        [held.root(which)], results_index_db_url=held.url, columns=COLUMNS
+    ) as source:
         return _in_order(source.facts(selection))
 
 
@@ -825,7 +827,9 @@ def named_facts_from_index(
     Returns:
         What the stream yielded, in the order it yielded it.
     """
-    with open_record_source([held.root(which)], results_db_url=held.url, columns=COLUMNS) as source:
+    with open_record_source(
+        [held.root(which)], results_index_db_url=held.url, columns=COLUMNS
+    ) as source:
         return list(source.facts(selection))
 
 

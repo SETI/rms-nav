@@ -162,7 +162,7 @@ def enumerate_images(
     dataset: DataSetPDS3CassiniISS,
     results_root: Path,
     *,
-    results_db_url: str | None = None,
+    results_index_db_url: str | None = None,
     **flags: bool,
 ) -> list[ImageFile]:
     """Run the enumeration exactly as a program does, and collect what it yields.
@@ -170,8 +170,8 @@ def enumerate_images(
     Parameters:
         dataset: The dataset, with its volume index already installed.
         results_root: The navigation results root the filter reads.
-        results_db_url: An index to answer the filter from, or None to read the
-            documents.
+        results_index_db_url: An index to answer the filter from, or None to
+            read the documents.
         flags: The selection flags to apply.
 
     Returns:
@@ -180,7 +180,7 @@ def enumerate_images(
     groups = dataset.yield_image_files_index(
         volumes=[VOLUME],
         nav_results_root=str(results_root),
-        results_db_url=results_db_url,
+        results_index_db_url=results_index_db_url,
         **flags,
     )
     return [image for group in groups for image in group.image_files]
@@ -365,7 +365,7 @@ def test_an_index_backed_run_carries_no_record(
 ) -> None:
     """A row is narrowed on columns, and the record a consumer wants is another read."""
     kept = enumerate_images(
-        ds_with_an_index, results_root, results_db_url=indexed, has_no_offset_error=True
+        ds_with_an_index, results_root, results_index_db_url=indexed, has_no_offset_error=True
     )
 
     assert [image.nav_record for image in kept] == [None]
@@ -376,7 +376,7 @@ def test_an_index_backed_run_selects_the_same_images(
 ) -> None:
     """Stated so that the assertion above is about an image the run kept."""
     kept = enumerate_images(
-        ds_with_an_index, results_root, results_db_url=indexed, has_no_offset_error=True
+        ds_with_an_index, results_root, results_index_db_url=indexed, has_no_offset_error=True
     )
 
     assert [image.results_path_stub for image in kept] == [SUCCEEDED]
@@ -390,7 +390,7 @@ def test_an_index_backed_run_reads_no_document_at_all(
 ) -> None:
     """The filter reads rows, so the enumeration opens none of the documents."""
     enumerate_images(
-        ds_with_an_index, results_root, results_db_url=indexed, has_no_offset_error=True
+        ds_with_an_index, results_root, results_index_db_url=indexed, has_no_offset_error=True
     )
 
     assert count_reads == []

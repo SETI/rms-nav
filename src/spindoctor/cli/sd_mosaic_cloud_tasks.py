@@ -97,7 +97,7 @@ def _resolve_pointing_source(cli_args: argparse.Namespace) -> PointingSource:
         None if nav_results_root_str is None else FileCache(None).new_path(nav_results_root_str)
     )
     return build_pointing_source(
-        nav_results_root, results_db_url=get_results_index_db_url(cli_args, DEFAULT_CONFIG)
+        nav_results_root, results_index_db_url=get_results_index_db_url(cli_args, DEFAULT_CONFIG)
     )
 
 
@@ -153,7 +153,7 @@ def process_task(
         Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result``
         is ``{'status': 'error', 'status_error': ...}`` (and optionally
         ``status_exception``) when the task itself could not run -- including
-        ``unusable_results_db`` when a level named the index with an empty
+        ``unusable_results_index_db`` when a level named the index with an empty
         value, or an index was named that cannot be opened or has not ingested
         this root, which fails the task rather than letting it reproject a whole
         batch on uncorrected pointing.  Otherwise it
@@ -256,7 +256,7 @@ def process_task(
     except ValueError as exc:
         return False, {
             'status': 'error',
-            'status_error': 'unusable_results_db',
+            'status_error': 'unusable_results_index_db',
             'status_exception': str(exc),
         }
 

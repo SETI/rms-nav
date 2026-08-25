@@ -79,7 +79,12 @@ _INDEX_BACKED: list[tuple[str, list[str]]] = [
 _CONSUMERS: list[tuple[str, list[str]]] = [
     *_INDEX_BACKED,
     ('sd_offset', ['coiss_saturn']),
-    ('sd_results_index', []),
+    # The results index offers the option under each of its four subcommands,
+    # every one of which builds a parser of its own, so each is asked separately.
+    ('sd_results_index', ['ingest']),
+    ('sd_results_index', ['divide']),
+    ('sd_results_index', ['complete']),
+    ('sd_results_index', ['drop']),
     ('sd_stats_report', []),
 ]
 

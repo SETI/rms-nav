@@ -30,7 +30,7 @@ __all__ = ['open_record_source']
 def open_record_source(
     roots: Sequence[str | Path | FCPath],
     *,
-    results_db_url: str | None = None,
+    results_index_db_url: str | None = None,
     columns: Sequence[sqlalchemy.Column[Any]] = (),
     logger: PdsLogger | None = None,
 ) -> RecordSource:
@@ -44,8 +44,8 @@ def open_record_source(
     Parameters:
         roots: The results roots to read, in the order questions are answered
             about them.  Two spellings of one root are one root.
-        results_db_url: Connection URL of the results index, or None to read the
-            documents.
+        results_index_db_url: Connection URL of the results index, or None to
+            read the documents.
         columns: The columns of ``images`` a consumer's *records* are rebuilt
             from.  Ignored when the documents are read, which carry every field
             whatever is selected; ignored by a stream of facts, which is the
@@ -71,7 +71,7 @@ def open_record_source(
     root_urls = distinct_roots(roots)
     if not root_urls:
         raise ValueError('a record source needs at least one results root to read')
-    if results_db_url is None:
+    if results_index_db_url is None:
         return TreeRecordSource(root_urls, logger=logger)
-    engine = open_index_for_roots(results_db_url, root_urls)
-    return IndexRecordSource(engine, root_urls, results_db_url, columns)
+    engine = open_index_for_roots(results_index_db_url, root_urls)
+    return IndexRecordSource(engine, root_urls, results_index_db_url, columns)

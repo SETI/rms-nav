@@ -43,7 +43,7 @@ def test_the_report_says_how_old_the_index_answer_is(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=url,
+        results_index_db_url=url,
         has_no_offset_file=True,
     )
     assert '2 days ago' in capsys.readouterr().out
@@ -61,7 +61,7 @@ def test_the_report_names_the_moment_as_well_as_the_interval(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=url,
+        results_index_db_url=url,
         has_no_offset_file=True,
     )
     assert stamp in capsys.readouterr().out
@@ -79,7 +79,7 @@ def test_the_age_is_that_of_this_roots_pass_and_not_another(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=url,
+        results_index_db_url=url,
         has_no_offset_file=True,
     )
     assert '2026-03-04T05:06:07+00:00' not in capsys.readouterr().out
@@ -100,7 +100,7 @@ def test_a_finish_time_that_will_not_parse_is_reported_as_it_stands(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=url,
+        results_index_db_url=url,
         has_no_offset_file=True,
     )
     assert 'ingested whenever it was' in capsys.readouterr().out
@@ -124,7 +124,7 @@ def test_a_finish_time_in_the_future_is_reported_as_it_stands(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=url,
+        results_index_db_url=url,
         has_no_offset_file=True,
     )
     assert reported_line(capsys.readouterr().out).endswith(stamp)
@@ -148,7 +148,7 @@ def test_a_finish_time_with_no_offset_is_read_as_utc(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=url,
+        results_index_db_url=url,
         has_no_offset_file=True,
     )
     assert reported_line(capsys.readouterr().out).endswith(f'{naive} (2 days ago)')
@@ -173,7 +173,7 @@ def test_a_recorded_finish_time_of_nothing_is_reported_as_nothing(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=url,
+        results_index_db_url=url,
         has_no_offset_file=True,
     )
     assert 'at a time this index does not record' in capsys.readouterr().out

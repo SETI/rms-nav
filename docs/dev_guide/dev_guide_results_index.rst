@@ -667,7 +667,7 @@ cannot touch the same stub.
 
 **A pass may be told to keep them, and only presence is weakened by it.**
 ``ingest_metadata_files`` and ``fan_out_ingest_tasks`` both take ``prune``, and
-``sd_results_index --no-prune`` is what sets it. A row then outlives its
+``sd_results_index ingest --no-prune`` is what sets it. A row then outlives its
 document and presence of one stops implying the tree still holds the result;
 absence is untouched, because skipping a delete adds no row, so every rule above
 that reads absence is unaffected. The relaxation is bounded by there being no

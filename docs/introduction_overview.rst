@@ -126,9 +126,9 @@ distributed processing:
   :doc:`/user_guide/user_guide_reprojection`.)
 
 * ``sd_results_index_cloud_tasks`` - Cloud tasks worker that reads one share of
-  a navigation-results root into the results index. ``sd_results_index`` lists
-  each root and divides it into shares, and adds the workers' tallies up again
-  when they have run; see :doc:`/user_guide/user_guide_results_index`.
+  a navigation-results root into the results index. ``sd_results_index divide``
+  lists each root and divides it into shares, and ``sd_results_index complete``
+  adds the workers' tallies up again when they have run; see :doc:`/user_guide/user_guide_results_index`.
 
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud

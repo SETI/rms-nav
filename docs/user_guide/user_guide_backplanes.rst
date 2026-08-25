@@ -120,7 +120,7 @@ other run.
 
 Under ``sd_backplanes_cloud_tasks`` each of those outcomes is reported in the
 task result rather than in a run log, because a cloud task has none: an
-unusable index is ``unusable_results_db``, an image nothing navigated is a
+unusable index is ``unusable_results_index_db``, an image nothing navigated is a
 skip named ``no_navigation_record``, and every other way one image can fail —
 a document the ingest refused among them — is ``backplanes_failed``. All three
 are returned rather than raised, so a queue configured to retry on an

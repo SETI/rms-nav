@@ -798,7 +798,7 @@ def test_a_stub_recorded_only_under_another_root_is_absent(
 
 def test_no_url_reads_documents(tmp_path: Path) -> None:
     """No index is every program's default, and it reads the tree."""
-    source = build_pointing_source(FCPath(tmp_path), results_db_url=None)
+    source = build_pointing_source(FCPath(tmp_path), results_index_db_url=None)
     assert isinstance(source, FilePointingSource)
 
 
@@ -808,7 +808,9 @@ def test_a_url_reads_rows(tmp_path: Path, quiet_ingest_logger: pdslogger.PdsLogg
     build_tree(root, {CMATRIX_STUB: document(CMATRIX_STUB, offset=OFFSET)})
     database = tmp_path / 'index.sqlite3'
     index_for([root], database, logger=quiet_ingest_logger).dispose()
-    source = build_pointing_source(FCPath(root), results_db_url=f'sqlite:///{database.as_posix()}')
+    source = build_pointing_source(
+        FCPath(root), results_index_db_url=f'sqlite:///{database.as_posix()}'
+    )
     try:
         assert isinstance(source, IndexPointingSource)
     finally:
@@ -843,7 +845,9 @@ def test_an_unopenable_url_fails_rather_than_falling_back(tmp_path: Path) -> Non
     """A misconfigured index is a failed run, not a slow and different one."""
     missing = tmp_path / 'nowhere' / 'index.sqlite3'
     with pytest.raises(ValueError) as excinfo:
-        build_pointing_source(FCPath(tmp_path), results_db_url=f'sqlite:///{missing.as_posix()}')
+        build_pointing_source(
+            FCPath(tmp_path), results_index_db_url=f'sqlite:///{missing.as_posix()}'
+        )
     assert 'sd_results_index' in str(excinfo.value)
 
 
@@ -851,7 +855,9 @@ def test_an_unopenable_url_leaves_no_database_behind(tmp_path: Path) -> None:
     """And it does not create the index it was told to read."""
     missing = tmp_path / 'index.sqlite3'
     with pytest.raises(ValueError, match='sd_results_index') as excinfo:
-        build_pointing_source(FCPath(tmp_path), results_db_url=f'sqlite:///{missing.as_posix()}')
+        build_pointing_source(
+            FCPath(tmp_path), results_index_db_url=f'sqlite:///{missing.as_posix()}'
+        )
     assert 'index.sqlite3' in str(excinfo.value)
     assert not missing.exists()
 
@@ -865,7 +871,7 @@ def test_an_index_with_no_root_to_read_under_is_refused(
     database = tmp_path / 'index.sqlite3'
     index_for([root], database, logger=quiet_ingest_logger).dispose()
     with pytest.raises(ValueError, match='no navigation results root'):
-        build_pointing_source(None, results_db_url=f'sqlite:///{database.as_posix()}')
+        build_pointing_source(None, results_index_db_url=f'sqlite:///{database.as_posix()}')
 
 
 def test_a_root_nobody_ingested_is_refused(
@@ -883,7 +889,9 @@ def test_a_root_nobody_ingested_is_refused(
     database = tmp_path / 'index.sqlite3'
     index_for([ingested], database, logger=quiet_ingest_logger).dispose()
     with pytest.raises(ValueError) as excinfo:
-        build_pointing_source(FCPath(other), results_db_url=f'sqlite:///{database.as_posix()}')
+        build_pointing_source(
+            FCPath(other), results_index_db_url=f'sqlite:///{database.as_posix()}'
+        )
     assert normalize_root_url(other) in str(excinfo.value)
 
 
@@ -898,7 +906,9 @@ def test_the_refusal_names_the_roots_the_index_does_hold(
     database = tmp_path / 'index.sqlite3'
     index_for([ingested], database, logger=quiet_ingest_logger).dispose()
     with pytest.raises(ValueError) as excinfo:
-        build_pointing_source(FCPath(other), results_db_url=f'sqlite:///{database.as_posix()}')
+        build_pointing_source(
+            FCPath(other), results_index_db_url=f'sqlite:///{database.as_posix()}'
+        )
     assert normalize_root_url(ingested) in str(excinfo.value)
 
 
@@ -929,7 +939,7 @@ def test_a_run_that_died_halfway_leaves_a_root_unreadable(
     finally:
         engine.dispose()
     with pytest.raises(ValueError, match='no completed ingest'):
-        build_pointing_source(FCPath(root), results_db_url=url)
+        build_pointing_source(FCPath(root), results_index_db_url=url)
 
 
 # ---------------------------------------------------------------------------

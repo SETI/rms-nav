@@ -63,7 +63,8 @@ def run_driver(
     """Run ``sd_results_index`` and return its exit status and its main log.
 
     Parameters:
-        argv: Arguments, without the program name.
+        argv: Arguments, without the program name, beginning with the
+            subcommand.
         monkeypatch: Fixture the argument vector and logger are replaced through.
         tmp_path: Directory the run's log files are written under.
 
@@ -75,8 +76,10 @@ def run_driver(
     def recording(message: Any, *args: Any) -> None:
         written.append(str(message) % args if args else str(message))
 
+    # The log root goes last, because every subcommand declares it and none of
+    # them is reached until the subcommand itself has been read.
     monkeypatch.setattr(
-        sys, 'argv', ['sd_results_index', '--log-root', str(tmp_path / 'logs'), *argv]
+        sys, 'argv', ['sd_results_index', *argv, '--log-root', str(tmp_path / 'logs')]
     )
     for level in ('info', 'warning', 'error', 'fatal', 'exception'):
         monkeypatch.setattr(MAIN_LOGGER, level, recording)
@@ -131,11 +134,12 @@ def fanned_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, count: int = 
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
+            'divide',
             '--results-index-db',
             url,
             '--nav-results-root',
             root.as_posix(),
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,
@@ -160,11 +164,12 @@ def fanned_out_with_a_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
+            'divide',
             '--results-index-db',
             url,
             '--nav-results-root',
             root.as_posix(),
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,

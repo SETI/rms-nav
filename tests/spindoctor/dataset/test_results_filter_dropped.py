@@ -123,7 +123,7 @@ def _scan(root: Path, stubs: Sequence[str]) -> list[str]:
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=None,
+        results_index_db_url=None,
         has_offset_spice_error=True,
     ) as under_test:
         return select_from(under_test, _candidate_files(root, stubs))
@@ -262,7 +262,7 @@ def test_a_filter_closed_again_does_not_report_a_second_scan(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=None,
+        results_index_db_url=None,
         has_offset_spice_error=True,
     )
     select_from(under_test, _candidate_files(root, [EARLIER_SCHEMA]))

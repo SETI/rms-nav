@@ -81,9 +81,9 @@ def _urls_asked_for(module: Any, monkeypatch: pytest.MonkeyPatch) -> list[str | 
     urls: list[str | None] = []
     real = module.build_pointing_source
 
-    def spy(nav_results_root: Any, *, results_db_url: str | None = None) -> Any:
-        urls.append(results_db_url)
-        return real(nav_results_root, results_db_url=results_db_url)
+    def spy(nav_results_root: Any, *, results_index_db_url: str | None = None) -> Any:
+        urls.append(results_index_db_url)
+        return real(nav_results_root, results_index_db_url=results_index_db_url)
 
     monkeypatch.setattr(module, 'build_pointing_source', spy)
     return urls

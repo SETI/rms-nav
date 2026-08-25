@@ -286,7 +286,7 @@ An optional, rebuildable database index over the results tree, so that
 programs needing a few fields per image stop reading one JSON document
 each -- one paid cloud round trip per image per program today, at order
 400,000 images for a Cassini-scale run. Design is settled and detailed in
-`plans/RESULTS_DB_PLAN.md`, which is self-contained. The JSON documents
+`plans/RESULTS_INDEX_PLAN.md`, which is self-contained. The JSON documents
 stay authoritative, no program ever requires the index, and the
 file-reading paths remain the default.
 

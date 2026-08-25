@@ -216,7 +216,7 @@ def test_the_version_message_says_to_delete_and_re_ingest(postgres_url: str) -> 
     """
     with opened(postgres_url, create=True) as engine, engine.begin() as connection:
         connection.execute(SCHEMA_META.update().values(schema_version=SCHEMA_VERSION + 1))
-    with pytest.raises(ValueError, match='empty the database with sd_results_index --drop-index'):
+    with pytest.raises(ValueError, match='empty the database with sd_results_index drop'):
         open_index(postgres_url)
 
 
@@ -698,7 +698,7 @@ def _selecting(url: str, **flags: bool) -> list[str]:
         [SELECTION_SUBTREE],
         SELECTION_ROOT,
         logger=pdslogger.NullLogger(),
-        results_db_url=url,
+        results_index_db_url=url,
         **flags,
     ) as results_filter:
         kept = [stub for stub in SELECTION_CANDIDATES if results_filter.passes(stub)]
@@ -822,7 +822,7 @@ def test_the_snapshot_time_answers_for_one_root_on_postgresql(
         [SELECTION_SUBTREE],
         SELECTION_ROOT,
         logger=pdslogger.PdsLogger(f'postgres_selection_{uuid.uuid4().hex}'),
-        results_db_url=postgres_url,
+        results_index_db_url=postgres_url,
         has_offset_file=True,
     )
     assert SELECTION_INGESTED in capsys.readouterr().out
@@ -1046,7 +1046,9 @@ def _record_source(url: str, *roots: str) -> Iterator[RecordSource]:
     Yields:
         The source.
     """
-    with open_record_source(list(roots), results_db_url=url, columns=RECORD_COLUMNS) as source:
+    with open_record_source(
+        list(roots), results_index_db_url=url, columns=RECORD_COLUMNS
+    ) as source:
         yield source
 
 

@@ -44,7 +44,8 @@ def _run(
     """Run the driver and return its exit status and what it told the main log.
 
     Parameters:
-        argv: Arguments, without the program name.
+        argv: Arguments, without the program name, beginning with the
+            subcommand.
         monkeypatch: Fixture the argument vector and logger are replaced through.
         tmp_path: Directory the run's log files are written under.
 
@@ -56,8 +57,10 @@ def _run(
     def recording(message: Any, *args: Any) -> None:
         written.append(str(message) % args if args else str(message))
 
+    # The log root goes last, because every subcommand declares it and none of
+    # them is reached until the subcommand itself has been read.
     monkeypatch.setattr(
-        sys, 'argv', ['sd_results_index', '--log-root', str(tmp_path / 'logs'), *argv]
+        sys, 'argv', ['sd_results_index', *argv, '--log-root', str(tmp_path / 'logs')]
     )
     monkeypatch.setattr(MAIN_LOGGER, 'info', recording)
     monkeypatch.setattr(MAIN_LOGGER, 'warning', recording)
@@ -77,7 +80,9 @@ def test_no_navigation_root_is_reported_and_not_raised(
     monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     status, _written = _run(
-        ['--results-index-db', index_url(tmp_path / 'index.sqlite3')], monkeypatch, tmp_path
+        ['ingest', '--results-index-db', index_url(tmp_path / 'index.sqlite3')],
+        monkeypatch,
+        tmp_path,
     )
     assert status == 1
 
@@ -89,7 +94,9 @@ def test_no_navigation_root_says_which_settings_supply_one(
     monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     _status, written = _run(
-        ['--results-index-db', index_url(tmp_path / 'index.sqlite3')], monkeypatch, tmp_path
+        ['ingest', '--results-index-db', index_url(tmp_path / 'index.sqlite3')],
+        monkeypatch,
+        tmp_path,
     )
     assert any('--nav-results-root' in line for line in written)
 
@@ -108,7 +115,7 @@ def test_no_index_is_reported_and_not_raised(
     """
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
-    status, written = _run(['--nav-results-root', str(root)], monkeypatch, tmp_path)
+    status, written = _run(['ingest', '--nav-results-root', str(root)], monkeypatch, tmp_path)
     assert status == 1
     assert any('NAV_RESULTS_INDEX_DB' in line for line in written)
 
@@ -125,7 +132,7 @@ def test_an_index_named_with_an_empty_value_is_reported_and_not_raised(
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     status, _written = _run(
-        ['--nav-results-root', str(root), '--results-index-db', ''], monkeypatch, tmp_path
+        ['ingest', '--nav-results-root', str(root), '--results-index-db', ''], monkeypatch, tmp_path
     )
     assert status == 1
 
@@ -142,7 +149,7 @@ def test_an_index_named_with_an_empty_value_says_which_level_named_it(
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
-        ['--nav-results-root', str(root), '--results-index-db', ''], monkeypatch, tmp_path
+        ['ingest', '--nav-results-root', str(root), '--results-index-db', ''], monkeypatch, tmp_path
     )
     assert any('--results-index-db is set to an empty value' in line for line in written)
 
@@ -155,7 +162,7 @@ def test_the_run_log_does_not_carry_a_database_password(
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
-        ['--results-index-db', SERVER_URL, '--nav-results-root', root.as_posix()],
+        ['ingest', '--results-index-db', SERVER_URL, '--nav-results-root', root.as_posix()],
         monkeypatch,
         tmp_path,
     )
@@ -174,7 +181,7 @@ def test_the_run_log_still_names_the_index_it_was_given(
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
-        ['--results-index-db', SERVER_URL, '--nav-results-root', root.as_posix()],
+        ['ingest', '--results-index-db', SERVER_URL, '--nav-results-root', root.as_posix()],
         monkeypatch,
         tmp_path,
     )
@@ -190,6 +197,7 @@ def test_the_run_log_names_the_roots_it_was_given(
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
         [
+            'ingest',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
@@ -208,6 +216,7 @@ def test_a_root_that_is_not_there_is_reported(
     monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     status, _written = _run(
         [
+            'ingest',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
@@ -226,6 +235,7 @@ def test_a_root_that_is_not_there_is_named_in_the_summary(
     monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     _status, written = _run(
         [
+            'ingest',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
@@ -258,6 +268,7 @@ def _run_over_an_unlistable_directory(
     try:
         return _run(
             [
+                'ingest',
                 '--results-index-db',
                 index_url(tmp_path / 'index.sqlite3'),
                 '--nav-results-root',
@@ -337,6 +348,7 @@ def test_a_failure_nobody_enumerated_exits_rather_than_raising(
     monkeypatch.setattr(sd_results_index, 'ingest_metadata_files', exploding)
     status, _written = _run(
         [
+            'ingest',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
@@ -362,6 +374,7 @@ def test_a_failure_nobody_enumerated_says_what_it_was(
     monkeypatch.setattr(sd_results_index, 'ingest_metadata_files', exploding)
     _status, written = _run(
         [
+            'ingest',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
@@ -384,6 +397,7 @@ def test_a_failure_reason_names_one_example_file(
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
         [
+            'ingest',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
@@ -421,6 +435,7 @@ def _two_passes(
     (root / 'VOL' / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
     (root / 'VOL' / 'rings_metadata.json').write_text('{"rings": []}', encoding='utf-8')
     argv = [
+        'ingest',
         '--results-index-db',
         index_url(tmp_path / 'index.sqlite3'),
         '--nav-results-root',

@@ -284,13 +284,15 @@ def select_from(results_filter: ResultsFilter, images: list[ImageFile]) -> list[
     return [image.results_path_stub for image in selected]
 
 
-def selection_of(root: Path, flags: dict[str, bool], *, results_db_url: str | None) -> list[str]:
+def selection_of(
+    root: Path, flags: dict[str, bool], *, results_index_db_url: str | None
+) -> list[str]:
     """Answer one filter combination over the fixture tree.
 
     Parameters:
         root: The results root under test.
         flags: The selection flags to apply.
-        results_db_url: The index to answer from, or None to read the tree.
+        results_index_db_url: The index to answer from, or None to read the tree.
 
     Returns:
         The stubs that passed, in enumeration order.
@@ -299,7 +301,7 @@ def selection_of(root: Path, flags: dict[str, bool], *, results_db_url: str | No
         VOLUMES,
         str(root),
         logger=null_logger(),
-        results_db_url=results_db_url,
+        results_index_db_url=results_index_db_url,
         **flags,
     )
     return select_from(results_filter, candidate_files(root))

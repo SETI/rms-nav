@@ -481,7 +481,7 @@ class IndexPointingSource:
 def build_pointing_source(
     nav_results_root: str | FCPath | None,
     *,
-    results_db_url: str | None,
+    results_index_db_url: str | None,
 ) -> PointingSource:
     """Build the source a program reads its navigation records through.
 
@@ -498,8 +498,8 @@ def build_pointing_source(
             means no pointing is looked for at all, which only a run with no
             index can ask for -- an index is keyed by root, so there is nothing
             to look a row up under.
-        results_db_url: Connection URL of the results index, or None to read
-            documents.
+        results_index_db_url: Connection URL of the results index, or None to
+            read documents.
 
     Returns:
         The source, which the caller closes when it is done with it.
@@ -510,13 +510,13 @@ def build_pointing_source(
             by another version of the schema; or if the root has no completed
             ingest run in it.
     """
-    if results_db_url is None:
+    if results_index_db_url is None:
         return FilePointingSource(nav_results_root)
     if nav_results_root is None:
         raise ValueError(
-            f'the results index {masked_url(results_db_url)} was named with no navigation '
+            f'the results index {masked_url(results_index_db_url)} was named with no navigation '
             f'results root; the index is keyed by root, so there is no root to read rows '
             f'under. Name one, or pass --results-index-db none to read navigation documents.'
         )
     root_url = normalize_root_url(nav_results_root)
-    return IndexPointingSource(open_index_for_roots(results_db_url, [root_url]), root_url)
+    return IndexPointingSource(open_index_for_roots(results_index_db_url, [root_url]), root_url)

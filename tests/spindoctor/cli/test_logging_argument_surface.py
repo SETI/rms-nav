@@ -48,9 +48,14 @@ _WITHOUT_IMAGE_LOGGER = [
     ('sd_consolidate_metadata', ['coiss_saturn']),
     ('sd_create_bundle', ['labels', 'coiss_saturn']),
     ('sd_create_bundle', ['summary', 'coiss_saturn']),
-    # Ingest processes documents rather than images, but a partial or failed
-    # pass has to appear in a run log rather than only in an exit code.
-    ('sd_results_index', []),
+    # The results index processes documents rather than images, but a partial or
+    # failed pass has to appear in a run log rather than only in an exit code --
+    # and that is true of every one of its subcommands, each of which builds a
+    # parser of its own, so each is asked separately.
+    ('sd_results_index', ['ingest']),
+    ('sd_results_index', ['divide']),
+    ('sd_results_index', ['complete']),
+    ('sd_results_index', ['drop']),
 ]
 
 _WITH_ANY_LOGGER = _WITH_IMAGE_LOGGER + _WITHOUT_IMAGE_LOGGER
