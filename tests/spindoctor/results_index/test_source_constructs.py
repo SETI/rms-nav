@@ -8,10 +8,12 @@ found the first time somebody points the code at a server. These read the source
 so that the answer does not depend on which backend a test happened to run
 against.
 
-The scan covers every package that holds index queries: the Core layer itself,
-the programs that write and empty an index, and the statistics programs, whose
-report issues most of the SQL in the system. A scan aimed at one package while
-the queries live in another reports green without reading them.
+The scan covers three packages. Two of them hold the index's statements: the
+Core layer itself, and the programs that write and empty an index. The third is
+the statistics programs, which issue none -- the report formats one pass of
+accumulators fed from the record seam -- and are scanned so that a statement
+written there is read rather than missed. A scan aimed at one package while the
+queries live in another reports green without reading them.
 
 It reads the source rather than importing it, so a module added to any of those
 packages tomorrow is covered without being named here.
@@ -33,7 +35,13 @@ _INDEX_ROOT = _SRC / 'results_index'
 """The Core layer: the schema, the opener, and the root bookkeeping."""
 
 _SOURCE_ROOTS = (_INDEX_ROOT, _SRC / 'cli' / 'results_index', _SRC / 'cli' / 'stats')
-"""Every package holding index queries."""
+"""The packages under scan: two that hold statements, and one that may grow one.
+
+The Core layer and the programs that write and empty an index are where the
+statements live. The statistics package is scanned because it is the largest
+reader of what the index holds, and a statement written there would otherwise be
+the one nobody read.
+"""
 
 # The connect-time events a PRAGMA may legitimately live inside.  A pragma in a
 # query reaches one connection out of however many the pool holds.
@@ -66,8 +74,9 @@ _KNOWN_MODULES = frozenset(
         'drop.py',
         'runs.py',
         'store.py',
-        # The statistics programs, where the report's queries live.
+        # The statistics programs, the largest reader of what the index holds.
         'report.py',
+        'report_accumulate.py',
         'report_common.py',
         'report_sections.py',
     }
@@ -352,13 +361,24 @@ def test_the_scan_actually_reads_some_modules() -> None:
 
 
 def test_the_scan_reaches_the_statistics_programs() -> None:
-    """The report issues most of the SQL in the system, so it is scanned too.
+    """The largest reader of what the index holds is scanned too.
 
     Named as a directory rather than as a module list: a scan that had drifted
     back to the Core layer alone would still find every module it named there.
     """
     reached = {path.as_posix() for path in _source_files()}
     assert any('/cli/stats/' in path for path in reached)
+
+
+def test_the_scan_reaches_the_programs_that_write_an_index() -> None:
+    """The statements that fill and prune an index are in a package of their own.
+
+    Named as a directory for the same reason as the one above: what a scan
+    loses is a whole root, and the floor is a set of base names, which says
+    nothing about where the module holding one was found.
+    """
+    reached = {path.as_posix() for path in _source_files()}
+    assert any('/cli/results_index/' in path for path in reached)
 
 
 def test_the_markdown_exclusion_leaves_a_statement_alone() -> None:

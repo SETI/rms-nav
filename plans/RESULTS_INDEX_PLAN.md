@@ -1347,7 +1347,7 @@ nonexistent path, which section 2.4 deliberately changes for consumers.
 `upsert_image` issues DELETE + INSERT with transaction management left to
 the caller.
 
-**`spindoctor/cli/results_index.py`** flattens a document in
+**`spindoctor/cli/stats/ingest.py`** flattens a document in
 `rows_from_metadata`. It reads the rounded `navigation_result.offset_px`
 rather than the top-level `offset`; merges `status_reason` and
 `status_error` into one column; and drops `rotation_deg`,
@@ -1398,7 +1398,7 @@ record types, the document rules, root identity, `Selection`, the
 **`spindoctor/results_index/record_source.py`** holds `IndexRecordSource` and
 `open_record_source`. There is one walk of a results tree, one spelling of the
 `_metadata.json` suffix and one rule about what makes a stub a key.
-`spindoctor/support/nav_document.py` and `spindoctor/cli/results_index/walk.py`
+`spindoctor/support/nav_document.py` and `spindoctor/cli/stats/ingest/walk.py`
 are gone. The enumeration is on the seam too: `spindoctor/dataset/results_filter.py`
 carries no walk, no parser, no `exists()` probe and no copy of the suffix, and
 answers all six of its flags from `listing()` and `facts()`, whichever storage
@@ -1766,7 +1766,7 @@ Details settled during execution, none of them a change of intent:
   by the stub alone, which is how a root-blind query ships. Both arms of the
   share's own lookup, both deletes of an image write, both of a refusal, and
   both of the prune are each pinned by a test that fails when its root half is
-  dropped (`tests/spindoctor/cli/stats/test_ingest_two_roots.py`, and the two
+  dropped (`tests/spindoctor/cli/results_index/test_ingest_two_roots.py`, and the two
   share-lookup tests beside it). What each break costs differs -- a navigated
   image made invisible under another root, a refusal cleared so its file is
   downloaded again on every pass -- and the tests are named for it.
@@ -2299,7 +2299,7 @@ parameter arrives with the consumer that can use it (#513).
 `spindoctor/support/nav_document.py` goes entirely: its `read_documents` walked
 with `rglob`, which skips a directory it cannot list and reports a clean run --
 measured at 1 record of 2, silently, against the ingest's hard refusal over the
-same tree. `spindoctor/cli/results_index/walk.py` goes too, its strict walk
+same tree. `spindoctor/cli/stats/ingest/walk.py` goes too, its strict walk
 having moved into `nav_records/tree.py` where every reader of a tree inherits
 it; the ingest's `_listing_of_root` is what is left, and it is the accounting a
 pass keeps around a listing rather than a listing of its own.
@@ -2394,12 +2394,20 @@ Behavior changes review must see:
 
 ## 5. Acceptance criteria
 
+Every criterion names what establishes it: a test as `path::function`, or a
+command line and what its output says. The default tier is what a plain
+`pytest -n 4 --dist=loadfile` runs; the `postgres` tier needs a server named by
+`SPINDOCTOR_TEST_POSTGRES_URL` and is selected with `-m postgres`; the
+integration tier needs the holdings and a local SPICE tree and is selected with
+`-m integration`. A criterion that does not hold says so.
+
 1. `sd_backplanes`, `sd_mosaic`, and the `ResultsFilter`-driven selections
    produce identical products and identical selections for the same inputs
    with and without an index, over a fixture tree exercising success,
    failure, error, missing-metadata and malformed-metadata images. Asserted
-   by tests (unit tier at the `PointingSelection`/selection level; integration
-   tier on written products). "Identical" binds returned values, written
+   by tests (default tier at the `PointingSelection`/selection level;
+   integration tier on written products, where the evidence below records that
+   the criterion is not met). "Identical" binds returned values, written
    products, and the reachable-reason warnings -- not incidental log text.
    The criterion binds every image whose document the ingest could read.
 
@@ -2437,48 +2445,249 @@ Behavior changes review must see:
    Neither carve-out is asserted to be complete: a divergence outside them is a
    defect of the enumeration, to be fixed or enumerated, and not a license to
    differ.
-   `sd_stats_report`'s criterion is section 4 Phase 2's old-vs-new
-   byte-identical report.
+
+   `sd_stats_report`'s form of this criterion is that one report comes out of a
+   results tree and out of an index ingested from that tree, byte for byte, and
+   that both reproduce the frozen output. `images.csv` is held to the same rows
+   rather than to the same bytes: the export writes each row where it reads it,
+   so its line order is the order the storage found the images in and is not a
+   contract.
+
+   Evidence, default tier:
+
+   - the selection matrix, every flag over the one fixture tree, each held to a
+     stated answer --
+     `tests/spindoctor/dataset/test_results_filter_index.py::test_the_tree_answers_each_filter`
+     and `::test_the_index_answers_each_filter_the_same_way`, with
+     `::test_the_index_path_reads_no_file_at_all`;
+   - the `PointingSelection` level --
+     `tests/spindoctor/cli/reproj/test_pointing_source.py::test_both_paths_select_the_same_mechanism`,
+     `::test_both_paths_report_the_same_reason`,
+     `::test_both_paths_carry_the_same_fallback_offset` and
+     `::test_the_image_log_says_the_same_thing_either_way`;
+   - the second carve-out, both directions --
+     `tests/spindoctor/cli/reproj/test_pointing_source.py::test_a_document_the_ingest_refused_is_not_reported_as_an_unnavigated_image`
+     and `::test_an_image_nothing_navigated_is_still_reported_as_unnavigated`;
+   - the third carve-out, member by member --
+     `tests/spindoctor/dataset/test_results_filter_index_divergence.py::test_a_file_the_pass_could_not_retrieve_reads_as_absent`
+     and
+     `::test_a_document_rewritten_in_place_reads_as_its_previous_self_in_the_index`;
+   - the four lists compared entry for entry --
+     `tests/spindoctor/results_index/test_enumeration_lists.py::test_every_list_states_each_member_in_an_entry_of_its_own`
+     and `::test_no_entry_of_a_list_states_anything_outside_the_enumeration`,
+     each parametrized over the four ids `module-docstring`,
+     `navigation-guide`, `plan-phase-5` and `plan-criterion-1`, so this
+     criterion's own list is one of the four the guard binds together;
+   - `sd_stats_report` --
+     `tests/spindoctor/cli/stats/test_report_over_a_tree.py::test_the_report_is_byte_identical_to_one_from_an_index`,
+     `::test_the_tree_reproduces_the_frozen_report` and
+     `::test_the_csv_export_holds_the_same_rows`, with
+     `::test_the_report_is_not_empty` as the control an equality needs -- two
+     empty reports compare equal -- and
+     `tests/spindoctor/cli/stats/test_report_regression.py::test_the_report_is_byte_identical`
+     for the frozen output itself.
+
+   **The written-product half is not evidenced.**
+   `tests/integration/test_results_index_consumers.py` is what states it, over
+   real library frames navigated for real and ingested by the real ingest. Run
+   with the holdings and a local SPICE tree, its Galileo frame's eight
+   assertions pass and its Cassini ring frame's thirteen error in setup: that
+   frame reaches `no_features_extracted` and writes no successful document, so
+   the comparison has nothing to read. Every written-product assertion -- the
+   backplane arrays, the ring reprojections and the ring mosaics -- belongs to
+   that frame, so no product is compared today. The failure is the image
+   library's rather than the index's; it reproduces on `main` for the same
+   frame, and it is tracked as its own issue.
 2. No pipeline program requires an index, and `import spindoctor.nav_records`
    -- the storage-free half of the record seam, which every reader of a results
    tree goes through -- does not import `sqlalchemy`. Asserted by a subprocess
    probe, which also asserts that the walk itself loaded, since a guarantee
    about a package that imported almost nothing is a guarantee about nothing.
+   The claim is about what that package's own import pulls in; nothing here
+   forbids a caller from importing a database layer.
+
+   Evidence, default tier:
+   `tests/spindoctor/nav_records/test_imports.py::test_the_record_seam_loads_no_database_layer`,
+   with `::test_the_probe_really_imported_the_walk` and
+   `::test_the_probe_imported_the_package_under_test` pinning that the probe
+   answered for this checkout's walk rather than for an empty import of an
+   installed copy.
+
+   That no program requires an index is asserted twice over. Narrowly, by
+   `tests/spindoctor/cli/test_results_index_db_argument_surface.py::test_no_option_and_no_variable_means_no_index`,
+   where an argument, the configuration variable and the environment variable
+   all being absent resolves to no index rather than to an error, and by
+   `tests/spindoctor/cli/reproj/test_pointing_source.py::test_no_url_reads_documents`,
+   where the same program then reads the tree. Broadly, by `tests/conftest.py`'s
+   autouse `no_ambient_results_index_for_the_session` and
+   `no_ambient_results_index`, which unset `NAV_RESULTS_INDEX_DB` and run from a
+   directory holding no `nav_default_config.yaml`: the whole default tier,
+   every pipeline program's tests included, runs with no index resolvable
+   anywhere.
 3. A program given an unopenable, nonexistent, or version-mismatched index,
    or a root the index has not fully ingested, fails with a message naming
    the cause; it does not fall back to reading files and does not create an
    empty database.
+
+   Evidence, default tier:
+   `tests/spindoctor/results_index/test_engine.py::test_a_consumer_refuses_a_database_that_does_not_exist`,
+   `::test_a_consumer_does_not_create_the_database_it_refused`,
+   `::test_a_database_stamped_with_another_version_is_refused` and
+   `::test_the_version_message_names_the_version_this_code_reads`;
+   `tests/spindoctor/results_index/test_roots.py::test_the_refusal_masks_its_index_and_leaves_its_roots_alone`,
+   which is the refusal itself, naming the root and the masked index; and at
+   the program level
+   `tests/spindoctor/cli/reproj/test_pointing_source.py::test_an_unopenable_url_fails_rather_than_falling_back`
+   with `::test_an_unopenable_url_leaves_no_database_behind`,
+   `::test_a_root_nobody_ingested_is_refused` and
+   `::test_the_refusal_names_the_roots_the_index_does_hold` for a root the
+   index never heard of, and `::test_a_run_that_died_halfway_leaves_a_root_unreadable`
+   for one whose newest ingest never finished, which is what "not fully
+   ingested" means: the run's rows are whatever the dead pass wrote, so absence
+   under that root answers nothing.
 4. Two images with the same basename in different volumes produce two rows
    and are independently retrievable; a multi-root index serves each
    consumer only rows from its own normalized root.
+
+   Evidence, default tier:
+   `tests/spindoctor/cli/results_index/test_ingest.py::test_two_volumes_with_one_basename_produce_two_rows`
+   and `::test_each_colliding_image_is_independently_retrievable`;
+   `tests/spindoctor/cli/reproj/test_pointing_source.py::test_a_source_reads_its_own_roots_offset`,
+   `::test_the_other_source_reads_the_other_roots_offset` and
+   `::test_a_stub_recorded_only_under_another_root_is_absent`. The last three
+   run over a two-root fixture whose second root differs in exactly the value
+   under test, so one row cannot satisfy both directions. Dropping the root
+   half of the join in `IndexRecordSource._row` fails two of the three --
+   `::test_the_other_source_reads_the_other_roots_offset` reads the first
+   root's offset for the second, and `::test_a_stub_recorded_only_under_another_root_is_absent`
+   finds a record where there is none.
 5. The stored offset round-trips the document's top-level `offset`
    bit-exactly at 15 significant digits, and `status_error` is retrievable
    verbatim.
+
+   Evidence, default tier:
+   `tests/spindoctor/cli/results_index/test_ingest.py::test_an_offset_survives_the_database_bit_for_bit`,
+   which ingests `3.14159265358979` and reads the same value back out of
+   `images.offset_dv`; and
+   `tests/spindoctor/results_index/test_schema.py::test_status_error_is_retrievable_verbatim`
+   with `::test_status_reason_is_stored_separately_from_status_error`, which is
+   what keeps the two vocabularies from merging into one column again.
 6. A second ingest over an unchanged tree reads no metadata file and issues
    no per-file stat or exists call, proven by counting.
+
+   Evidence, default tier:
+   `tests/spindoctor/cli/results_index/test_ingest.py::test_an_unchanged_file_is_not_read_again`
+   wraps `FCPath.retrieve` and requires the list of retrievals the second pass
+   made to be empty; `::test_an_unchanged_file_is_not_stat_ed_either` wraps
+   `FCPath.stat`, replaces `FCPath.exists` with a call that raises, and requires
+   no recorded path to be a metadata file, having first required the pass to
+   report one file skipped; and
+   `::test_a_first_ingest_asks_about_no_single_file_either` holds the first pass
+   to the same rule, so the second pass's silence is not a listing that asked
+   about every file once already.
 7. Ingest on a cloud-style root downloads its files; the test fails if the
    download call is reverted to `get_local_path()`.
+
+   Evidence, default tier:
+   `tests/spindoctor/cli/results_index/test_ingest.py::test_a_cloud_style_root_downloads_its_files`
+   and `::test_a_cloud_style_root_reads_the_downloaded_document`. The fixture
+   root holds a file of the right name, size and modification time whose
+   contents are not the document, and the retrieval is redirected to the
+   directory holding the real ones, so a caller that named a file instead of
+   retrieving it reads the placeholder. Reverting
+   `spindoctor/cli/results_index/chunks.py` to `get_local_path()` fails both,
+   the first on `files_ingested == 0` and the second on an empty row set.
 8. Concurrent local SQLite ingest workers produce the same rows as one
    serial ingest over the same input.
+
+   Evidence, default tier:
+   `tests/spindoctor/cli/results_index/test_ingest_cloud_tasks.py::test_concurrent_shares_write_the_rows_a_single_pass_writes`
+   runs six shares of twelve documents through four threads, each share with an
+   engine of its own, and compares every `images` row against a serial
+   `ingest_metadata_files` over the same tree;
+   `::test_concurrent_shares_lose_no_feature_row` covers the child rows, which
+   are written second and are what an interleaved image would lose.
 9. `sd_results_index_cloud_tasks` writes zero bytes to stdout and stderr
    from SpinDoctor code under a worker subprocess, and its counts arrive in
    the task result.
+
+   Evidence, default tier:
+   `tests/spindoctor/cli/test_cloud_task_silence.py::test_an_ingest_task_writes_nothing_to_stdout`
+   and `::test_an_ingest_task_writes_nothing_to_stderr`, measured on the
+   descriptors of a real subprocess that calls `logging.basicConfig` first, so
+   the root handler a worker installs is present; and
+   `::test_an_ingest_task_still_reports_what_it_ingested`,
+   `::test_an_ingest_task_still_names_what_it_refused` and
+   `::test_an_ingest_task_still_reports_what_it_skipped` for the counts, which
+   are the whole of what an ingest worker says.
 10. No SQLite-only construct remains in any query: no UDF registration, no
     `TOTAL(`, no `executescript`, no `PRAGMA` outside a dialect event, no
     integer comparison or arithmetic against a Boolean column. Enforced by a
-    source-scanning test, whose root covers every package holding index
-    queries: `src/spindoctor/results_index/`, and from Phase 2 also
-    `src/spindoctor/cli/stats/`, where the report's queries live. A scan
-    aimed at one package while the queries live in another reports green
-    without reading them.
+    source-scanning test whose roots are named as directories rather than as
+    module lists, so a module added to any of them is covered without being
+    named. Three roots, each for a reason of its own:
+    `src/spindoctor/results_index/`, the Core layer, which holds the schema,
+    the opener and the root bookkeeping; `src/spindoctor/cli/results_index/`,
+    the programs that write and empty an index, which is where the statements
+    that fill and prune it live; and `src/spindoctor/cli/stats/`, the report,
+    which issues no statement of its own -- it formats one pass of accumulators
+    fed from the record seam -- and is scanned so that a statement written there
+    is read rather than missed. A scan aimed at one package while the queries
+    live in another reports green without reading them.
+
+    Evidence, default tier: the five parametrized checks of
+    `tests/spindoctor/results_index/test_source_constructs.py` --
+    `test_no_module_registers_a_python_function_as_sql`,
+    `test_no_module_uses_the_total_aggregate`,
+    `test_no_module_runs_a_statement_script`,
+    `test_every_pragma_lives_inside_a_connect_event` and
+    `test_no_module_compares_a_boolean_column_against_an_integer` -- each run
+    once per module found under the three roots. What keeps an empty scan from
+    passing is `::test_the_scan_actually_reads_some_modules`, which asserts a
+    floor of named modules from all three roots;
+    `::test_the_scan_reaches_the_statistics_programs` and
+    `::test_the_scan_reaches_the_programs_that_write_an_index`, which pin those
+    two roots as directories, since the floor is matched on base names and
+    several of them have a namesake in the Core layer; and
+    `::test_the_boolean_scan_knows_which_columns_are_boolean`, which reads the
+    Boolean column names off the schema.
 11. The suite's index tests pass against PostgreSQL under a `postgres`
     marker: registered in `[tool.pytest.ini_options].markers`, excluded by
     default via `addopts` (`-m "not integration and not postgres"`), given a
     `scripts/run-all-checks.sh` flag alongside `-i` (`-P` / `--postgres`), and
     named in the dev guide as a locally-runnable tier if CI has no service
     container.
+
+    Evidence: `pytest -m postgres -n 4 --dist=loadfile -rs` with
+    `SPINDOCTOR_TEST_POSTGRES_URL` exported, which selects the tier and reports
+    every test passed and none skipped. The four surface facts are the
+    `markers` and `addopts` tables of `[tool.pytest.ini_options]` in
+    `pyproject.toml`, the `-P|--postgres` case in `scripts/run-all-checks.sh`
+    -- which refuses `-P` outright when no server is named, since a tier that
+    skipped every test would report as a pass -- and the tier's account in
+    `docs/dev_guide/dev_guide_testing.rst`.
 12. `ruff check`, `ruff format --check`, `mypy --strict`, `sphinx-build -W`
     and `pymarkdown scan` all pass; suite coverage stays at or above 90%.
+
+    The five gates pass. Evidence, each from the repository root:
+    `ruff check src tests`, `ruff format --check src tests`, `mypy src tests`,
+    `rm -rf docs/_build && sphinx-build -W -b html docs docs/_build`, and
+    `pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md`. Each exits 0
+    and reports no finding; `scripts/run-all-checks.sh` runs all five together
+    with the suite. `plans/` is deliberately outside the pymarkdown scan and is
+    not clean under it.
+
+    **The coverage half does not hold.** `pytest --cov` runs, so the number is
+    measurable rather than unknown, and over the tier CI measures --
+    the default one, `-m "not integration and not postgres"` --
+    `pytest --cov -n 4 --dist=loadfile` reports **79%** with branch coverage on
+    and 81% of statements. Adding the `postgres` tier moves neither figure.
+    Nothing enforces the floor either: `.coveragerc` sets no `fail_under` and
+    `codecov.yml` sets both targets to 0, so the figure sits below 90 without
+    failing anything. The shortfall is the PyQt6 code: `src/spindoctor/ui/` and
+    `src/spindoctor/cli/sd_backplane_viewer.py` account for about 4,470 of the
+    7,511 unexecuted statements between them. Raising the number, or ratifying
+    a lower floor and enforcing that one, is tracked as its own issue.
 
 ---
 
