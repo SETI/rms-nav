@@ -1,4 +1,4 @@
-"""Tests for the ``sd_stats_ingest`` command line.
+"""Tests for the ``sd_results_index`` command line.
 
 Three things the driver does are worth pinning on their own. It reports a
 configuration failure -- no index named, no results root resolvable -- through
@@ -28,7 +28,7 @@ from tests.spindoctor.conftest import (
     write_metadata,
 )
 
-from spindoctor.cli import sd_stats_ingest
+from spindoctor.cli import sd_results_index
 from spindoctor.config import MAIN_LOGGER
 
 PASSWORD = 'sup3rs3cr3t'
@@ -57,7 +57,7 @@ def _run(
         written.append(str(message) % args if args else str(message))
 
     monkeypatch.setattr(
-        sys, 'argv', ['sd_stats_ingest', '--log-root', str(tmp_path / 'logs'), *argv]
+        sys, 'argv', ['sd_results_index', '--log-root', str(tmp_path / 'logs'), *argv]
     )
     monkeypatch.setattr(MAIN_LOGGER, 'info', recording)
     monkeypatch.setattr(MAIN_LOGGER, 'warning', recording)
@@ -65,7 +65,7 @@ def _run(
     monkeypatch.setattr(MAIN_LOGGER, 'fatal', recording)
     monkeypatch.setattr(MAIN_LOGGER, 'exception', recording)
     with pytest.raises(SystemExit) as caught:
-        sd_stats_ingest.main()
+        sd_results_index.main()
     status = caught.value.code
     return (status if status is None or isinstance(status, int) else 1), written
 
@@ -75,9 +75,9 @@ def test_no_navigation_root_is_reported_and_not_raised(
 ) -> None:
     """A configuration failure is an operator's mistake, not a traceback."""
     monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     status, _written = _run(
-        ['--results-db', index_url(tmp_path / 'index.sqlite3')], monkeypatch, tmp_path
+        ['--results-index-db', index_url(tmp_path / 'index.sqlite3')], monkeypatch, tmp_path
     )
     assert status == 1
 
@@ -87,9 +87,9 @@ def test_no_navigation_root_says_which_settings_supply_one(
 ) -> None:
     """A refusal that does not say what to set is a refusal nobody can act on."""
     monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     _status, written = _run(
-        ['--results-db', index_url(tmp_path / 'index.sqlite3')], monkeypatch, tmp_path
+        ['--results-index-db', index_url(tmp_path / 'index.sqlite3')], monkeypatch, tmp_path
     )
     assert any('--nav-results-root' in line for line in written)
 
@@ -110,7 +110,7 @@ def test_no_index_is_reported_and_not_raised(
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     status, written = _run(['--nav-results-root', str(root)], monkeypatch, tmp_path)
     assert status == 1
-    assert any('NAV_RESULTS_DB' in line for line in written)
+    assert any('NAV_RESULTS_INDEX_DB' in line for line in written)
 
 
 def test_an_index_named_with_an_empty_value_is_reported_and_not_raised(
@@ -125,7 +125,7 @@ def test_an_index_named_with_an_empty_value_is_reported_and_not_raised(
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     status, _written = _run(
-        ['--nav-results-root', str(root), '--results-db', ''], monkeypatch, tmp_path
+        ['--nav-results-root', str(root), '--results-index-db', ''], monkeypatch, tmp_path
     )
     assert status == 1
 
@@ -142,20 +142,22 @@ def test_an_index_named_with_an_empty_value_says_which_level_named_it(
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
-        ['--nav-results-root', str(root), '--results-db', ''], monkeypatch, tmp_path
+        ['--nav-results-root', str(root), '--results-index-db', ''], monkeypatch, tmp_path
     )
-    assert any('--results-db is set to an empty value' in line for line in written)
+    assert any('--results-index-db is set to an empty value' in line for line in written)
 
 
 def test_the_run_log_does_not_carry_a_database_password(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The command line is logged, and a password can be one of its words."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
-        ['--results-db', SERVER_URL, '--nav-results-root', root.as_posix()], monkeypatch, tmp_path
+        ['--results-index-db', SERVER_URL, '--nav-results-root', root.as_posix()],
+        monkeypatch,
+        tmp_path,
     )
     assert not any(PASSWORD in line for line in written)
 
@@ -168,11 +170,13 @@ def test_the_run_log_still_names_the_index_it_was_given(
     Which of the command line, the configuration file and the environment
     supplied a bad URL is exactly what the logged arguments answer.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
-        ['--results-db', SERVER_URL, '--nav-results-root', root.as_posix()], monkeypatch, tmp_path
+        ['--results-index-db', SERVER_URL, '--nav-results-root', root.as_posix()],
+        monkeypatch,
+        tmp_path,
     )
     assert any('db.example/spindoctor' in line for line in written)
 
@@ -181,12 +185,12 @@ def test_the_run_log_names_the_roots_it_was_given(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An ordinary local root carries no credentials and reaches the log whole."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             root.as_posix(),
@@ -201,10 +205,10 @@ def test_a_root_that_is_not_there_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Exit status 1, because the run could not walk a root it was given."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     status, _written = _run(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             str(tmp_path / 'absent'),
@@ -219,10 +223,10 @@ def test_a_root_that_is_not_there_is_named_in_the_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A mistyped root reads as a root that is empty unless the summary says so."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     _status, written = _run(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             str(tmp_path / 'absent'),
@@ -245,7 +249,7 @@ def _run_over_an_unlistable_directory(
     Returns:
         The exit status, and one entry per line written to the main log.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL1/N1454725799_1_CALIB', metadata_document())
     write_metadata(root, 'VOL2/N1454725800_1_CALIB', metadata_document())
@@ -254,7 +258,7 @@ def _run_over_an_unlistable_directory(
     try:
         return _run(
             [
-                '--results-db',
+                '--results-index-db',
                 index_url(tmp_path / 'index.sqlite3'),
                 '--nav-results-root',
                 root.as_posix(),
@@ -323,17 +327,17 @@ def test_a_failure_nobody_enumerated_exits_rather_than_raising(
     instead, and the roots the pass never reached keep their unfinished runs
     with nothing said about why.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
 
     def exploding(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError('a failure nobody enumerated')
 
-    monkeypatch.setattr(sd_stats_ingest, 'ingest_metadata_files', exploding)
+    monkeypatch.setattr(sd_results_index, 'ingest_metadata_files', exploding)
     status, _written = _run(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             root.as_posix(),
@@ -348,17 +352,17 @@ def test_a_failure_nobody_enumerated_says_what_it_was(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An exit status with nothing in the log leaves nobody anything to act on."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
 
     def exploding(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError('a failure nobody enumerated')
 
-    monkeypatch.setattr(sd_stats_ingest, 'ingest_metadata_files', exploding)
+    monkeypatch.setattr(sd_results_index, 'ingest_metadata_files', exploding)
     _status, written = _run(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             root.as_posix(),
@@ -373,14 +377,14 @@ def test_a_failure_reason_names_one_example_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A reason is a field-level diagnosis until one real file is named beside it."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     root.mkdir()
     (root / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     _status, written = _run(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             root.as_posix(),
@@ -411,13 +415,13 @@ def _two_passes(
     Returns:
         The results root, and the exit status and main log of each pass.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     (root / 'VOL').mkdir(parents=True)
     (root / 'VOL' / 'edges_metadata.json').write_text('{"edges": []}', encoding='utf-8')
     (root / 'VOL' / 'rings_metadata.json').write_text('{"rings": []}', encoding='utf-8')
     argv = [
-        '--results-db',
+        '--results-index-db',
         index_url(tmp_path / 'index.sqlite3'),
         '--nav-results-root',
         root.as_posix(),

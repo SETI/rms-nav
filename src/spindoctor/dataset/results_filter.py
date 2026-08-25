@@ -85,7 +85,7 @@ What the index answers differently
 
 The index holds what one ingest pass could read and record, so the answers below
 are bounded by that rather than by the filters.  Each is stated here, in the
-plan, in the navigation guide's account of ``--results-db``, and in a test of
+plan, in the navigation guide's account of ``--results-index-db``, and in a test of
 its own, and one found later is added in the same four places rather than left
 to be rediscovered.  The guide is one of them because an operator reading it is
 the person a silently short selection is served to: an enumeration a user is

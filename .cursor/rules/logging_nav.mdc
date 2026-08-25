@@ -51,7 +51,7 @@ logger — give it `LogRole.MAIN`.
 and the graphical programs (`sd_backplane_viewer`, `sd_mosaic_display`,
 `sd_create_simulated_image`) write to the terminal with `print()` and take no
 logging configuration. A report's output *is* terminal text for a person
-reading it, and a GUI surfaces problems through dialogs. `sd_stats_ingest` is
+reading it, and a GUI surfaces problems through dialogs. `sd_results_index` is
 not one of them: it is infrastructure other programs depend on, so it carries a
 main logger and a partial or failed pass appears in a run log. This is the one
 documented exception to "never bare `print()` in library code", and it extends

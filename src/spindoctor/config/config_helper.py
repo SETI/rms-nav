@@ -6,10 +6,10 @@ from filecache import FCPath
 from .config import Config
 from .logging_keys import validate_logging_config
 
-RESULTS_DB_NONE = 'none'
-"""Value of the results index URL that makes :func:`get_results_db_url` answer None.
+RESULTS_INDEX_DB_NONE = 'none'
+"""Value of the results index URL that makes :func:`get_results_index_db_url` answer None.
 
-An exported NAV_RESULTS_DB would otherwise reach every program on the machine, and
+An exported NAV_RESULTS_INDEX_DB would otherwise reach every program on the machine, and
 one that resolves a URL never falls back to reading files.  What "no index" then
 means belongs to each caller: a program with a file-reading path takes it, and one
 without a file-reading path refuses.
@@ -168,20 +168,21 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace, config: Config) 
     return pds4_bundle_root_str
 
 
-def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | None:
+def get_results_index_db_url(arguments: argparse.Namespace, config: Config) -> str | None:
     """Get the results index URL from the arguments, configuration, or environment.
 
-    First look in arguments.results_db, then in config.environment.results_db, then in
-    the environment variable NAV_RESULTS_DB.
+    First look in arguments.results_index_db, then in
+    config.environment.results_index_db, then in the environment variable
+    NAV_RESULTS_INDEX_DB.
 
     Unlike the results roots, absence is not an error: it means no index was
-    resolved, and each caller decides whether it can proceed without one.  The literal
-    value ``none`` resolves to the same answer, so a run on a machine that exports
-    NAV_RESULTS_DB can still be told to read files by passing ``--results-db none``.
-    The sentinel is honored wherever the value came from, so a configuration file can
-    opt out of an exported variable in the same way; surrounding spaces are not part
-    of it, and it is otherwise matched as the exact string, so a URL that merely
-    contains the word is still a URL.
+    resolved, and each caller decides whether it can proceed without one.  The
+    literal value ``none`` resolves to the same answer, so a run on a machine that
+    exports NAV_RESULTS_INDEX_DB can still be told to read files by passing
+    ``--results-index-db none``.  The sentinel is honored wherever the value came
+    from, so a configuration file can opt out of an exported variable in the same
+    way; surrounding spaces are not part of it, and it is otherwise matched as the
+    exact string, so a URL that merely contains the word is still a URL.
 
     A value that is empty, or nothing but spaces, is refused rather than read as
     naming no index.  ``none`` is the deliberate spelling of "no index" and is
@@ -207,27 +208,27 @@ def get_results_db_url(arguments: argparse.Namespace, config: Config) -> str | N
             spaces.
     """
     # Absence is the ordinary case at both levels -- most programs define no
-    # --results-db argument, and most configurations name no index -- so each is
+    # --results-index-db argument, and most configurations name no index -- so each is
     # asked for the key rather than made to raise for it, which would also hide an
     # AttributeError raised by something other than the lookup.
-    named_by = '--results-db'
-    results_db_str = vars(arguments).get('results_db')
-    if results_db_str is None:
-        named_by = 'the environment.results_db configuration variable'
-        results_db_str = config.environment.get('results_db')
-    if results_db_str is None:
-        named_by = 'the NAV_RESULTS_DB environment variable'
-        results_db_str = os.getenv('NAV_RESULTS_DB')
-    if results_db_str is None:
+    named_by = '--results-index-db'
+    results_index_db_str = vars(arguments).get('results_index_db')
+    if results_index_db_str is None:
+        named_by = 'the environment.results_index_db configuration variable'
+        results_index_db_str = config.environment.get('results_index_db')
+    if results_index_db_str is None:
+        named_by = 'the NAV_RESULTS_INDEX_DB environment variable'
+        results_index_db_str = os.getenv('NAV_RESULTS_INDEX_DB')
+    if results_index_db_str is None:
         return None
-    url = str(results_db_str)
+    url = str(results_index_db_str)
     if not url.strip():
         raise ValueError(
             f'{named_by} is set to an empty value, which is neither a connection URL '
-            f'nor the way to name no index. Write {RESULTS_DB_NONE} to name no index, '
+            f'nor the way to name no index. Write {RESULTS_INDEX_DB_NONE} to name no index, '
             f'or a connection URL to name one.'
         )
-    if url.strip() == RESULTS_DB_NONE:
+    if url.strip() == RESULTS_INDEX_DB_NONE:
         return None
     return url
 

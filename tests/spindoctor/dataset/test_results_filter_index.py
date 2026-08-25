@@ -42,7 +42,7 @@ from tests.spindoctor.dataset.conftest import (
     selection_of,
 )
 
-from spindoctor.cli.stats.ingest import UnwritableRowError, store
+from spindoctor.cli.results_index import UnwritableRowError, store
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.dataset.results_filter import SPICE_STATUS_ERROR, ResultsFilter, SelectionError
 

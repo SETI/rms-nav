@@ -3,7 +3,7 @@
 The answers a results index gives differently from the results tree are stated
 in four places: the module docstring of
 :mod:`spindoctor.dataset.results_filter`, the navigation guide's account of
-``--results-db``, and the plan twice, in its Phase 5 entry and in acceptance
+``--results-index-db``, and the plan twice, in its Phase 5 entry and in acceptance
 criterion 1.  The guide is one of them because an operator reading it is the
 person a silently short selection is served to, and the list has twice been
 lost from there while every other copy of it stayed intact.
@@ -63,7 +63,8 @@ why this file's guard is described as binding the lists together rather than as
 validating any of them.
 """
 
-PLAN = FCPath(Path(__file__).resolve().parents[3]) / 'plans' / 'RESULTS_DB_PLAN.md'
+PLANS = FCPath(Path(__file__).resolve().parents[3]) / 'plans'
+PLAN = PLANS / 'RESULTS_DB_PLAN.md'
 """The plan, which states the enumeration twice: in Phase 5 and in criterion 1."""
 
 NAVIGATION_GUIDE = (
@@ -81,20 +82,29 @@ the ingest refused, and nothing in the run says so.
 
 
 def _plan_lines() -> list[str]:
-    """Return the plan's lines, skipping the test when the plan is not there.
+    """Return the plan's lines, skipping the test only where no plan is packaged.
 
     The plan is a repository document rather than a packaged one, so a checkout
-    always has it and an installed tree never does.
+    always has it and an installed tree never does.  What is skipped on is
+    therefore the whole ``plans`` directory rather than the one file: a checkout
+    that holds the directory and not this file is naming a plan that has moved,
+    which is a stale path here and not a tree the check does not apply to.
+    Skipping on the file alone makes a renamed plan indistinguishable from an
+    installed tree, and this check compares four lists that are meant to move
+    together -- so the rename it would go quiet for is exactly the event it
+    exists to catch.
 
     Returns:
         The lines of the plan file.
+
+    Raises:
+        FileNotFoundError: If the plans directory is there and this plan is not.
     """
-    try:
-        with PLAN.open('r', encoding='utf-8') as plan:
-            text: str = plan.read()
-        return text.splitlines()
-    except FileNotFoundError:
-        pytest.skip(f'{PLAN.as_posix()} is not in this tree')
+    if not PLANS.is_dir():
+        pytest.skip(f'{PLANS.as_posix()} is not in this tree')
+    with PLAN.open('r', encoding='utf-8') as plan:
+        text: str = plan.read()
+    return text.splitlines()
 
 
 def _normalized(text: str) -> str:
@@ -195,7 +205,7 @@ def _navigation_guide_members() -> list[str]:
     """Return the enumeration as the navigation guide states it.
 
     The guide's members are the bold-led paragraphs of its account of
-    ``--results-db``, which runs from the sentence introducing that option's
+    ``--results-index-db``, which runs from the sentence introducing that option's
     answers to the end of the selection section.
 
     Returns:
@@ -210,7 +220,7 @@ def _navigation_guide_members() -> list[str]:
     return _lead_paragraphs(
         lines,
         re.compile(r'^\*\*'),
-        opens='Given ``--results-db``',
+        opens='Given ``--results-index-db``',
         closes='Miscellaneous',
     )
 

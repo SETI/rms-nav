@@ -844,13 +844,13 @@ def test_an_unopenable_url_fails_rather_than_falling_back(tmp_path: Path) -> Non
     missing = tmp_path / 'nowhere' / 'index.sqlite3'
     with pytest.raises(ValueError) as excinfo:
         build_pointing_source(FCPath(tmp_path), results_db_url=f'sqlite:///{missing.as_posix()}')
-    assert 'sd_stats_ingest' in str(excinfo.value)
+    assert 'sd_results_index' in str(excinfo.value)
 
 
 def test_an_unopenable_url_leaves_no_database_behind(tmp_path: Path) -> None:
     """And it does not create the index it was told to read."""
     missing = tmp_path / 'index.sqlite3'
-    with pytest.raises(ValueError, match='sd_stats_ingest') as excinfo:
+    with pytest.raises(ValueError, match='sd_results_index') as excinfo:
         build_pointing_source(FCPath(tmp_path), results_db_url=f'sqlite:///{missing.as_posix()}')
     assert 'index.sqlite3' in str(excinfo.value)
     assert not missing.exists()

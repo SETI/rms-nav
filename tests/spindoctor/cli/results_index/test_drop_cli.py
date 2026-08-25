@@ -1,4 +1,4 @@
-"""Tests for ``sd_stats_ingest --drop-index``.
+"""Tests for ``sd_results_index --drop-index``.
 
 The destructive command, so what is asked of it is mostly what it does *not* do:
 it does not drop without an answer, it does not treat a closed standard input as
@@ -18,6 +18,10 @@ from typing import Any
 import pdslogger
 import pytest
 import sqlalchemy
+from tests.spindoctor.cli.results_index.conftest import (
+    rows_of,
+)
+from tests.spindoctor.cli.results_index.ingest_driver_helpers import process, run_driver
 from tests.spindoctor.conftest import (
     index_url,
     ingest_tree,
@@ -25,16 +29,11 @@ from tests.spindoctor.conftest import (
     write_metadata,
 )
 
-from spindoctor.cli.stats.drop import _because
+from spindoctor.cli.results_index.drop import _because
 from spindoctor.cli.stats.report import main_report
 from spindoctor.dataset.results_filter import ResultsFilter
 from spindoctor.results_index import IMAGES, SCHEMA_VERSION, index_table_names
 from spindoctor.results_index import engine as engine_module
-
-from .conftest import (
-    rows_of,
-)
-from .ingest_driver_helpers import process, run_driver
 
 STUB = 'VOL/N1454725799_1_CALIB'
 """The stub of the document the trees below hold."""
@@ -139,7 +138,7 @@ def _drop(
     Returns:
         The exit status, and one entry per line written to the main log.
     """
-    return run_driver(['--results-db', url, '--drop-index', *extra], monkeypatch, tmp_path)
+    return run_driver(['--results-index-db', url, '--drop-index', *extra], monkeypatch, tmp_path)
 
 
 def _tables(url: str) -> list[str]:
@@ -389,7 +388,7 @@ def test_an_unfinished_ingest_run_is_reported_before_the_question(
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             root.as_posix(),
@@ -423,7 +422,7 @@ def test_an_unfinished_ingest_run_is_named_in_the_question_itself(
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             root.as_posix(),
@@ -590,7 +589,7 @@ def test_yes_without_a_drop_is_refused(
         monkeypatch: Fixture the driver is run through.
     """
     url = _tree_with_an_index(tmp_path, quiet_logger)
-    status, _written = run_driver(['--results-db', url, '--yes'], monkeypatch, tmp_path)
+    status, _written = run_driver(['--results-index-db', url, '--yes'], monkeypatch, tmp_path)
     assert status == 1
 
 
@@ -605,7 +604,7 @@ def test_the_refusal_of_yes_alone_says_what_to_add(
         monkeypatch: Fixture the driver is run through.
     """
     url = _tree_with_an_index(tmp_path, quiet_logger)
-    _status, written = run_driver(['--results-db', url, '--yes'], monkeypatch, tmp_path)
+    _status, written = run_driver(['--results-index-db', url, '--yes'], monkeypatch, tmp_path)
     assert any('--drop-index' in line for line in written)
 
 
@@ -821,7 +820,7 @@ def test_neither_a_dropped_index_nor_an_absent_one_answers_a_selection(
         monkeypatch: Fixture the driver is run through.
     """
     for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch):
-        with pytest.raises(ValueError, match='sd_stats_ingest'):
+        with pytest.raises(ValueError, match='sd_results_index'):
             _selecting_against(url, tmp_path, quiet_logger)
 
 
@@ -839,7 +838,7 @@ def test_both_send_the_reader_to_the_ingest(
     for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch):
         with pytest.raises(ValueError) as excinfo:
             _selecting_against(url, tmp_path, quiet_logger)
-        said.append('sd_stats_ingest' in str(excinfo.value))
+        said.append('sd_results_index' in str(excinfo.value))
     assert said == [True, True]
 
 
@@ -853,9 +852,9 @@ def test_the_report_refuses_both(
         quiet_logger: Logger the ingest reports through.
         monkeypatch: Fixture the driver is run through.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     statuses = [
-        main_report(['--results-db', url, '--output-dir', str(tmp_path / 'report')])
+        main_report(['--results-index-db', url, '--output-dir', str(tmp_path / 'report')])
         for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch)
     ]
     assert statuses == [1, 1]
@@ -1194,7 +1193,7 @@ def _interrupting_the_step(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     def interrupted(*args: Any, **kwargs: Any) -> Any:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(f'spindoctor.cli.stats.drop.{name}', interrupted)
+    monkeypatch.setattr(f'spindoctor.cli.results_index.drop.{name}', interrupted)
 
 
 @pytest.mark.parametrize(
@@ -1449,7 +1448,7 @@ def test_neither_state_lets_a_cloud_task_worker_ingest_a_share(
         quiet_logger: Logger the ingest reports through.
         monkeypatch: Fixture the driver is run through.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     outcomes = []
     for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch):
         _retry, result = process(
@@ -1474,7 +1473,7 @@ def test_neither_state_lets_a_fan_out_be_completed(
     statuses = [
         run_driver(
             [
-                '--results-db',
+                '--results-index-db',
                 url,
                 '--nav-results-root',
                 str(tmp_path / 'results'),
@@ -1502,7 +1501,9 @@ def test_both_states_are_rebuilt_by_the_ingest_that_creates(
     root = tmp_path / 'results'
     statuses = [
         run_driver(
-            ['--results-db', url, '--nav-results-root', root.as_posix()], monkeypatch, tmp_path
+            ['--results-index-db', url, '--nav-results-root', root.as_posix()],
+            monkeypatch,
+            tmp_path,
         )[0]
         for url in _dropped_and_never_built(tmp_path, quiet_logger, monkeypatch)
     ]

@@ -160,7 +160,7 @@ _READING = _Access(
     writing=False,
     must_exist=True,
     gated=True,
-    absent_remedy='Run sd_stats_ingest to build one.',
+    absent_remedy='Run sd_results_index to build one.',
 )
 """Every consumer: the database must already be an index of this version."""
 
@@ -450,7 +450,7 @@ def _sqlite_probe_failure(
     if error_name.startswith(_SQLITE_NOT_A_DATABASE):
         return _IndexOpenError(
             f'{url}: this file is not a SQLite database ({exc.orig}). Check the path: an '
-            f'index is built by sd_stats_ingest, and this file holds something else.'
+            f'index is built by sd_results_index, and this file holds something else.'
         )
     if error_name.startswith(_SQLITE_CANNOT_OPEN):
         return _IndexOpenError(_cannot_open_message(exc, url, path))
@@ -712,13 +712,13 @@ def _verify_schema_version(stamped: int | None, url: str) -> None:
     if stamped is None:
         raise _IndexOpenError(
             f'{url}: this is not a results index (it has no schema_meta row). '
-            f'Run sd_stats_ingest first to build one.'
+            f'Run sd_results_index first to build one.'
         )
     if stamped != SCHEMA_VERSION:
         raise _IndexOpenError(
             f'{url}: results index schema version {stamped} is not the '
             f'version {SCHEMA_VERSION} this code reads. There are no migrations: empty '
-            f'the database with sd_stats_ingest --drop-index and re-run sd_stats_ingest.'
+            f'the database with sd_results_index --drop-index and re-run sd_results_index.'
         )
 
 
@@ -871,7 +871,7 @@ def open_index(url: str, *, create: bool = False) -> Engine:
     the gate refused can be dropped.
 
     With ``create`` false -- every consumer -- a database that does not exist, or
-    that carries no ``schema_meta`` row, is an error naming ``sd_stats_ingest``.
+    that carries no ``schema_meta`` row, is an error naming ``sd_results_index``.
     A consumer pointed at a SQLite path that does not exist fails; it does not
     leave an empty database behind.  With ``create`` true -- the ingest programs
     -- missing tables are created and the version row is written, and a database
@@ -1015,6 +1015,6 @@ def reporting_a_failed_read(url: str) -> Iterator[None]:
         raise ValueError(
             f'{masked_url(url)}: the results index could not be read '
             f'({type(exc).__name__}: {detail}). Check that this URL names an index '
-            f'sd_stats_ingest wrote and that the account it is opened with may read '
+            f'sd_results_index wrote and that the account it is opened with may read '
             f'every table of it.'
         ) from exc

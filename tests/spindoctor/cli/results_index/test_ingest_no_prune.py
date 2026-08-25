@@ -26,7 +26,7 @@ from typing import Any
 import pdslogger
 import pytest
 import sqlalchemy
-from tests.spindoctor.cli.stats.ingest_driver_helpers import (
+from tests.spindoctor.cli.results_index.ingest_driver_helpers import (
     fanned_out,
     process,
     run_driver,
@@ -34,10 +34,10 @@ from tests.spindoctor.cli.stats.ingest_driver_helpers import (
 )
 from tests.spindoctor.conftest import index_url, metadata_document, write_metadata
 
-from spindoctor.cli.stats.ingest import IngestCounts, fan_out_ingest_tasks, ingest_metadata_files
-from spindoctor.cli.stats.ingest import driver as driver_module
-from spindoctor.cli.stats.ingest import tasks as tasks_module
-from spindoctor.cli.stats.ingest.store import _RecordedFile
+from spindoctor.cli.results_index import IngestCounts, fan_out_ingest_tasks, ingest_metadata_files
+from spindoctor.cli.results_index import driver as driver_module
+from spindoctor.cli.results_index import tasks as tasks_module
+from spindoctor.cli.results_index.store import _RecordedFile
 from spindoctor.results_index import FAILED_FILES, IMAGES, open_index
 
 KEPT = 'VOL/N1454725799_1_CALIB'
@@ -385,7 +385,7 @@ def test_a_fan_out_that_does_not_prune_still_cuts_every_document_into_a_share(
 def _run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, url: str, root: Path, *extra: str
 ) -> tuple[int | None, list[str]]:
-    """Run ``sd_stats_ingest`` over one root.
+    """Run ``sd_results_index`` over one root.
 
     Parameters:
         tmp_path: Directory the logs are written under.
@@ -398,7 +398,7 @@ def _run(
         The exit status, and one entry per line written to the main log.
     """
     return run_driver(
-        ['--results-db', url, '--nav-results-root', root.as_posix(), *extra],
+        ['--results-index-db', url, '--nav-results-root', root.as_posix(), *extra],
         monkeypatch,
         tmp_path,
     )
@@ -590,7 +590,7 @@ def test_a_drop_that_would_otherwise_run_refuses_the_flag(
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
     status, _written = run_driver(
-        ['--results-db', url, '--drop-index', '--yes', '--no-prune'], monkeypatch, tmp_path
+        ['--results-index-db', url, '--drop-index', '--yes', '--no-prune'], monkeypatch, tmp_path
     )
     assert status == 1
 
@@ -603,7 +603,7 @@ def test_the_same_drop_without_the_flag_runs(
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
     status, _written = run_driver(
-        ['--results-db', url, '--drop-index', '--yes'], monkeypatch, tmp_path
+        ['--results-index-db', url, '--drop-index', '--yes'], monkeypatch, tmp_path
     )
     assert status == 0
 
@@ -616,7 +616,7 @@ def test_a_drop_that_refuses_the_flag_names_it(
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
     _status, written = run_driver(
-        ['--results-db', url, '--drop-index', '--yes', '--no-prune'], monkeypatch, tmp_path
+        ['--results-index-db', url, '--drop-index', '--yes', '--no-prune'], monkeypatch, tmp_path
     )
     refusals = [line for line in written if 'nothing to do with' in line]
     assert '--no-prune' in refusals[0]

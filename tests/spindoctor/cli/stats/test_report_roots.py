@@ -170,8 +170,8 @@ def _report_over(url: str, out: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     Returns:
         The Markdown the report wrote.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
-    main_report(['--results-db', url, '--output-dir', str(out)])
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
+    main_report(['--results-index-db', url, '--output-dir', str(out)])
     return (out / 'report.md').read_text(encoding='utf-8')
 
 

@@ -21,7 +21,7 @@ import numpy as np
 import pdslogger
 import pytest
 
-from spindoctor.cli.stats.ingest import IngestCounts, ingest_metadata_files
+from spindoctor.cli.results_index import IngestCounts, ingest_metadata_files
 from spindoctor.results_index import open_index
 from spindoctor.support.cmatrix import AttitudeBaseline, PointingSolution
 

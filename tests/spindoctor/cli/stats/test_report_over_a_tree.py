@@ -976,7 +976,7 @@ def test_two_trees_are_reported_on_together(
     )
     url = index_url(tmp_path / 'control.sqlite3')
     ingest_tree(url, [RESULTS_TREE, second], logger=quiet_logger)
-    main_report(['--results-db', url, '--output-dir', str(from_index)])
+    main_report(['--results-index-db', url, '--output-dir', str(from_index)])
     assert exit_code == 0
     assert (from_tree / 'report.md').read_bytes() == (from_index / 'report.md').read_bytes()
 
@@ -1058,7 +1058,7 @@ def test_a_report_over_every_root_leaves_out_a_half_ingested_one(
     """
     url, _finished, _unfinished = _index_over_two_roots_one_half_ingested(tmp_path, quiet_logger)
     out = tmp_path / 'report'
-    main_report(['--results-db', url, '--output-dir', str(out)])
+    main_report(['--results-index-db', url, '--output-dir', str(out)])
     assert 'N1294562000' not in (out / 'report.md').read_text(encoding='utf-8')
 
 
@@ -1068,7 +1068,7 @@ def test_the_completed_root_is_still_reported(
     """Otherwise the narrowing above is a report that covered nothing at all."""
     url, _finished, _unfinished = _index_over_two_roots_one_half_ingested(tmp_path, quiet_logger)
     out = tmp_path / 'report'
-    main_report(['--results-db', url, '--output-dir', str(out)])
+    main_report(['--results-index-db', url, '--output-dir', str(out)])
     assert 'N1294561202' in (out / 'report.md').read_text(encoding='utf-8')
 
 

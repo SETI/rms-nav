@@ -35,13 +35,13 @@ def test_main_report_writes_a_report(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The driver opens the index it was named and writes the report."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
     out = tmp_path / 'report'
-    exit_code = main_report(['--results-db', url, '--output-dir', str(out)])
+    exit_code = main_report(['--results-index-db', url, '--output-dir', str(out)])
     assert exit_code == 0
 
 
@@ -49,7 +49,7 @@ def test_main_report_accepts_the_drill_down_flags(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The range, suspect, and CSV flags parse and take effect."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
@@ -57,7 +57,7 @@ def test_main_report_accepts_the_drill_down_flags(
     out = tmp_path / 'report'
     main_report(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--output-dir',
             str(out),
@@ -79,14 +79,14 @@ def test_main_report_accepts_a_root(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The root is normalized the way ingest normalized it, so it matches."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
     out = tmp_path / 'report'
     exit_code = main_report(
-        ['--results-db', url, '--root', f'{root.as_posix()}/', '--output-dir', str(out)]
+        ['--results-index-db', url, '--root', f'{root.as_posix()}/', '--output-dir', str(out)]
     )
     assert exit_code == 0
 
@@ -95,7 +95,7 @@ def test_main_report_refuses_a_root_nobody_ingested(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Absence of rows under a root is not evidence that nothing was navigated."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
@@ -103,7 +103,7 @@ def test_main_report_refuses_a_root_nobody_ingested(
     with pytest.raises(SystemExit) as caught:
         main_report(
             [
-                '--results-db',
+                '--results-index-db',
                 url,
                 '--root',
                 str(tmp_path / 'never-ingested'),
@@ -121,7 +121,7 @@ def test_main_report_names_the_roots_it_does_hold(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The message has to be actionable, so it says what the index does cover."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
@@ -129,7 +129,7 @@ def test_main_report_names_the_roots_it_does_hold(
     with pytest.raises(SystemExit):
         main_report(
             [
-                '--results-db',
+                '--results-index-db',
                 url,
                 '--root',
                 str(tmp_path / 'never-ingested'),
@@ -144,7 +144,7 @@ def test_main_report_with_neither_an_index_nor_a_tree_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Naming no index reads a tree, and naming no tree either leaves nothing."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     exit_code = main_report(['--output-dir', str(tmp_path / 'report')])
     assert exit_code == 1
@@ -154,17 +154,17 @@ def test_main_report_with_neither_names_the_index_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A refusal that does not say what to type is a refusal nobody can act on."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     main_report(['--output-dir', str(tmp_path / 'report')])
-    assert '--results-db' in capsys.readouterr().err
+    assert '--results-index-db' in capsys.readouterr().err
 
 
 def test_main_report_with_neither_names_the_tree_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Both ways forward are named, since either would let the run proceed."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     main_report(['--output-dir', str(tmp_path / 'report')])
     assert '--nav-results-root' in capsys.readouterr().err
@@ -187,7 +187,7 @@ def _empty_variable_over_a_readable_tree(
     Returns:
         The exit code, and where the report would have been written.
     """
-    monkeypatch.setenv('NAV_RESULTS_DB', '')
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', '')
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     output_dir = tmp_path / 'report'
@@ -233,7 +233,7 @@ def test_main_report_names_the_variable_the_empty_value_came_from(
         capsys: Fixture the refusal is read back from.
     """
     _empty_variable_over_a_readable_tree(tmp_path, monkeypatch)
-    assert 'NAV_RESULTS_DB' in capsys.readouterr().err
+    assert 'NAV_RESULTS_INDEX_DB' in capsys.readouterr().err
 
 
 def test_main_report_says_it_through_its_own_output_rather_than_a_log(
@@ -270,10 +270,10 @@ def test_main_report_refuses_an_index_that_is_not_there(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A consumer never creates an index; it reports that there is none."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     missing = tmp_path / 'absent.sqlite3'
     exit_code = main_report(
-        ['--results-db', index_url(missing), '--output-dir', str(tmp_path / 'report')]
+        ['--results-index-db', index_url(missing), '--output-dir', str(tmp_path / 'report')]
     )
     assert exit_code == 1
 
@@ -282,9 +282,11 @@ def test_main_report_leaves_no_database_behind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An empty database would answer every question with "not navigated"."""
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     missing = tmp_path / 'absent.sqlite3'
-    main_report(['--results-db', index_url(missing), '--output-dir', str(tmp_path / 'report')])
+    main_report(
+        ['--results-index-db', index_url(missing), '--output-dir', str(tmp_path / 'report')]
+    )
     assert not missing.exists()
 
 
@@ -300,7 +302,7 @@ def test_a_read_failure_while_streaming_fails_the_run(
     not matter, only that it lands while the pass is reading, so a table dropped
     after the open stands in for a lost connection.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
@@ -311,7 +313,7 @@ def test_a_read_failure_while_streaming_fails_the_run(
             connection.execute(sqlalchemy.text(f'DROP TABLE {TECHNIQUES.name}'))
     finally:
         engine.dispose()
-    exit_code = main_report(['--results-db', url, '--output-dir', str(tmp_path / 'report')])
+    exit_code = main_report(['--results-index-db', url, '--output-dir', str(tmp_path / 'report')])
     assert exit_code == 1
 
 
@@ -326,7 +328,7 @@ def test_a_read_failure_while_streaming_says_the_index_could_not_be_read(
     Nothing else on the command line is at fault, so a line that did not name
     the index would leave an operator looking at their own flags.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
@@ -337,7 +339,7 @@ def test_a_read_failure_while_streaming_says_the_index_could_not_be_read(
             connection.execute(sqlalchemy.text(f'DROP TABLE {TECHNIQUES.name}'))
     finally:
         engine.dispose()
-    main_report(['--results-db', url, '--output-dir', str(tmp_path / 'report')])
+    main_report(['--results-index-db', url, '--output-dir', str(tmp_path / 'report')])
     assert 'Cannot read the results index' in capsys.readouterr().err
 
 
@@ -351,7 +353,7 @@ def test_an_image_bound_with_no_digits_is_a_usage_error(
     is open, it would arrive at the same place as an index that could not be
     read, and one of the two would take the other's exit code.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
@@ -359,7 +361,7 @@ def test_an_image_bound_with_no_digits_is_a_usage_error(
     with pytest.raises(SystemExit) as caught:
         main_report(
             [
-                '--results-db',
+                '--results-index-db',
                 url,
                 '--min-image',
                 'nodigits',
@@ -390,11 +392,11 @@ def test_main_report_honors_the_none_sentinel(
     write_metadata(
         root, 'VOL/N1595336177_1_CALIB', metadata_document(image_name='N1595336177_1_CALIB.IMG')
     )
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', url)
     out = tmp_path / 'report'
     main_report(
         [
-            '--results-db',
+            '--results-index-db',
             'none',
             '--nav-results-root',
             str(root),
@@ -413,7 +415,7 @@ def test_main_report_reads_the_environment_variable(
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
     ingest_tree(url, [root], logger=quiet_logger)
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', url)
     exit_code = main_report(['--output-dir', str(tmp_path / 'report')])
     assert exit_code == 0
 
@@ -432,7 +434,7 @@ def test_main_report_refuses_a_root_whose_newest_run_did_not_finish(
     tree a consumer would be answering from, so the newest run is the only one
     that decides.
     """
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     root = tmp_path / 'results'
     write_metadata(root, 'VOL/N1454725799_1_CALIB', metadata_document())
     url = index_url(tmp_path / 'index.sqlite3')
@@ -451,7 +453,7 @@ def test_main_report_refuses_a_root_whose_newest_run_did_not_finish(
     with pytest.raises(SystemExit) as caught:
         main_report(
             [
-                '--results-db',
+                '--results-index-db',
                 url,
                 '--root',
                 root.as_posix(),

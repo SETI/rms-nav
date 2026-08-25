@@ -23,7 +23,7 @@ from typing import Any, cast
 
 import sqlalchemy
 
-from spindoctor.cli.stats.ingest.counts import IngestCounts
+from spindoctor.cli.results_index.counts import IngestCounts
 from spindoctor.results_index import INGEST_RUNS, SCHEMA_VERSION
 
 

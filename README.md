@@ -50,7 +50,7 @@ bodies.
   latitude, angles, etc.)
 - **Run statistics**: Ingests navigation results into SQLite and generates
   reports on success rates, technique usage, offsets, and cross-technique
-  agreement (`sd_stats_ingest` / `sd_stats_report`)
+  agreement (`sd_results_index` / `sd_stats_report`)
 
 ## Installation
 

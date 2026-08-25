@@ -28,7 +28,7 @@ from spindoctor.config import (
     build_run_logging,
     get_backplane_results_root,
     get_nav_results_root,
-    get_results_db_url,
+    get_results_index_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_BACKPLANES
@@ -108,15 +108,15 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         environment variable and the backplane_results_root configuration variable""",
     )
     environment_group.add_argument(
-        '--results-db',
+        '--results-index-db',
         type=str,
         default=None,
         metavar='URL',
-        help="""Connection URL of the results index written by sd_stats_ingest (a
+        help="""Connection URL of the results index written by sd_results_index (a
         sqlite: URL naming a local path, or a postgresql+psycopg: URL naming a
-        server); overrides the environment.results_db configuration variable
-        and NAV_RESULTS_DB. Each image's navigation record is then read as one
-        row instead of one file. Pass --results-db none to read the files even where
+        server); overrides the environment.results_index_db configuration variable
+        and NAV_RESULTS_INDEX_DB. Each image's navigation record is then read as one
+        row instead of one file. Pass --results-index-db none to read the files even where
         an index is configured. Without an index the navigation results tree is read
         directly, which is the default.""",
     )
@@ -176,7 +176,7 @@ def main() -> None:
     backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
     backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
-    results_db_url = get_results_db_url(arguments, DEFAULT_CONFIG)
+    results_db_url = get_results_index_db_url(arguments, DEFAULT_CONFIG)
 
     MAIN_LOGGER.info('Starting backplanes generation')
     MAIN_LOGGER.info('Dataset: %s', DATASET_NAME)

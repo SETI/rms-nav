@@ -50,7 +50,7 @@ _WITHOUT_IMAGE_LOGGER = [
     ('sd_create_bundle', ['summary', 'coiss_saturn']),
     # Ingest processes documents rather than images, but a partial or failed
     # pass has to appear in a run log rather than only in an exit code.
-    ('sd_stats_ingest', []),
+    ('sd_results_index', []),
 ]
 
 _WITH_ANY_LOGGER = _WITH_IMAGE_LOGGER + _WITHOUT_IMAGE_LOGGER
@@ -80,7 +80,7 @@ _CLOUD_TASK_DRIVERS = [
     'sd_offset_cloud_tasks',
     'sd_backplanes_cloud_tasks',
     'sd_mosaic_cloud_tasks',
-    'sd_stats_ingest_cloud_tasks',
+    'sd_results_index_cloud_tasks',
 ]
 
 

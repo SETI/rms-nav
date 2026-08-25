@@ -19,6 +19,9 @@ from pathlib import Path
 
 import pdslogger
 import sqlalchemy
+from tests.spindoctor.cli.results_index.conftest import (
+    FIRST_STUB,
+)
 from tests.spindoctor.conftest import (
     index_url,
     ingest_tree,
@@ -28,10 +31,6 @@ from tests.spindoctor.conftest import (
 )
 
 from spindoctor.results_index import FAILED_FILES, IMAGES, normalize_root_url, open_index
-
-from .conftest import (
-    FIRST_STUB,
-)
 
 SECOND_STUB = 'VOL/N1454725800_1_CALIB'
 """A second stub, for the root that has to differ from the other in its count."""

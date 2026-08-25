@@ -13,7 +13,7 @@
 # tasks complete to produce the final mosaic.
 #
 # CLI accepts only ``--config-file``, ``--nav-results-root`` and
-# ``--results-db``. Every other parameter (output directory, format, mosaic
+# ``--results-index-db``. Every other parameter (output directory, format, mosaic
 # geometry, body/planet selection, etc.) is read from each task's
 # ``task_data['arguments']`` dict.
 ################################################################################
@@ -46,7 +46,7 @@ from spindoctor.config import (
     build_cloud_task_logging,
     build_image_log_handlers,
     get_nav_results_root,
-    get_results_db_url,
+    get_results_index_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_MOSAIC
@@ -97,7 +97,7 @@ def _resolve_pointing_source(cli_args: argparse.Namespace) -> PointingSource:
         None if nav_results_root_str is None else FileCache(None).new_path(nav_results_root_str)
     )
     return build_pointing_source(
-        nav_results_root, results_db_url=get_results_db_url(cli_args, DEFAULT_CONFIG)
+        nav_results_root, results_db_url=get_results_index_db_url(cli_args, DEFAULT_CONFIG)
     )
 
 
@@ -144,7 +144,7 @@ def process_task(
               :func:`spindoctor.cli.reproj.reproject.reproject_one_ring`.
         worker_data: The data for the worker (parsed CLI namespace in ``args``,
             which holds only ``config_file``, ``nav_results_root`` and
-            ``results_db``).  Those three are what the task builds its
+            ``results_index_db``).  Those three are what the task builds its
             :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` from;
             with no navigation results root among them, no pointing is looked
             up at all.
@@ -424,7 +424,7 @@ def process_task(
 async def async_main() -> None:
     """Async CLI entry for the cloud_tasks reprojection worker.
 
-    Parses only ``--config-file``, ``--nav-results-root`` and ``--results-db``
+    Parses only ``--config-file``, ``--nav-results-root`` and ``--results-index-db``
     from ``sys.argv``; all other parameters (mode, output directory, mosaic
     geometry, etc.) are read per-task from ``task_data``. A single worker process
     can therefore handle a queue that mixes ring and body tasks. Default and
@@ -456,16 +456,17 @@ async def async_main() -> None:
         ),
     )
     env.add_argument(
-        '--results-db',
+        '--results-index-db',
         type=str,
         default=None,
         metavar='URL',
         help=(
-            'Connection URL of the results index written by sd_stats_ingest; overrides '
-            'the environment.results_db configuration variable and NAV_RESULTS_DB. Each '
-            "image's navigation record is then read as one row instead of one file, and "
-            '--nav-results-root names the ingested root the rows are read under. Pass '
-            '--results-db none to read the files even where an index is configured.'
+            'Connection URL of the results index written by sd_results_index; overrides '
+            'the environment.results_index_db configuration variable and '
+            "NAV_RESULTS_INDEX_DB. Each image's navigation record is then read as one row "
+            'instead of one file, and --nav-results-root names the ingested root the rows are '
+            'read under. Pass --results-index-db none to read the files even where an index '
+            'is configured.'
         ),
     )
 

@@ -162,7 +162,7 @@ and starts with a design document, not code.
   `ring_only_flat`.
 - **Standing practice** — after any calibration- or technique-affecting
   merge: `util/calibration/library_crosscheck.py` over the full library,
-  every per-image delta accounted for; `sd_stats_ingest` /
+  every per-image delta accounted for; `sd_results_index` /
   `sd_stats_report` over campaign outputs as the accuracy checkpoint
   (both from the statistics system).
 

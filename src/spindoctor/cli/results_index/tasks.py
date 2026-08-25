@@ -80,22 +80,22 @@ import sqlalchemy
 from filecache import FCPath
 from pdslogger import PdsLogger
 
-from spindoctor.cli.stats.ingest.chunks import _batched, _ingest_chunk
-from spindoctor.cli.stats.ingest.counts import IngestCounts
-from spindoctor.cli.stats.ingest.driver import (
+from spindoctor.cli.results_index.chunks import _batched, _ingest_chunk
+from spindoctor.cli.results_index.counts import IngestCounts
+from spindoctor.cli.results_index.driver import (
     INGEST_COMMIT_CHUNK_SIZE,
     _files_to_read,
     _listing_of_root,
     _prune_missing,
 )
-from spindoctor.cli.stats.ingest.runs import (
+from spindoctor.cli.results_index.runs import (
     _finish_run,
     _record_fan_out,
     _record_shares,
     _start_run,
     _unfinished_run,
 )
-from spindoctor.cli.stats.ingest.store import _recorded_files
+from spindoctor.cli.results_index.store import _recorded_files
 from spindoctor.nav_records import ListedRecord, distinct_roots, document_path, normalize_root_url
 
 __all__ = [

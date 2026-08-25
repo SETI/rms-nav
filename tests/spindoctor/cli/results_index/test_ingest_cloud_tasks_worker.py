@@ -1,6 +1,6 @@
 """Tests for the worker that ingests one share of a results root.
 
-``sd_stats_ingest_cloud_tasks`` is the middle of the three steps: it is handed
+``sd_results_index_cloud_tasks`` is the middle of the three steps: it is handed
 the files of a share and no root to walk, and what is pinned here is the split
 of authority that makes that safe.  It creates no schema, because a worker that
 did would answer a mistyped URL by building an empty index beside the real one
@@ -16,15 +16,7 @@ The command lines that divide a root up and put it back together are in
 from pathlib import Path
 
 import pytest
-from tests.spindoctor.conftest import (
-    index_url,
-    metadata_document,
-    write_metadata,
-)
-
-from spindoctor.cli import sd_stats_ingest, sd_stats_ingest_cloud_tasks
-
-from .ingest_driver_helpers import (
+from tests.spindoctor.cli.results_index.ingest_driver_helpers import (
     STUB,
     fanned_out,
     process,
@@ -32,6 +24,13 @@ from .ingest_driver_helpers import (
     tasks_of,
     worker_data,
 )
+from tests.spindoctor.conftest import (
+    index_url,
+    metadata_document,
+    write_metadata,
+)
+
+from spindoctor.cli import sd_results_index, sd_results_index_cloud_tasks
 
 # ---------------------------------------------------------------------------
 # Who creates the schema
@@ -45,7 +44,7 @@ def test_the_fan_out_creates_the_index(tmp_path: Path, monkeypatch: pytest.Monke
     database = tmp_path / 'index.sqlite3'
     run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(database),
             '--nav-results-root',
             root.as_posix(),
@@ -118,24 +117,24 @@ def test_a_worker_that_cannot_open_the_index_names_no_password() -> None:
     quotes the parser's own complaint about it puts a run of the password in
     that file.
     """
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db=LEAKING_INDEX_URL)
+    _retry, result = sd_results_index_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_index_db=LEAKING_INDEX_URL)
     )
     assert 'etlongsecretpassword' not in result['status_exception']
 
 
 def test_a_worker_that_cannot_open_the_index_still_says_why() -> None:
     """And keeps the diagnosis, which is the whole of what the result is for."""
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db=LEAKING_INDEX_URL)
+    _retry, result = sd_results_index_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_index_db=LEAKING_INDEX_URL)
     )
     assert result['status_error'] == 'index_unopenable'
 
 
 def test_a_worker_with_no_index_url_reports_it() -> None:
     """A worker has no run log, so the missing setting comes back in the result."""
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db=None)
+    _retry, result = sd_results_index_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_index_db=None)
     )
     assert result['status_error'] == 'no_results_db'
 
@@ -146,18 +145,18 @@ def test_a_worker_given_an_empty_index_url_reports_it_as_unusable() -> None:
     Told apart from the missing setting because the fix differs: one level has
     to be unset, and the message says which.
     """
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db='')
+    _retry, result = sd_results_index_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_index_db='')
     )
     assert result['status_error'] == 'unusable_results_db'
 
 
 def test_such_a_worker_says_which_level_named_the_empty_value() -> None:
     """The share's result is the only account of it, so it carries the level."""
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db='')
+    _retry, result = sd_results_index_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_index_db='')
     )
-    assert '--results-db' in result['status_exception']
+    assert '--results-index-db' in result['status_exception']
 
 
 def test_a_worker_told_to_use_no_index_reports_it(
@@ -168,9 +167,9 @@ def test_a_worker_told_to_use_no_index_reports_it(
     Every other program answers it by reading files; ingest into no index is not
     a mode that exists.
     """
-    monkeypatch.setenv('NAV_RESULTS_DB', index_url(tmp_path / 'index.sqlite3'))
-    _retry, result = sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', {}, worker_data(results_db='none')
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', index_url(tmp_path / 'index.sqlite3'))
+    _retry, result = sd_results_index_cloud_tasks.process_task(
+        'ingest-1-000000', {}, worker_data(results_index_db='none')
     )
     assert result['status_error'] == 'no_results_db'
 
@@ -222,4 +221,4 @@ def test_a_worker_says_what_was_wrong_with_the_task(
 
 def test_the_worker_shares_its_interactive_siblings_identity() -> None:
     """One ``logging.programs`` block governs both forms of a program."""
-    assert sd_stats_ingest_cloud_tasks.PROGRAM_NAME == sd_stats_ingest.PROGRAM_NAME
+    assert sd_results_index_cloud_tasks.PROGRAM_NAME == sd_results_index.PROGRAM_NAME

@@ -492,8 +492,8 @@ Pointing application
 
 When ``--nav-results-root`` is provided, ``sd_mosaic`` looks up the navigation
 record for each image (written by ``sd_offset``) and applies the pointing it
-records, preferring the exact form over its approximation. The record comes
-from that image's ``_metadata.json`` file, or, when ``--results-db`` names a
+records, preferring the exact form over its approximation. The record comes from
+that image's ``_metadata.json`` file, or, when ``--results-index-db`` names a
 results index, from one row of that index; both supply the same recorded values
 and both are classified by the same ladder, so for every record ``sd_offset``
 wrote the products are the same. (A record hand-built into a results tree can
@@ -553,11 +553,11 @@ What is applied is what the document said when the selection was made. A
 document rewritten or deleted while the run is going is therefore not noticed
 for an image already selected. And the reasons that describe failing to read a
 document --- ``no_metadata``, ``unreadable_metadata``, ``invalid_json``,
-``metadata_not_an_object`` and ``unusable_metadata_path`` --- are not counted for
-such an image, since a record is carried only for a document that was read
+``metadata_not_an_object`` and ``unusable_metadata_path`` --- are not counted
+for such an image, since a record is carried only for a document that was read
 whole; the image is counted under the pointing its record supplies, exactly as
-if the document had been read here. With ``--results-db`` nothing is carried and
-each image's row is read as before.
+if the document had been read here. With ``--results-index-db`` nothing is
+carried and each image's row is read as before.
 
 One consequence worth knowing: for a result the kernel generator deliberately
 omitted from the corrected kernels — the yielding WAC of a BOTSIM pair, or
@@ -571,11 +571,11 @@ implies. SpinDoctor's own products are authoritative for those images.
 Where a document and an index row are classified differently
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``sd_stats_ingest`` stores the fields the ladder reads, and it reads them
+``sd_results_index`` stores the fields the ladder reads, and it reads them
 through the same code the ladder does, so a value a run would apply is a value
 the index holds and a value it would refuse is a value the index holds nothing
 for. For every document the ingest could read, the products a run builds are
-therefore the same whether or not ``--results-db`` was given.
+therefore the same whether or not ``--results-index-db`` was given.
 
 A document the ingest could *not* read is the exception, and it is a refusal
 rather than a difference. The ingest records such a file as one it holds no
@@ -584,9 +584,9 @@ whose blocks are of some other shape, one naming a technique twice, or a file
 that is not JSON at all. Read directly, that same document may carry a status
 and a pointing, so reporting it as an image nothing navigated would build one
 product from the tree and another from the index in silence. Instead the image
-fails, naming itself, the index and the reason the ingest recorded, and the
-rest of the pass continues. The remedy is to fix the document and ingest the
-root again, or to run the pass without ``--results-db``. One kind of refusal is
+fails, naming itself, the index and the reason the ingest recorded, and the rest
+of the pass continues. The remedy is to fix the document and ingest the root
+again, or to run the pass without ``--results-index-db``. One kind of refusal is
 deliberately recorded nowhere -- a file the ingest could not retrieve, which is
 worth retrying on the next pass -- and an image whose document failed that way
 reads as one nothing navigated.
@@ -663,7 +663,7 @@ scoped and shared across every task the worker handles:
 
 * ``--config-file PATH`` (may be repeated)
 * ``--nav-results-root PATH``
-* ``--results-db URL``
+* ``--results-index-db URL``
 
 All other parameters that the local ``sd_mosaic_rings`` /
 ``sd_mosaic_body`` accept (``--output-dir``, ``--prefix``, ``--format``,
@@ -675,7 +675,7 @@ passed per-task inside the task JSON. Invoke the worker with:
 .. code-block:: bash
 
    sd_mosaic_cloud_tasks [--config-file PATH] [--nav-results-root PATH] \
-       [--results-db URL]
+       [--results-index-db URL]
 
 To build a ready-to-load task-queue JSON file from the local driver without
 running any reprojection, use ``--output-cloud-tasks-file``:
@@ -790,17 +790,17 @@ Common options reference
    * - ``--nav-results-root DIR``
      - ``None``
      - Root written by ``sd_offset``; enables pointing application.
-   * - ``--results-db URL``
+   * - ``--results-index-db URL``
      - ``None``
-     - Connection URL of a results index built by ``sd_stats_ingest``. Each
+     - Connection URL of a results index built by ``sd_results_index``. Each
        image's navigation record is then read as one database row instead of
        one file, which on a cloud results root replaces a round trip per image
        with a query. The index must already hold a completed ingest of the
        root named by ``--nav-results-root``, and its rows are a snapshot of
        the tree as of that ingest. Omitting the option names no index, and the
-       results tree is read directly. ``--results-db none`` names no index
+       results tree is read directly. ``--results-index-db none`` names no index
        either, which is how a machine that sets the option through
-       configuration or through ``NAV_RESULTS_DB`` reads the files.
+       configuration or through ``NAV_RESULTS_INDEX_DB`` reads the files.
    * - ``--dry-run``
      - ``False``
      - Print what would be done without writing files.

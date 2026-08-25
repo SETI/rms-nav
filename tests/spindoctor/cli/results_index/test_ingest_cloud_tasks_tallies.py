@@ -18,20 +18,19 @@ from typing import Any
 
 import pdslogger
 import pytest
-from tests.spindoctor.conftest import (
-    index_url,
-)
-
-from spindoctor.cli.stats.ingest.tasks import _LARGEST_RUN_ROW_COUNT, _share_tally
-from spindoctor.results_index import normalize_root_url
-
-from .conftest import (
+from tests.spindoctor.cli.results_index.conftest import (
     build_tree,
     complete,
     fan_out,
     reported,
     run_rows,
 )
+from tests.spindoctor.conftest import (
+    index_url,
+)
+
+from spindoctor.cli.results_index.tasks import _LARGEST_RUN_ROW_COUNT, _share_tally
+from spindoctor.results_index import normalize_root_url
 
 # ---------------------------------------------------------------------------
 # The shape of a tally

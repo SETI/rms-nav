@@ -35,9 +35,9 @@ from tests.spindoctor.conftest import (
     write_metadata,
 )
 
-from spindoctor.cli.stats.ingest import UnwritableRowError
-from spindoctor.cli.stats.ingest import driver as driver_module
-from spindoctor.cli.stats.ingest import store as store_module
+from spindoctor.cli.results_index import UnwritableRowError
+from spindoctor.cli.results_index import driver as driver_module
+from spindoctor.cli.results_index import store as store_module
 from spindoctor.nav_records import (
     METADATA_SUFFIX,
     NOT_VALID_JSON,

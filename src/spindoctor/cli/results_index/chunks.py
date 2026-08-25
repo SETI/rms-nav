@@ -57,8 +57,8 @@ import sqlalchemy
 from filecache import FCPath
 from pdslogger import PdsLogger
 
-from spindoctor.cli.stats.ingest.counts import IngestCounts
-from spindoctor.cli.stats.ingest.store import _write_chunk
+from spindoctor.cli.results_index.counts import IngestCounts
+from spindoctor.cli.results_index.store import _write_chunk
 from spindoctor.nav_records import (
     COULD_NOT_RETRIEVE,
     METADATA_SUFFIX,

@@ -10,7 +10,7 @@ from filecache import FCPath
 from tests.spindoctor.conftest import metadata_document
 from tests.spindoctor.dataset.conftest import coiss_filespecs, install_fake_index
 
-from spindoctor.cli.stats.ingest import ingest_metadata_files
+from spindoctor.cli.results_index import ingest_metadata_files
 from spindoctor.dataset.dataset_pds3 import DataSetPDS3
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.results_filter import ResultsFilter, SelectionError
@@ -240,7 +240,7 @@ def _indexed_tree_and_late_document(tmp_path: Path) -> tuple[Path, str]:
 
 
 def _program_arguments(
-    ds: DataSetPDS3CassiniISS, *, declares_results_db: bool, argv: list[str] | None = None
+    ds: DataSetPDS3CassiniISS, *, declares_results_index_db: bool, argv: list[str] | None = None
 ) -> argparse.Namespace:
     """Parse the command line of a program with or without the index option.
 
@@ -250,7 +250,7 @@ def _program_arguments(
 
     Parameters:
         ds: The dataset whose selection arguments the program offers.
-        declares_results_db: Whether the program declares ``--results-db``.
+        declares_results_index_db: Whether the program declares ``--results-index-db``.
         argv: The command line to parse, defaulting to an empty one.
 
     Returns:
@@ -258,8 +258,8 @@ def _program_arguments(
     """
     parser = argparse.ArgumentParser()
     ds.add_selection_arguments(parser)
-    if declares_results_db:
-        parser.add_argument('--results-db', default=None)
+    if declares_results_index_db:
+        parser.add_argument('--results-index-db', default=None)
     return parser.parse_args(argv or [])
 
 
@@ -286,19 +286,19 @@ def test_a_results_index_answers_the_offset_file_filter(
 def test_the_results_index_url_is_resolved_from_the_environment(
     ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # A program that declares --results-db and is given no value gets the one
+    # A program that declares --results-index-db and is given no value gets the one
     # the environment names, exactly as it gets the results root from
     # NAV_RESULTS_ROOT.
     _install_two_camera_index(ds, monkeypatch)
     results_root, url = _indexed_tree_and_late_document(tmp_path)
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', url)
 
     groups = list(
         ds.yield_image_files_index(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=_program_arguments(ds, declares_results_db=True),
+            arguments=_program_arguments(ds, declares_results_index_db=True),
         )
     )
 
@@ -316,14 +316,14 @@ def test_a_program_that_declares_no_index_flag_reads_the_results_tree(
     # is under test is the declaration and nothing else.
     _install_two_camera_index(ds, monkeypatch)
     results_root, url = _indexed_tree_and_late_document(tmp_path)
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', url)
 
     groups = list(
         ds.yield_image_files_index(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=_program_arguments(ds, declares_results_db=False),
+            arguments=_program_arguments(ds, declares_results_index_db=False),
         )
     )
 
@@ -340,14 +340,14 @@ def test_an_exported_index_does_not_answer_the_resume_idiom_for_such_a_program(
     # again, and only the three frames nothing was ever written for are left.
     _install_two_camera_index(ds, monkeypatch)
     results_root, url = _indexed_tree_and_late_document(tmp_path)
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', url)
 
     groups = list(
         ds.yield_image_files_index(
             volumes=['COISS_2001'],
             has_no_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=_program_arguments(ds, declares_results_db=False),
+            arguments=_program_arguments(ds, declares_results_index_db=False),
         )
     )
 
@@ -363,14 +363,14 @@ def test_a_stale_index_re_selects_a_navigated_frame_for_a_program_that_declares_
     # for navigation all over again.
     _install_two_camera_index(ds, monkeypatch)
     results_root, url = _indexed_tree_and_late_document(tmp_path)
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', url)
 
     groups = list(
         ds.yield_image_files_index(
             volumes=['COISS_2001'],
             has_no_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=_program_arguments(ds, declares_results_db=True),
+            arguments=_program_arguments(ds, declares_results_index_db=True),
         )
     )
 
@@ -390,14 +390,14 @@ def test_the_none_sentinel_reads_the_results_tree(
     # read, so the frame the index does not hold is selected too.
     _install_two_camera_index(ds, monkeypatch)
     results_root, _url = _indexed_tree_and_late_document(tmp_path)
-    monkeypatch.setenv('NAV_RESULTS_DB', 'none')
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', 'none')
 
     groups = list(
         ds.yield_image_files_index(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
-            arguments=_program_arguments(ds, declares_results_db=True),
+            arguments=_program_arguments(ds, declares_results_index_db=True),
         )
     )
 
@@ -412,7 +412,7 @@ def test_the_none_sentinel_on_the_command_line_overrides_a_working_url(
     # still reads the tree.
     _install_two_camera_index(ds, monkeypatch)
     results_root, url = _indexed_tree_and_late_document(tmp_path)
-    monkeypatch.setenv('NAV_RESULTS_DB', url)
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', url)
 
     groups = list(
         ds.yield_image_files_index(
@@ -420,7 +420,7 @@ def test_the_none_sentinel_on_the_command_line_overrides_a_working_url(
             has_offset_file=True,
             nav_results_root=str(results_root),
             arguments=_program_arguments(
-                ds, declares_results_db=True, argv=['--results-db', 'none']
+                ds, declares_results_index_db=True, argv=['--results-index-db', 'none']
             ),
         )
     )
@@ -440,7 +440,7 @@ def test_an_empty_results_index_url_refuses_the_selection(
     """
     _install_two_camera_index(ds, monkeypatch)
     results_root, _url = _indexed_tree_and_late_document(tmp_path)
-    monkeypatch.setenv('NAV_RESULTS_DB', '')
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', '')
 
     with pytest.raises(SelectionError, match='empty value'):
         list(
@@ -448,7 +448,7 @@ def test_an_empty_results_index_url_refuses_the_selection(
                 volumes=['COISS_2001'],
                 has_offset_file=True,
                 nav_results_root=str(results_root),
-                arguments=_program_arguments(ds, declares_results_db=True),
+                arguments=_program_arguments(ds, declares_results_index_db=True),
             )
         )
 
@@ -465,15 +465,15 @@ def test_an_empty_results_index_url_names_the_level_that_set_it(
     """
     _install_two_camera_index(ds, monkeypatch)
     results_root, _url = _indexed_tree_and_late_document(tmp_path)
-    monkeypatch.setenv('NAV_RESULTS_DB', '')
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', '')
 
-    with pytest.raises(SelectionError, match='NAV_RESULTS_DB'):
+    with pytest.raises(SelectionError, match='NAV_RESULTS_INDEX_DB'):
         list(
             ds.yield_image_files_index(
                 volumes=['COISS_2001'],
                 has_offset_file=True,
                 nav_results_root=str(results_root),
-                arguments=_program_arguments(ds, declares_results_db=True),
+                arguments=_program_arguments(ds, declares_results_index_db=True),
             )
         )
 

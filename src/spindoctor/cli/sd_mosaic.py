@@ -64,7 +64,7 @@ from spindoctor.config import (
     build_image_log_handlers,
     build_run_logging,
     get_nav_results_root,
-    get_results_db_url,
+    get_results_index_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_MOSAIC
@@ -325,7 +325,7 @@ _CLI_ONLY_TASK_EXCLUDES: frozenset[str] = frozenset(
     {
         'config_file',
         'nav_results_root',
-        'results_db',
+        'results_index_db',
         'pds3_holdings_root',
         'log_level',
         'profile',
@@ -694,7 +694,7 @@ def main() -> None:
             pr.print_stats(sort='cumulative')
         return
 
-    results_db_url = get_results_db_url(args, DEFAULT_CONFIG)
+    results_db_url = get_results_index_db_url(args, DEFAULT_CONFIG)
     MAIN_LOGGER.info(
         'Results index: %s',
         masked_url(results_db_url) if results_db_url is not None else 'none (reading files)',

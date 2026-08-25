@@ -71,7 +71,7 @@ def no_ambient_results_index_for_the_session(
     """
     with pytest.MonkeyPatch.context() as patch:
         patch.chdir(directory_naming_no_index)
-        patch.delenv('NAV_RESULTS_DB', raising=False)
+        patch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
         patch.delenv('NAV_RESULTS_ROOT', raising=False)
         yield
 
@@ -83,8 +83,8 @@ def no_ambient_results_index(
     """Close every way a test could reach a results index or tree nobody named.
 
     A results index URL is resolved from three places in order: the argument,
-    the ``environment.results_db`` configuration variable, and the
-    ``NAV_RESULTS_DB`` environment variable.  A test that names none of them is
+    the ``environment.results_index_db`` configuration variable, and the
+    ``NAV_RESULTS_INDEX_DB`` environment variable.  A test that names none of them is
     testing what a program does with no index, and on a machine that sets either
     ambient one it instead opens a real one -- for SQLite a write-lock probe
     against a file an ingest may be holding, and for a report a read of every
@@ -123,13 +123,13 @@ def no_ambient_results_index(
         Nothing; the test runs with no ambient level reachable.
     """
     monkeypatch.chdir(directory_naming_no_index)
-    monkeypatch.delenv('NAV_RESULTS_DB', raising=False)
+    monkeypatch.delenv('NAV_RESULTS_INDEX_DB', raising=False)
     monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     # A configuration merged before this test ran -- by a test that named its own
     # override file, or by one that ran before the working directory moved --
     # outlives it: the merge is into a process-global configuration and nothing
     # takes it back out.
-    monkeypatch.delitem(DEFAULT_CONFIG.environment, 'results_db', raising=False)
+    monkeypatch.delitem(DEFAULT_CONFIG.environment, 'results_index_db', raising=False)
     monkeypatch.delitem(DEFAULT_CONFIG.environment, 'nav_results_root', raising=False)
     yield
     left_behind = sorted(entry.name for entry in directory_naming_no_index.iterdir())

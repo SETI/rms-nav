@@ -24,7 +24,7 @@ from tests.spindoctor.conftest import (
     write_metadata,
 )
 
-from spindoctor.cli import sd_stats_ingest, sd_stats_ingest_cloud_tasks
+from spindoctor.cli import sd_results_index, sd_results_index_cloud_tasks
 from spindoctor.config import MAIN_LOGGER
 
 STUB = 'VOL/N1454725799_1_CALIB'
@@ -60,7 +60,7 @@ def worker_data(**kwargs: object) -> WorkerData:
 def run_driver(
     argv: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[int | None, list[str]]:
-    """Run ``sd_stats_ingest`` and return its exit status and its main log.
+    """Run ``sd_results_index`` and return its exit status and its main log.
 
     Parameters:
         argv: Arguments, without the program name.
@@ -76,12 +76,12 @@ def run_driver(
         written.append(str(message) % args if args else str(message))
 
     monkeypatch.setattr(
-        sys, 'argv', ['sd_stats_ingest', '--log-root', str(tmp_path / 'logs'), *argv]
+        sys, 'argv', ['sd_results_index', '--log-root', str(tmp_path / 'logs'), *argv]
     )
     for level in ('info', 'warning', 'error', 'fatal', 'exception'):
         monkeypatch.setattr(MAIN_LOGGER, level, recording)
     with pytest.raises(SystemExit) as caught:
-        sd_stats_ingest.main()
+        sd_results_index.main()
     status = caught.value.code
     return (status if status is None or isinstance(status, int) else 1), written
 
@@ -108,8 +108,8 @@ def process(task_data: dict[str, Any], url: str) -> tuple[bool, Any]:
     Returns:
         What ``process_task`` returned.
     """
-    return sd_stats_ingest_cloud_tasks.process_task(
-        'ingest-1-000000', task_data, worker_data(results_db=url)
+    return sd_results_index_cloud_tasks.process_task(
+        'ingest-1-000000', task_data, worker_data(results_index_db=url)
     )
 
 
@@ -131,7 +131,7 @@ def fanned_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, count: int = 
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             root.as_posix(),
@@ -160,7 +160,7 @@ def fanned_out_with_a_refusal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             root.as_posix(),

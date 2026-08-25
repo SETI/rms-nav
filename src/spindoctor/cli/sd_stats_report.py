@@ -2,7 +2,7 @@
 """Generate a deterministic statistics report (Markdown + charts).
 
 Dispatch script for the ``sd_stats_report`` console entry point; reads a
-navigation results tree, or the results index written by ``sd_stats_ingest``
+navigation results tree, or the results index written by ``sd_results_index``
 where one is named.  See ``spindoctor.cli.stats``.
 
 This program keeps ``print()`` and takes no logging configuration: its output

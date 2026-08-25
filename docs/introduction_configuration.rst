@@ -52,7 +52,7 @@ Configuration files use YAML format and are organized into sections:
    environment:
      nav_results_root: /path/to/results
      pds3_holdings_root: /path/to/pds3
-     results_db: sqlite:////path/to/results/index.sqlite3
+     results_index_db: sqlite:////path/to/results/index.sqlite3
 
    logging:
      models:
@@ -163,18 +163,18 @@ Environment Options
   variable and any ``environment.nav_results_root`` configuration setting. This
   specifies the root directory or URL where navigation results will be written.
 
-* ``--results-db URL``: Overrides the ``NAV_RESULTS_DB`` environment variable
-  and any ``environment.results_db`` configuration setting. This names the
-  results index --- a database derived from the navigation results tree by a
-  separate ingest step --- as a ``sqlite:`` URL naming a local file or a
-  ``postgresql+psycopg:`` URL naming a server. Unset means no index, which is
+* ``--results-index-db URL``: Overrides the ``NAV_RESULTS_INDEX_DB`` environment
+  variable and any ``environment.results_index_db`` configuration setting. This
+  names the results index --- a database derived from the navigation results
+  tree by a separate ingest step --- as a ``sqlite:`` URL naming a local file or
+  a ``postgresql+psycopg:`` URL naming a server. Unset means no index, which is
   the default for every program that offers the option; the literal value
   ``none`` says so explicitly and overrides a URL set elsewhere. A value that is
   empty, or nothing but spaces, is neither, and is refused where it is spelled.
-  Only a program
-  that offers the option reads one: ``environment.results_db`` and
-  ``NAV_RESULTS_DB`` do not make a program index-backed that does not declare
-  ``--results-db``. See :doc:`/user_guide/user_guide_results_index`.
+  Only a program that offers the option reads one:
+  ``environment.results_index_db`` and ``NAV_RESULTS_INDEX_DB`` do not make a
+  program index-backed that does not declare ``--results-index-db``. See
+  :doc:`/user_guide/user_guide_results_index`.
 
 Navigation Options
 ------------------

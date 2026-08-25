@@ -24,13 +24,7 @@ from typing import Any
 
 import pdslogger
 from filecache import FCPath
-from tests.spindoctor.conftest import (
-    index_url,
-)
-
-from spindoctor.cli.stats.ingest import task_results_from_event_log
-
-from .conftest import (
+from tests.spindoctor.cli.results_index.conftest import (
     build_tree,
     complete,
     fan_out,
@@ -38,6 +32,11 @@ from .conftest import (
     run_rows,
     run_shares,
 )
+from tests.spindoctor.conftest import (
+    index_url,
+)
+
+from spindoctor.cli.results_index import task_results_from_event_log
 
 
 def test_the_completion_tallies_the_reasons_the_shares_reported(

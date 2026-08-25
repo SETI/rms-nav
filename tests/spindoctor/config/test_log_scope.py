@@ -277,7 +277,7 @@ def test_a_main_role_component_never_trips_scope_enforcement(
 @pytest.mark.parametrize(
     'module_name',
     [
-        'spindoctor.cli.stats.ingest',
+        'spindoctor.cli.results_index',
         'spindoctor.cli.stats.report',
         'spindoctor.cli.sd_backplane_viewer',
         'spindoctor.ui.mosaic_viewer.common',

@@ -21,7 +21,7 @@ SD_CREATE_BUNDLE = 'sd_create_bundle'
 SD_CREATE_CK = 'sd_create_ck'
 SD_MOSAIC = 'sd_mosaic'
 SD_OFFSET = 'sd_offset'
-SD_STATS_INGEST = 'sd_stats_ingest'
+SD_RESULTS_INDEX = 'sd_results_index'
 
 PROGRAM_NAMES = frozenset(
     {
@@ -31,7 +31,7 @@ PROGRAM_NAMES = frozenset(
         SD_CREATE_CK,
         SD_MOSAIC,
         SD_OFFSET,
-        SD_STATS_INGEST,
+        SD_RESULTS_INDEX,
     }
 )
 """Every valid program identity, used to validate ``logging.programs`` keys."""

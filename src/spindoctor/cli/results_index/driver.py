@@ -73,10 +73,10 @@ import sqlalchemy
 from filecache import FCPath
 from pdslogger import PdsLogger
 
-from spindoctor.cli.stats.ingest.chunks import _batched, _ingest_chunk
-from spindoctor.cli.stats.ingest.counts import IngestCounts
-from spindoctor.cli.stats.ingest.runs import _finish_run, _start_run
-from spindoctor.cli.stats.ingest.store import _recorded_files, _RecordedFile
+from spindoctor.cli.results_index.chunks import _batched, _ingest_chunk
+from spindoctor.cli.results_index.counts import IngestCounts
+from spindoctor.cli.results_index.runs import _finish_run, _start_run
+from spindoctor.cli.results_index.store import _recorded_files, _RecordedFile
 from spindoctor.nav_records import (
     ListedRecord,
     Selection,

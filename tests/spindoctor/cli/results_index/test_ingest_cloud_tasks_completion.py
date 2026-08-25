@@ -17,24 +17,7 @@ from typing import Any
 import pdslogger
 import pytest
 from filecache import FCPath
-from tests.spindoctor.conftest import (
-    index_url,
-    ingest_tree,
-    metadata_document,
-    write_metadata,
-)
-
-from spindoctor.cli.stats.ingest import TaskResult
-from spindoctor.nav_records import UnlistableDirectoryError
-from spindoctor.results_index import (
-    INGEST_RUNS,
-    SCHEMA_VERSION,
-    normalize_root_url,
-    open_index,
-    require_ingested_roots,
-)
-
-from .conftest import (
+from tests.spindoctor.cli.results_index.conftest import (
     build_tree,
     complete,
     cycle,
@@ -42,6 +25,22 @@ from .conftest import (
     reported,
     run_rows,
     run_shares,
+)
+from tests.spindoctor.conftest import (
+    index_url,
+    ingest_tree,
+    metadata_document,
+    write_metadata,
+)
+
+from spindoctor.cli.results_index import TaskResult
+from spindoctor.nav_records import UnlistableDirectoryError
+from spindoctor.results_index import (
+    INGEST_RUNS,
+    SCHEMA_VERSION,
+    normalize_root_url,
+    open_index,
+    require_ingested_roots,
 )
 
 # ---------------------------------------------------------------------------

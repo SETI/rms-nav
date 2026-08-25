@@ -26,7 +26,7 @@ from spindoctor.config import (
     build_cloud_task_logging,
     get_backplane_results_root,
     get_nav_results_root,
-    get_results_db_url,
+    get_results_index_db_url,
     load_default_and_user_config,
 )
 from spindoctor.config.program_names import SD_BACKPLANES
@@ -64,7 +64,7 @@ def _task_pointing_source(
             version of the schema, or has not fully ingested this root.
     """
     return build_pointing_source(
-        nav_results_root, results_db_url=get_results_db_url(arguments, DEFAULT_CONFIG)
+        nav_results_root, results_db_url=get_results_index_db_url(arguments, DEFAULT_CONFIG)
     )
 
 
@@ -228,15 +228,16 @@ async def async_main() -> None:
         help='Root directory for prior navigation results (metadata, offsets)',
     )
     environment_group.add_argument(
-        '--results-db',
+        '--results-index-db',
         type=str,
         default=None,
         metavar='URL',
         help=(
-            'Connection URL of the results index written by sd_stats_ingest; overrides '
-            'the environment.results_db configuration variable and NAV_RESULTS_DB. Each '
-            "image's navigation record is then read as one row instead of one file. Pass "
-            '--results-db none to read the files even where an index is configured.'
+            'Connection URL of the results index written by sd_results_index; overrides '
+            'the environment.results_index_db configuration variable and '
+            "NAV_RESULTS_INDEX_DB. Each image's navigation record is then read as one row "
+            'instead of one file. Pass --results-index-db none to read the files even where '
+            'an index is configured.'
         ),
     )
 

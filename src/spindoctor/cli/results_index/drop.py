@@ -8,7 +8,7 @@ is a deliberate act, not the opening move of a long ingest, and a command that
 did both would make a mistyped URL expensive twice over.
 
 The account of what is about to go is written to the log, which is where
-everything else ``sd_stats_ingest`` does is written.  The one thing this module
+everything else ``sd_results_index`` does is written.  The one thing this module
 puts on standard output itself is the question, which ``input`` writes there: a
 prompt is a dialogue rather than a report, and carrying it in the log alone
 would leave a run whose log was routed to a file waiting silently for an answer.
@@ -78,7 +78,7 @@ answer out of memory.  The schema is one of those facts: on a server the same
 URL reaches several, and which one holds the index is not something the command
 line said.
 
-``sd_stats_ingest`` carries a main logger and reports through it; this is a
+``sd_results_index`` carries a main logger and reports through it; this is a
 dialogue rather than a report, and the prompt is written to standard output by
 ``input`` itself.
 """
@@ -201,7 +201,7 @@ def _summary(safe_url: str, contents: IndexContents) -> list[str]:
     lines.append(
         f'Nothing else in schema {contents.schema} is touched, and no other schema of this '
         f'database is looked at. The metadata documents are the source of truth, so a dropped '
-        f'index is rebuilt by running sd_stats_ingest again.'
+        f'index is rebuilt by running sd_results_index again.'
     )
     return lines
 
@@ -410,7 +410,7 @@ def drop_results_index(url: str, *, assume_yes: bool, logger: PdsLogger) -> int:
         logger.info('Dropped from %s, schema %s: %s', safe_url, contents.schema, ', '.join(dropped))
         logger.info(
             'That index is now what one nobody has ingested into looks like. Run '
-            'sd_stats_ingest to build it again.'
+            'sd_results_index to build it again.'
         )
     finally:
         engine.dispose()

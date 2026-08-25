@@ -108,7 +108,7 @@ def test_the_missing_database_message_names_the_ingest_program(tmp_path: Path) -
         tmp_path: Directory the database would have lived in.
     """
     missing = tmp_path / 'index.sqlite3'
-    with pytest.raises(ValueError, match='sd_stats_ingest'):
+    with pytest.raises(ValueError, match='sd_results_index'):
         open_index(sqlite_url_for(missing))
 
 
@@ -220,7 +220,7 @@ def test_the_version_message_says_to_delete_and_re_ingest(tmp_path: Path) -> Non
         tmp_path: Directory holding the database.
     """
     path = _index_stamped_with_another_version(tmp_path)
-    with pytest.raises(ValueError, match='empty the database with sd_stats_ingest --drop-index'):
+    with pytest.raises(ValueError, match='empty the database with sd_results_index --drop-index'):
         open_index(sqlite_url_for(path))
 
 

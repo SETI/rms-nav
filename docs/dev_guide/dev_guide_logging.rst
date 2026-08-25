@@ -215,14 +215,14 @@ Cloud tasks
 ===========
 
 ``sd_offset_cloud_tasks``, ``sd_backplanes_cloud_tasks``,
-``sd_mosaic_cloud_tasks`` and ``sd_stats_ingest_cloud_tasks`` write nothing to
+``sd_mosaic_cloud_tasks`` and ``sd_results_index_cloud_tasks`` write nothing to
 the terminal. A worker's console belongs to ``cloud_tasks``, which reports task
 progress there under its own configuration; per-image processing detail goes to
 the per-image log file, under the same ``{log_root}/{backend}/`` tree the
 interactive driver writes to. Levels resolve identically, so an image's log
 reads the same whichever driver produced it.
 
-``sd_stats_ingest_cloud_tasks`` has no per-image log at all -- it reads
+``sd_results_index_cloud_tasks`` has no per-image log at all -- it reads
 documents, not images -- so isolation is the whole of what the builder does for
 it, and everything the pass would have logged goes to the null sink. What it
 did comes back in the task result.

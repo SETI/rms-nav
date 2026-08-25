@@ -118,17 +118,17 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         environment variable and the nav_results_root configuration variable""",
     )
     environment_group.add_argument(
-        '--results-db',
+        '--results-index-db',
         type=str,
         default=None,
         metavar='URL',
-        help="""Connection URL of the results index written by sd_stats_ingest (a sqlite:
+        help="""Connection URL of the results index written by sd_results_index (a sqlite:
         URL naming a local path, or a postgresql+psycopg: URL naming a server); overrides
-        the environment.results_db configuration variable and NAV_RESULTS_DB. The image
+        the environment.results_index_db configuration variable and NAV_RESULTS_INDEX_DB. The image
         selection options that read the navigation results are then answered by one query
         over that index instead of by reading the results tree. The index is a snapshot of
         its last ingest, so an image navigated since is one it does not hold; pass
-        --results-db none to read the tree instead, spelled exactly that way in lower
+        --results-index-db none to read the tree instead, spelled exactly that way in lower
         case, since anything else is read as the URL of an index.""",
     )
 

@@ -52,7 +52,7 @@ Per-image, the driver runs three phases:
    record through the stage's
    :class:`~spindoctor.cli.reproj.pointing_source.PointingSource` -- the
    ``_metadata.json`` document under ``--nav-results-root``, or one row of the
-   results index named by ``--results-db`` -- refuse to proceed if
+   results index named by ``--results-index-db`` -- refuse to proceed if
    ``status != 'success'``, build the per-instrument
    :class:`~spindoctor.obs.obs_snapshot_inst.ObsSnapshotInst` with
    ``extfov_margin_vu=(0, 0)`` (backplanes are evaluated on the sensor
