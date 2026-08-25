@@ -302,7 +302,9 @@ def facts_stream(
     Yields:
         One set of facts per image row, in the order the server sorts the key.
         Each mapping is keyed by column name, which is how a document reader
-        keys them too.
+        keys them too.  None of them carries a record: these three statements
+        select what the facts hold, and a record is rebuilt from a column set of
+        its consumer's own, so a consumer wanting both asks twice.
 
     Raises:
         ValueError: If a child row belongs to no image the image stream yielded,

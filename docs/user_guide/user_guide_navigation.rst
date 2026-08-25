@@ -243,6 +243,32 @@ cloud results root, one paid download apiece. Only images that have a document
 are ever asked about, since the listing has already excluded the rest, which is
 also what makes every error filter keep only images that have one.
 
+A document read to answer an error filter is not read a second time. Every
+program that processes an image reads one navigation record for it, and a run of
+``sd_backplanes`` or ``sd_mosaic`` that names an error filter has already read
+that record while it was deciding what to select: the record travels with the
+image, and the per-image stage uses it rather than opening the document again.
+On a cloud results root that is a download saved for every image the run goes on
+to process, not merely a second look at a local copy --- the enumeration and the
+per-image stage keep separate download caches, so neither ever sees the other's
+files.
+
+Two consequences follow, and both are properties of the run rather than of any
+one image. What such a run applies is what the document said when the selection
+was made, so a document rewritten or deleted while the run is going is not
+noticed for an image already selected; the same is true of any run for the
+window between its listing and its per-image stage, and this narrows that window
+rather than opening a new one. And the reasons that describe failing to read a
+document --- reported as ``no_metadata`` for one that is not there, and as
+``unreadable_metadata``, ``invalid_json`` or ``metadata_not_an_object`` for one
+that will not read --- are not reported for an image whose record was carried,
+because a record is carried only for a document that was read whole. Such an
+image is reported under what its record records, or under nothing at all.
+
+Given ``--results-db`` nothing is carried, and this saves nothing: the filter
+narrows on columns and the per-image stage reads the columns it needs, which are
+a different set, so the two stay separate reads of the index.
+
 The listing taken when the enumeration starts covers the volumes the enumeration
 selected and no others, and they are asked about one at a time. Reading the
 results tree, a selected volume the results root has no directory for

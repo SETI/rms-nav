@@ -135,6 +135,7 @@ from pdslogger import PdsLogger
 from spindoctor.nav_records import (
     ImageFacts,
     ListedRecord,
+    NavRecord,
     RecordSource,
     Selection,
     UnlistableDirectoryError,
@@ -343,7 +344,9 @@ class ResultsFilter:
       is active.  Both are asked of the candidates rather than of the subtrees,
       because the candidates are what a run might still keep and the other
       selection constraints are what decide them.
-      :attr:`needs_batch_filtering` says whether it has anything to do.
+      :attr:`needs_batch_filtering` says whether it has anything to do.  An
+      error filter reading documents hands each kept image the record it read,
+      so the stage that goes on to process the image reads no document twice.
 
     A filter with a second question to ask holds its storage open until it is
     closed, so it is usable as a context manager and an enumeration closes it
@@ -602,6 +605,23 @@ class ResultsFilter:
         Every stub an error filter names passed :meth:`passes`, so each of them
         has a document and none is read for an image already excluded.
 
+        An error filter answered out of the documents hands each kept image the
+        record its own document was read out of, so the stage that processes the
+        image reads no document a second time.  It is attached to the images
+        that are kept and to no others, and nothing is attached by a filter
+        answered out of a results index: a record is rebuilt there from the
+        column set its consumer declares, which is not the one an error filter
+        reads, so the two reads want different columns and stay separate.
+
+        A record lives exactly as long as the image it is attached to, which
+        bounds how many are held at once.  An enumeration that yields its images
+        one at a time holds one batch of them, so at most
+        :data:`RESULTS_FILTER_BATCH_SIZE` records are live however many images
+        the run covers.  One that pools its candidates and samples from the pool
+        holds the records of every image it has kept so far, which its own
+        requested sample count bounds: it stops at that many, so it holds at most
+        that many plus the remainder of the batch the last one came out of.
+
         Parameters:
             image_files: Candidates that already passed :meth:`passes`.
 
@@ -620,8 +640,16 @@ class ResultsFilter:
             return self._undocumented(image_files)
         if not self._needs_metadata_read:
             return image_files
-        matching = self._matching_stubs(tuple(image.results_path_stub for image in image_files))
-        return [image for image in image_files if image.results_path_stub in matching]
+        matching = self._matching_records(tuple(image.results_path_stub for image in image_files))
+        kept: list[ImageFile] = []
+        for image in image_files:
+            if image.results_path_stub not in matching:
+                continue
+            record = matching[image.results_path_stub]
+            if record is not None:
+                image.nav_record = record.metadata
+            kept.append(image)
+        return kept
 
     def _undocumented(self, image_files: list[ImageFile]) -> list[ImageFile]:
         """Keep the candidates of one batch the results root holds no document for.
@@ -760,14 +788,17 @@ class ResultsFilter:
             source.close()
         return stubs
 
-    def _matching_stubs(self, stubs: Sequence[str]) -> frozenset[str]:
+    def _matching_records(self, stubs: Sequence[str]) -> dict[str, NavRecord | None]:
         """Ask what one batch of candidates' documents record, and match them.
 
         Parameters:
             stubs: The candidates' results path stubs.
 
         Returns:
-            Those whose document satisfies the active error filters.  A file no
+            One entry per stub whose document satisfies the active error
+            filters, mapped to the record the facts were read out of -- which is
+            a record when the storage answered from a document, and None when it
+            answered from a row and there is none to hand back.  A file no
             per-image facts could be read out of is not among them, for the
             reason :meth:`_records_a_wanted_error` gives; it is counted instead,
             so that :meth:`close` can say how much of the batch went that way.
@@ -779,17 +810,17 @@ class ResultsFilter:
         source = self._source
         if source is None:  # pragma: no cover - closed only when nothing asks again
             raise SelectionError('this selection filter has been closed and cannot answer')
-        matching: set[str] = set()
+        matching: dict[str, NavRecord | None] = {}
         try:
             for facts in source.facts(Selection(stubs=tuple(stubs))):
                 if isinstance(facts, UnreadableFile):
                     self._note_unreadable(facts)
                     continue
                 if self._records_a_wanted_error(facts):
-                    matching.add(str(facts.image['results_path_stub']))
+                    matching[str(facts.image['results_path_stub'])] = facts.record
         except ValueError as exc:
             raise SelectionError(str(exc)) from exc
-        return frozenset(matching)
+        return matching
 
     def _note_unreadable(self, unreadable: UnreadableFile) -> None:
         """Count a candidate no record came out of, and keep the first as the example.

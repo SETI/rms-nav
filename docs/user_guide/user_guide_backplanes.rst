@@ -103,6 +103,21 @@ the ingest recorded, so the remedy — fix the document and ingest that root
 again, or run without ``--results-db`` — is visible from the run log. The rest
 of the pass continues; only that image is lost.
 
+A run that also names an error filter (``--has-offset-error``,
+``--has-no-offset-error``, ``--has-offset-spice-error``,
+``--has-offset-nonspice-error``) has already read each selected image's
+navigation document, because that is how the filter decided what to select. The
+record travels with the image, so each such image's document is read once for
+the whole run. A second read would be a second download on a cloud results
+root, not a second look at a file already local — the two readers hold caches
+of their own. What the backplanes are built on is what the document said when
+the selection was made, so a document rewritten or deleted while the run is
+going is not noticed for an image already selected, and the "skipped due to
+missing metadata" outcome is not reported for one: a record travels only with a
+document that was read whole. With ``--results-db`` nothing travels with the
+image, because the filter narrows on columns; each image's row is read as it is
+for any other run.
+
 Under ``sd_backplanes_cloud_tasks`` each of those outcomes is reported in the
 task result rather than in a run log, because a cloud task has none: an
 unusable index is ``unusable_results_db``, an image nothing navigated is a

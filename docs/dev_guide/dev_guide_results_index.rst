@@ -554,6 +554,46 @@ carries neither of its two metrics and reports
 and a modification time come from a directory entry, and a stand-in would be
 read as the file's own and make a changed document look unchanged.
 
+What a filter hands on
+----------------------
+
+An error filter reading the tree hands each kept image the record its own
+document was read out of.
+:attr:`~spindoctor.nav_records.facts.ImageFacts.record` is that record: filled
+by :class:`~spindoctor.nav_records.TreeRecordSource`, which holds one by the
+time it has any facts at all, and left None by
+:class:`~spindoctor.results_index.record_source.IndexRecordSource`, where a
+record is rebuilt from the column set its consumer declares rather than from the
+columns the facts hold.
+:meth:`~spindoctor.dataset.results_filter.ResultsFilter.filter_batch` puts it on
+:attr:`~spindoctor.dataset.dataset.ImageFile.nav_record`, and
+:class:`~spindoctor.cli.reproj.pointing_source.FilePointingSource`,
+:mod:`spindoctor.cli.backplanes` and
+:mod:`spindoctor.cli.pds4.bundle_data` answer from it, so a program that selects
+on what a document records reads that document once.
+:class:`~spindoctor.cli.reproj.pointing_source.IndexPointingSource` reads its
+row.
+
+A second read of the same document would not be a ``filecache`` cache hit. The
+dispatch programs build their results root through ``FileCache(None).new_path``,
+an anonymous cache in a directory of its own that is deleted when the process
+ends, while the record seam reads through the persistent ``_filecache_global``.
+The two never see each other's downloads, so on a cloud results root a second
+read is a second download. Pointing the programs at the global cache instead is
+not the alternative: a Cassini-scale run would leave several hundred thousand
+documents in a cache nothing empties.
+
+What this bounds, and what it does not: an enumeration that yields its images
+one at a time holds at most one filter batch of records,
+:data:`~spindoctor.dataset.results_filter.RESULTS_FILTER_BATCH_SIZE` (64),
+however many images the run covers. One that pools its candidates and samples
+from them --- ``--choose-random-images`` --- holds the records of every image it
+has kept, which the requested sample count bounds: it returns at that many
+yields, so it holds at most that many plus the remainder of the batch the last
+one came out of. Measured over 99 navigation documents from two results trees, a
+parsed record is about 40 to 50 KB, so the sequential bound is a few megabytes
+and the sampling bound is about 50 MB per thousand images sampled.
+
 Opening an index
 ================
 
@@ -623,6 +663,23 @@ the evidence of another are all unrepresentable rather than refused. In a
 queue-divided pass the fan-out is the one step that sees a whole root, and it
 prunes before it cuts the shares --- so the prune and the workers' writes
 cannot touch the same stub.
+
+**A pass may be told to keep them, and only presence is weakened by it.**
+``ingest_metadata_files`` and ``fan_out_ingest_tasks`` both take ``prune``, and
+``sd_stats_ingest --no-prune`` is what sets it. A row then outlives its document
+and presence of one stops implying the tree still holds the result; absence is
+untouched, because skipping a delete adds no row, so every rule above that reads
+absence is unaffected. The relaxation is bounded by there being no ingest of part
+of a root: a pass that reaches the prune listed the whole of one, so the rows it
+declines to remove are exactly the rows it would have removed.
+
+Which query that saves differs between the two passes, and the rule is written
+once, in ``spindoctor.cli.stats.ingest.driver._reads_recorded_rows``. The
+rows the index already holds have two readers --- the skip rule and the prune ---
+and the query runs when either wants them. So an ordinary pass under
+``--no-prune`` still runs it for the skip rule and stops only under ``--force``
+as well, while a fan-out, whose workers skip from the metrics their own shares
+carry, stops running it either way.
 
 **A root is unreadable until its run is stamped.** The run row is written
 before the walk and its finish time is left NULL until the pass completes, so

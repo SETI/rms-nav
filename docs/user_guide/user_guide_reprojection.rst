@@ -537,6 +537,28 @@ The ladder:
   non-success status, or a null or malformed offset), a warning is logged
   and uncorrected pointing is used.
 
+A record the selection already read
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A run that also names an error filter --- ``--has-offset-error``,
+``--has-no-offset-error``, ``--has-offset-spice-error`` or
+``--has-offset-nonspice-error`` --- has read each selected image's document
+already, because that is how the filter decided. The record travels with the
+image and the pointing above is classified from it, so each such image's
+document is read once for the whole run. On a cloud results root that is one
+download saved per image processed: the enumeration and the pointing reader keep
+separate download caches, so a second read really is a second download.
+
+What is applied is what the document said when the selection was made. A
+document rewritten or deleted while the run is going is therefore not noticed
+for an image already selected. And the reasons that describe failing to read a
+document --- ``no_metadata``, ``unreadable_metadata``, ``invalid_json``,
+``metadata_not_an_object`` and ``unusable_metadata_path`` --- are not counted for
+such an image, since a record is carried only for a document that was read
+whole; the image is counted under the pointing its record supplies, exactly as
+if the document had been read here. With ``--results-db`` nothing is carried and
+each image's row is read as before.
+
 One consequence worth knowing: for a result the kernel generator deliberately
 omitted from the corrected kernels — the yielding WAC of a BOTSIM pair, or
 any image with an omission reason — the readers still apply that image's

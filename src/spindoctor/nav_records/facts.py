@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from typing import Any, NoReturn, cast
 
 from spindoctor.nav_records.derived import date_from_image_et, image_number_from_name
+from spindoctor.nav_records.record import NavRecord
 
 # Every column a consumer classifies a rebuilt record from is filled by the
 # reader's own function rather than by a rule written here.  A second rule that
@@ -136,11 +137,11 @@ class DocumentOrigin:
 class ImageFacts:
     """What one metadata document says about its image, column by column.
 
-    Each of the three is keyed by results-index column name, so a consumer reads
-    the same keys whether the facts were built from a document or read back out
-    of the index.  That correspondence is also the bound on them: what they hold
-    is what the column set holds, and a field of the document no column holds is
-    in neither storage's answer.
+    Each of the three mappings is keyed by results-index column name, so a
+    consumer reads the same keys whether the facts were built from a document or
+    read back out of the index.  That correspondence is also the bound on them:
+    what they hold is what the column set holds, and a field of the document no
+    column holds is in neither storage's answer.
 
     Neither list carries an order a consumer may rely on.  A source reading
     documents yields the techniques in the order the document wrote them and
@@ -155,11 +156,19 @@ class ImageFacts:
             ``techniques`` column name.
         feature_sources: One mapping per feature type and source, keyed by
             ``feature_sources`` column name.
+        record: The record these facts were read out of, when the storage
+            answered from a document and therefore has one to hand back.  None
+            when they came from a row: the record a consumer wants there is
+            rebuilt from a different set of columns than the facts hold, so it
+            stays a read of its own.  A consumer that wants both -- what the
+            document records, and the record itself -- therefore reads one
+            document once on the tree side, and asks the index twice.
     """
 
     image: dict[str, Any]
     techniques: list[dict[str, Any]]
     feature_sources: list[dict[str, Any]]
+    record: NavRecord | None = None
 
 
 # ---------------------------------------------------------------------------

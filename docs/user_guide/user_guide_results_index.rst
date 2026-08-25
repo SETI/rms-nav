@@ -279,6 +279,44 @@ unfinished, so every consumer reports it as a root nobody has ingested rather
 than answering "not navigated" for every image under it. A root that exists and
 is empty completes normally.
 
+**``--no-prune`` keeps those rows, and is a correctness relaxation rather than
+a speed feature.** Under it a row may outlive its document, so presence of a row
+stops meaning that the tree still holds the result it stands for: a consumer
+asking whether an image has been navigated is answered yes for one whose result
+has been deleted, and ``--has-offset-file`` hands such an image on to a
+downstream stage that then finds nothing to read. What is *not* affected is
+absence, because skipping a delete adds no row: "this image was never
+navigated", ``--has-no-offset-file``, and the refusal of a root nobody has
+ingested all keep exactly the meaning they had. That is what makes the flag safe
+enough to offer, and it holds only because a pass covers a whole root -- there is
+no way to ingest part of one, so a pass that gets as far as removing rows listed
+everything.
+
+**What it saves is the deletes and, in some modes, a query, and never any part
+of the walk.** The listing is discovery and happens either way. The deletes are
+what the flag always saves, since removing nothing is the whole of what it asks
+for. The query -- one statement over every row the root holds -- is saved only
+where nothing else wants the answer:
+
+* An ordinary pass issues that query once and reads the answer twice over: to
+  decide which documents to skip as unchanged, and to decide which rows to
+  remove. Only the second of those goes with the flag, so ``--no-prune`` alone
+  saves the deletes and still runs the query. ``--no-prune --force`` saves the
+  query as well, since a forced pass reads every document regardless and so has
+  nothing to skip.
+* ``--output-cloud-tasks-file`` issues it for the removals alone; each worker
+  decides what to skip from the metrics its own share carries. So ``--no-prune``
+  saves the query there whether or not ``--force`` is given.
+
+The pass says in its closing summary that it left those rows alone, in place of
+the count it would otherwise report, so a run log read later says which guarantee
+the index under it was built with. Running the ingest again without the flag is
+what puts a root right.
+
+``--no-prune`` is refused with ``--complete-cloud-tasks-file``, which removes no
+row -- whether a fan-out's rows went was settled at the fan-out -- and with
+``--drop-index``, which reads no tree at all.
+
 **A root the index has no completed ingest of is refused, not answered.**
 Absence of a row would otherwise read as "this image was never navigated", so
 a consumer pointed at an index that has never covered its root fails with a
@@ -439,7 +477,10 @@ where the one listing of the pass happens; a worker holds a share and knows
 nothing about the stubs outside it, so a worker that removed rows would remove
 its peers'. Nothing a worker is about to write can be removed in step 1 either:
 every file a worker is handed came from that listing, and only stubs the listing
-did **not** hold are removed.
+did **not** hold are removed. ``--no-prune`` belongs to step 1 for the same
+reason, and it is the one place in a queue-divided pass where the query over the
+root's rows goes with the removals: step 1 reads them for nothing else, since
+each worker skips from the metrics its own share carries.
 
 **A root is not readable until step 3.** Its ingest run stays unfinished from
 step 1 onwards, so every consumer reports it as a root nobody has ingested while
@@ -511,7 +552,9 @@ image under it as never navigated. Correct the root and run step 1 again.
 
 ``--force`` belongs to step 1, and is refused in step 3, which reads no document.
 A pass whose shares must ignore what the index records is one whose fan-out was
-run with ``--force``.
+run with ``--force``. ``--no-prune`` is refused in step 3 on the same reasoning
+from the other side: step 3 removes no row, so whether a root keeps the rows of
+documents that have left it was settled at step 1.
 
 The tasks file is a JSON array in the shape a ``cloud_tasks`` queue loads. Each
 entry has a ``task_id`` and a ``data`` object carrying ``run_id`` (the ingest
@@ -614,10 +657,11 @@ name the index URL with its password hidden; the lines that continue that
 account carry the schema and the counts rather than repeating the URL.
 
 **It does one thing, so it refuses to be asked for two.** ``--drop-index``
-together with ``--force``, ``--nav-results-root``, ``--output-cloud-tasks-file``
-or ``--complete-cloud-tasks-file`` is refused before anything is opened and
-exits 1, naming the option it will not combine with: a drop reads no document
-and walks no tree, so each of those was meant for a different command. A results
+together with ``--force``, ``--no-prune``, ``--nav-results-root``,
+``--output-cloud-tasks-file`` or ``--complete-cloud-tasks-file`` is refused
+before anything is opened and exits 1, naming the option it will not combine
+with: a drop reads no document and walks no tree, so each of those was meant for
+a different command. A results
 root reaching the program from ``NAV_RESULTS_ROOT`` or from the configuration is
 a machine's standing setting rather than a request, and is simply unused.
 ``--yes`` without ``--drop-index`` is refused for the same reason from the other

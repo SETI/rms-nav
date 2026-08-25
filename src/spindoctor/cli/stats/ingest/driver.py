@@ -45,9 +45,25 @@ cannot become one.
 
 A walk supplies one or it stops: a directory it cannot list ends the pass where
 it finds it, so a run that reaches the prune at all listed every directory
-under its root.  Every completed pass therefore prunes, which is what keeps one
-unreadable subdirectory from holding a root's stale rows across any number of
-passes that finished.
+under its root.  A completed pass therefore prunes unless it was told not to,
+which is what keeps one unreadable subdirectory from holding a root's stale
+rows across any number of passes that finished.
+
+What declining to prune costs
+-----------------------------
+
+A pass may be told to leave those rows alone, and then presence stops implying
+that the document is still there: a row outlives its document, so a consumer
+asking whether an image has been navigated is answered yes for one whose result
+the tree no longer holds.
+
+Absence is untouched, because skipping a delete adds no row.  Every answer read
+from absence -- "this image was never navigated", the selection filter that
+asks for images with no result, the refusal of a root nobody has ingested --
+therefore means exactly what it meant.  That is sound only because a pass covers
+a whole root: there is no ingest of part of one, so a pass that reaches the
+prune listed everything, and the rows it declines to remove are exactly the rows
+it would have removed.
 """
 
 from collections.abc import Sequence
@@ -234,6 +250,29 @@ def _files_to_read(
     return [listed for listed in files if not _is_unchanged(listed, recorded.get(listed.stub))]
 
 
+def _reads_recorded_rows(*, prune: bool, force: bool, has_file_metrics: bool) -> bool:
+    """Whether a pass has any use for what the index already holds about a root.
+
+    Two things read it.  The skip rule compares each listed file against the
+    metrics recorded for it, and has nothing to compare when the pass is reading
+    every document anyway -- because ``force`` was given, or because the listing
+    supplies no metric.  The prune needs every stub the root has a row under,
+    whatever the skip rule is doing.  With neither asking, the query is one
+    statement over every row of a root that may hold several hundred thousand,
+    for an answer nothing looks at.
+
+    Parameters:
+        prune: Whether the rows of documents that have left the tree go.
+        force: Whether every document is read regardless of what is recorded.
+        has_file_metrics: Whether the listing reported both a size and a
+            modification time for every file.
+
+    Returns:
+        True when the recorded rows have to be read.
+    """
+    return prune or (not force and has_file_metrics)
+
+
 def _prune_missing(
     engine: sqlalchemy.Engine,
     listing: _RootListing,
@@ -295,6 +334,7 @@ def ingest_metadata_files(
     roots: list[str],
     *,
     force: bool = False,
+    prune: bool = True,
     logger: PdsLogger,
 ) -> IngestCounts:
     """Ingest every metadata document under the given results roots.
@@ -311,6 +351,12 @@ def ingest_metadata_files(
     ingest run is deliberately not completed, because a mistyped or unmounted
     root is not an empty one.
 
+    A pass told not to prune leaves those rows in place, and a row may then
+    outlive its document.  Absence keeps its meaning either way, since nothing
+    is added by skipping a delete.  The recorded rows are read when either the
+    skip rule or the prune wants them, so such a pass still reads them to decide
+    what to skip and stops reading them altogether under ``force``.
+
     Two spellings of one root are one root, and are walked once.
 
     Each root's pass closes by reporting how many refused documents the index
@@ -326,6 +372,9 @@ def ingest_metadata_files(
             ``filecache`` layer accepts.  Each is normalized to the form the
             rows record and consumers compare against.
         force: Re-read every document, ignoring the recorded file metrics.
+        prune: Delete the rows of one root whose documents the walk did not
+            find.  False keeps them, which relaxes what presence of a row means
+            and leaves what absence of one means alone.
         logger: Logger for the per-root scan summary and per-file failures.
 
     Returns:
@@ -359,8 +408,12 @@ def ingest_metadata_files(
             total.add(counts)
             continue
         counts.files_seen = len(listing.documents)
-        with engine.connect() as connection:
-            recorded = _recorded_files(connection, root_url)
+        recorded: dict[str, _RecordedFile] = {}
+        if _reads_recorded_rows(
+            prune=prune, force=force, has_file_metrics=listing.has_file_metrics
+        ):
+            with engine.connect() as connection:
+                recorded = _recorded_files(connection, root_url)
         to_read = _files_to_read(
             listing.documents,
             recorded,
@@ -377,7 +430,8 @@ def ingest_metadata_files(
                 counts=counts,
                 logger=logger,
             )
-        counts.files_removed = _prune_missing(engine, listing, recorded, logger=logger)
+        if prune:
+            counts.files_removed = _prune_missing(engine, listing, recorded, logger=logger)
         _finish_run(engine, run_id, counts)
         logger.info(
             'Ingested %d, skipped %d unchanged, failed %d, removed %d of %d file(s) under %s',

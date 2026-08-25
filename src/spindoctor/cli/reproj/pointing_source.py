@@ -24,6 +24,27 @@ said, which is why ingest fills every one of them through
 fields through.  A column filled by a rule of its own, even one that agreed when
 it was written, is a second reader of the record.
 
+A record the enumeration already read
+-------------------------------------
+
+A run whose selection names an error filter (``--has-offset-error`` and its
+three siblings) has already read every kept image's document, because deciding
+what a document records means reading it.  The enumeration hands that record on
+with the image, and :class:`FilePointingSource` answers from it rather than
+reading the document again.  The saving is a real one rather than a cache hit
+that would have happened anyway: the drivers build their results root through a
+``FileCache`` of their own, in a directory of its own that is deleted when the
+process ends, while the record seam reads through the persistent global cache,
+so on a cloud results root the two reads are two downloads of the same file.
+Pointing the drivers at the global cache instead is not the fix -- a
+Cassini-scale run would leave several hundred thousand documents in a cache
+nothing empties.
+
+Only the document path carries one.  Against an index the two reads want
+different columns: an error filter reads what a document records, and a record
+is rebuilt from the column set :data:`_ROW_COLUMNS` declares, so
+:class:`IndexPointingSource` reads its row and nothing is carried to it.
+
 What the rebuilt record carries
 -------------------------------
 
@@ -264,11 +285,24 @@ class PointingSource(Protocol):
 class FilePointingSource:
     """A navigation record read from its ``_metadata.json`` document.
 
+    An image arriving with a record already read for it is answered from that
+    record and nothing is read.  A run whose selection asked what each
+    candidate's document records has retrieved and parsed the document of every
+    image it kept, and the enumeration hands the record on with the image; the
+    two readers hold caches of their own, so reading it again is a second
+    download of the same file on a cloud results root rather than a second look
+    at one already local.  What that record says is what the document said when
+    the selection was made: a document deleted or rewritten between the
+    selection and this read is not seen to have changed, which narrows a window
+    every run has rather than opening one.
+
     Parameters:
         nav_results_root: Root the navigator wrote its documents under, or None
             to look for no pointing at all -- which is what a reprojection run
             given no navigation results does, and is a choice rather than a
-            shortfall.
+            shortfall.  An image carrying a record is answered from it whatever
+            this is, since a record that has been read is a record this image
+            has.
     """
 
     def __init__(self, nav_results_root: str | FCPath | None) -> None:
@@ -278,11 +312,21 @@ class FilePointingSource:
     def read_record(self, image_file: ImageFile) -> dict[str, Any]:
         """Read and parse one image's metadata document.
 
+        The record the enumeration already read for this image is used when
+        there is one, and nothing is read.  None of the failures below is
+        reachable for such an image: a record is carried only for a document
+        that was retrieved, decoded, parsed and found to be a navigation
+        result, so the caller meets the record rather than any of them.
+
         Parameters:
             image_file: The image to look up.
 
         Returns:
-            The parsed document.
+            The parsed document -- the one carried with the image, or the one
+            read from storage when it carries none.  A carried record is handed
+            back rather than copied, so two calls for one image return the same
+            mapping; copying it per call would put back the cost this exists to
+            remove.  Every caller reads it and none writes to it.
 
         Raises:
             FileNotFoundError: If the document does not exist; if the stub does
@@ -295,6 +339,9 @@ class FilePointingSource:
             ValueError: If the document is not valid JSON, or is valid JSON that
                 is not an object.
         """
+        carried = image_file.nav_record
+        if carried is not None:
+            return carried
         if self._nav_results_root is None:
             raise FileNotFoundError(
                 f'{image_file.results_path_stub}: no navigation results root was resolved, '
@@ -316,6 +363,20 @@ class FilePointingSource:
     def load_pointing(self, image_file: ImageFile) -> PointingSelection:
         """Load and classify one image's recorded pointing from its document.
 
+        The record the enumeration already read for this image is classified
+        when there is one, and nothing is read.  It goes through the same
+        :func:`~spindoctor.cli.reproj.offsets.select_pointing` the file path
+        ends in, so there is one ladder and a carried record selects exactly
+        what the same document read here would.
+
+        The reasons that describe reading rather than classifying --
+        ``unusable_metadata_path``, ``no_metadata``, ``unreadable_metadata``,
+        ``invalid_json`` and ``metadata_not_an_object`` -- are unreachable for
+        an image whose record was carried, because a record is carried only for
+        a document that got past all five.  Such an image is classified on what
+        its document recorded, so what a run-level tally counts it under is one
+        of the classification reasons or nothing at all.
+
         Parameters:
             image_file: The image to look up.
 
@@ -323,6 +384,9 @@ class FilePointingSource:
             The classified selection, carrying the reason for every way the
             document could fail to supply a pointing.
         """
+        carried = image_file.nav_record
+        if carried is not None:
+            return select_pointing(carried, subject=image_file.image_file_url.as_posix())
         return load_pointing_if_any(self._nav_results_root, image_file)
 
     def close(self) -> None:

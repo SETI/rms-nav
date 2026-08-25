@@ -13,6 +13,13 @@ consumer's lookup can match.
 Ingest is never automatic: no batch driver runs it as a side effect, and the
 index it writes is a snapshot of the tree as of this run.
 
+A pass removes the rows whose documents have left the tree, which is what makes
+presence of a row mean that the tree still holds the result it stands for.
+``--no-prune`` gives that up and keeps them: absence of a row goes on meaning
+that the image was never navigated, since skipping a delete adds nothing, and
+what is saved is the deletes and, where nothing else wants it, the query that
+reads what the index already holds about the root.
+
 ``--drop-index`` is the opposite operation and shares only the URL with the
 rest: it removes the index's own tables from the database that URL names and
 stops there, walking no tree.  It is what makes emptying an index and starting
@@ -137,6 +144,25 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         modification time still match the tree. Refused with
         --complete-cloud-tasks-file, which reads no document.""",
     )
+    ingest_group.add_argument(
+        '--no-prune',
+        dest='prune',
+        action='store_false',
+        default=True,
+        help="""Leave the rows whose documents have left the tree in place
+        rather than removing them. A row then stops meaning that the tree still
+        holds the document it stands for, so a consumer asking whether an image
+        has been navigated is answered yes for one whose result the tree no
+        longer has. Absence of a row is untouched and still means the image was
+        never navigated, which is what makes this safe to offer at all. What it
+        saves is the deletes, and, where nothing else wants it, the query that
+        reads what the index already holds about the root: with --force as well,
+        since the skip rule is then not consulting it either, and under
+        --output-cloud-tasks-file whether or not --force is given, since a
+        fan-out reads it for the removals alone. It saves no part of the walk.
+        Refused with --complete-cloud-tasks-file, which removes no row, and with
+        --drop-index.""",
+    )
 
     drop_group = cmdparser.add_argument_group('Drop')
     drop_group.add_argument(
@@ -192,7 +218,42 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     return cmdparser.parse_args(command_list)
 
 
-def _log_outcome(counts: IngestCounts) -> None:
+def _log_removals(files_removed: int, *, pruned: bool | None) -> None:
+    """Say what became of the rows whose documents have left the tree.
+
+    A pass that removed them reports how many, which is a number an operator
+    would otherwise go looking for.  A pass that was told to leave them says so
+    instead of reporting a removal of none, because the log is the only place
+    that records which guarantee the index was built under and a zero reads
+    exactly like a tree nothing has left.
+
+    A count added up from somewhere else is reported as one, without saying
+    which of the two produced it.  Adding up what the workers did reads the
+    number off the run row the fan-out wrote it to, and nothing recorded there
+    says whether that fan-out was removing rows at all, so a zero there means
+    either that nothing had left the tree or that nobody looked.
+
+    Parameters:
+        files_removed: How many image rows were deleted.
+        pruned: Whether the pass reporting this was removing them, or None where
+            the count comes from a pass other than this one and which it was is
+            not recorded.
+    """
+    if pruned is None:
+        MAIN_LOGGER.info('Rows removed before the fan-out: %d', files_removed)
+        return
+    if pruned:
+        MAIN_LOGGER.info('Rows removed, their document gone from the tree: %d', files_removed)
+        return
+    MAIN_LOGGER.info(
+        'Rows whose document has left the tree: left in place, since --no-prune was given. '
+        'A row under these roots no longer means the tree still holds the document it '
+        'stands for. Absence of a row is unchanged and still means the image was never '
+        'navigated.'
+    )
+
+
+def _log_outcome(counts: IngestCounts, *, pruned: bool | None) -> None:
     """Write the closing summary of an ingest pass to the main log.
 
     The failures are tallied by reason as well as counted, because a results
@@ -205,11 +266,14 @@ def _log_outcome(counts: IngestCounts) -> None:
 
     Parameters:
         counts: What the pass did.
+        pruned: Whether it removed the rows of documents that have left the
+            tree, or None where the count was added up from a pass other than
+            this one, which does not record which it was doing.
     """
     MAIN_LOGGER.info('Metadata files seen: %d', counts.files_seen)
     MAIN_LOGGER.info('Ingested: %d', counts.files_ingested)
     MAIN_LOGGER.info('Skipped as unchanged: %d', counts.files_skipped)
-    MAIN_LOGGER.info('Rows removed, their document gone from the tree: %d', counts.files_removed)
+    _log_removals(counts.files_removed, pruned=pruned)
     MAIN_LOGGER.info('Not ingestible: %d', counts.files_failed)
     for reason in sorted(counts.failures_by_reason):
         MAIN_LOGGER.info(
@@ -231,7 +295,7 @@ def _log_completion(completion: TaskCompletion) -> None:
     Parameters:
         completion: What adding the shares up did.
     """
-    _log_outcome(completion.counts)
+    _log_outcome(completion.counts, pruned=None)
     MAIN_LOGGER.info('Ingest runs completed: %d', completion.runs_completed)
     for root in completion.roots_unaccounted:
         MAIN_LOGGER.error(
@@ -290,20 +354,21 @@ def _log_completion(completion: TaskCompletion) -> None:
         )
 
 
-def _run_ingest(engine: sqlalchemy.Engine, roots: list[str], *, force: bool) -> int:
+def _run_ingest(engine: sqlalchemy.Engine, roots: list[str], *, force: bool, prune: bool) -> int:
     """Read every document under each root and write its rows.
 
     Parameters:
         engine: The open index.
         roots: The navigation results roots to walk.
         force: Whether to re-read every document.
+        prune: Whether to remove the rows of documents that have left the tree.
 
     Returns:
         The exit status: 0 when every named root was walked, 1 when one could
         not be listed.
     """
-    counts = ingest_metadata_files(engine, roots, force=force, logger=MAIN_LOGGER)
-    _log_outcome(counts)
+    counts = ingest_metadata_files(engine, roots, force=force, prune=prune, logger=MAIN_LOGGER)
+    _log_outcome(counts, pruned=prune)
     # Whether the run completed, not what it found.  A count of documents flips
     # between two passes over one unchanged tree -- what one pass ingests the
     # next one skips, and what one pass refuses the next one skips too -- so a
@@ -315,7 +380,7 @@ def _run_ingest(engine: sqlalchemy.Engine, roots: list[str], *, force: bool) -> 
 
 
 def _write_cloud_tasks(
-    engine: sqlalchemy.Engine, roots: list[str], *, force: bool, path: str
+    engine: sqlalchemy.Engine, roots: list[str], *, force: bool, prune: bool, path: str
 ) -> int:
     """List each root once and write out the shares its documents divide into.
 
@@ -323,6 +388,7 @@ def _write_cloud_tasks(
         engine: The open index.
         roots: The navigation results roots to walk.
         force: Whether the workers should re-read every document.
+        prune: Whether to remove the rows of documents that have left the tree.
         path: Where to write the task descriptions.
 
     Returns:
@@ -330,14 +396,12 @@ def _write_cloud_tasks(
         not be.
     """
     MAIN_LOGGER.info('Writing cloud_tasks file to %s', path)
-    fan_out = fan_out_ingest_tasks(engine, roots, force=force, logger=MAIN_LOGGER)
+    fan_out = fan_out_ingest_tasks(engine, roots, force=force, prune=prune, logger=MAIN_LOGGER)
     with FCPath(path).open('w') as file:
         file.write(json_as_string(fan_out.tasks))
     MAIN_LOGGER.info('Wrote %d task(s) to %s', len(fan_out.tasks), path)
     MAIN_LOGGER.info('Metadata files seen: %d', fan_out.counts.files_seen)
-    MAIN_LOGGER.info(
-        'Rows removed, their document gone from the tree: %d', fan_out.counts.files_removed
-    )
+    _log_removals(fan_out.counts.files_removed, pruned=prune)
     if fan_out.counts.roots_unreadable:
         MAIN_LOGGER.error(
             'Roots that could not be listed and are therefore not ingested: %d',
@@ -430,6 +494,7 @@ def _mode_refusal(arguments: argparse.Namespace) -> str | None:
         name
         for name, given in (
             ('--force', arguments.force),
+            ('--no-prune', not arguments.prune),
             ('--nav-results-root', arguments.nav_results_roots is not None),
             ('--output-cloud-tasks-file', arguments.output_cloud_tasks_file is not None),
             ('--complete-cloud-tasks-file', arguments.complete_cloud_tasks_file is not None),
@@ -558,6 +623,18 @@ def main() -> None:
             'it writes.'
         )
         sys.exit(1)
+    if completing and not arguments.prune:
+        # Refused rather than ignored, on the same grounds as --force above.
+        # Completion removes no row: the fan-out that cut the shares held the
+        # one listing of the root and removed there, so whether this index keeps
+        # the rows of documents that have left the tree was settled a step
+        # earlier and cannot be revisited here.
+        MAIN_LOGGER.fatal(
+            '--no-prune has no meaning when adding up what the workers did, since no row is '
+            'removed here. The rows of documents that have left the tree go, or stay, at the '
+            '--output-cloud-tasks-file that listed the root.'
+        )
+        sys.exit(1)
     try:
         engine = open_index(url, create=not completing)
     except ValueError as exc:
@@ -566,12 +643,16 @@ def main() -> None:
     try:
         if arguments.output_cloud_tasks_file is not None:
             status = _write_cloud_tasks(
-                engine, roots, force=arguments.force, path=arguments.output_cloud_tasks_file
+                engine,
+                roots,
+                force=arguments.force,
+                prune=arguments.prune,
+                path=arguments.output_cloud_tasks_file,
             )
         elif completing:
             status = _complete_cloud_tasks(engine, roots, path=arguments.complete_cloud_tasks_file)
         else:
-            status = _run_ingest(engine, roots, force=arguments.force)
+            status = _run_ingest(engine, roots, force=arguments.force, prune=arguments.prune)
     except UnwritableRowError as exc:
         # The other failure a pass stops for.  The document read exactly as the
         # schema says and the writer or the column set would not take it, so

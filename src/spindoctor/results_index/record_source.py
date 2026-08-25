@@ -379,7 +379,13 @@ class IndexRecordSource:
         Returns:
             One set of facts per image row, and one
             :class:`~spindoctor.nav_records.record.UnreadableFile` per file the
-            ingest refused, carrying the reason it recorded.
+            ingest refused, carrying the reason it recorded.  No set of facts
+            carries a record: a record is rebuilt from the columns its consumer
+            declares, which are not the columns the facts hold, so a consumer
+            wanting both asks this source twice.  Handing back a record built
+            out of every column would be a second rebuild of a row beside
+            :mod:`spindoctor.results_index.rebuild`'s, which is how the two
+            storages came to disagree before there was one.
 
         Raises:
             ValueError: If the selection names stubs without resolving to

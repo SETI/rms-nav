@@ -417,3 +417,81 @@ def reported_line(out: str) -> str:
         root holds when the scan listed it.
     """
     return next(line for line in out.splitlines() if 'Results index' in line)
+
+
+class FakeIndexTable:
+    """Stand-in for a PdsTable serving canned index rows.
+
+    Parameters:
+        rows: The rows to serve, in index order.
+    """
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = rows
+
+    def dicts_by_row(self) -> list[dict[str, Any]]:
+        """Return the canned rows in index order.
+
+        Returns:
+            The rows this table was built with.
+        """
+        return self._rows
+
+
+class FakeIndexCache:
+    """Stand-in for the index FileCache: echoes URLs back as local paths."""
+
+    def retrieve(self, urls: list[str]) -> list[Path]:
+        """Return the label/table URL pair as paths without any I/O.
+
+        Parameters:
+            urls: The label URL and the table URL, in that order.
+
+        Returns:
+            The same two, as paths.
+        """
+        return [Path(urls[0]), Path(urls[1])]
+
+
+def install_fake_index(
+    ds: DataSetPDS3CassiniISS,
+    monkeypatch: pytest.MonkeyPatch,
+    volume_filespecs: dict[str, list[str]],
+) -> list[str]:
+    """Serve synthetic index rows per volume, reading no holdings.
+
+    Parameters:
+        ds: The dataset whose index reads are replaced.
+        monkeypatch: Fixture the two replacements are made through.
+        volume_filespecs: One list of index filespecs per volume name.
+
+    Returns:
+        A list that grows by one entry per volume index read, in the order the
+        enumeration reads them.
+    """
+    volumes_read: list[str] = []
+
+    def fake_read_pds_table(fn: Path, columns: tuple[str, ...] | None = None) -> FakeIndexTable:
+        for vol, specs in volume_filespecs.items():
+            if vol in str(fn):
+                volumes_read.append(vol)
+                return FakeIndexTable([{'FILE_SPECIFICATION_NAME': s} for s in specs])
+        raise AssertionError(f'Unexpected index read: {fn}')
+
+    monkeypatch.setattr(ds, '_index_filecache', FakeIndexCache())
+    monkeypatch.setattr(ds, '_read_pds_table', fake_read_pds_table)
+    return volumes_read
+
+
+def coiss_filespecs(camera: str, numbers: list[int]) -> list[str]:
+    """Return index filespecs for one camera, in the index's own sorted order.
+
+    Parameters:
+        camera: ``'N'`` or ``'W'``, the letter the image names begin with.
+        numbers: The image numbers, in ascending order.
+
+    Returns:
+        One filespec per image number.
+    """
+    range_dir = f'{numbers[0]:010d}_{numbers[-1]:010d}'
+    return [f'data/{range_dir}/{camera}{num:010d}_1.IMG' for num in numbers]

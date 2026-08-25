@@ -8,6 +8,7 @@ import pdslogger
 import pytest
 from filecache import FCPath
 from tests.spindoctor.conftest import metadata_document
+from tests.spindoctor.dataset.conftest import coiss_filespecs, install_fake_index
 
 from spindoctor.cli.stats.ingest import ingest_metadata_files
 from spindoctor.dataset.dataset_pds3 import DataSetPDS3
@@ -15,51 +16,6 @@ from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.results_filter import ResultsFilter, SelectionError
 from spindoctor.nav_records import UnlistableDirectoryError
 from spindoctor.results_index import open_index
-
-
-class _FakeIndexTable:
-    """Stand-in for a PdsTable serving canned index rows."""
-
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self._rows = rows
-
-    def dicts_by_row(self) -> list[dict[str, Any]]:
-        """Return the canned rows in index order."""
-        return self._rows
-
-
-class _FakeIndexCache:
-    """Stand-in for the index FileCache: echoes URLs back as local paths."""
-
-    def retrieve(self, urls: list[str]) -> list[Path]:
-        """Return the label/table URL pair as paths without any I/O."""
-        return [Path(urls[0]), Path(urls[1])]
-
-
-def _install_fake_index(
-    ds: DataSetPDS3CassiniISS,
-    monkeypatch: pytest.MonkeyPatch,
-    volume_filespecs: dict[str, list[str]],
-) -> list[str]:
-    """Serve synthetic index rows per volume; returns the log of volumes read."""
-    volumes_read: list[str] = []
-
-    def fake_read_pds_table(fn: Path, columns: tuple[str, ...] | None = None) -> _FakeIndexTable:
-        for vol, specs in volume_filespecs.items():
-            if vol in str(fn):
-                volumes_read.append(vol)
-                return _FakeIndexTable([{'FILE_SPECIFICATION_NAME': s} for s in specs])
-        raise AssertionError(f'Unexpected index read: {fn}')
-
-    monkeypatch.setattr(ds, '_index_filecache', _FakeIndexCache())
-    monkeypatch.setattr(ds, '_read_pds_table', fake_read_pds_table)
-    return volumes_read
-
-
-def _coiss_filespecs(camera: str, numbers: list[int]) -> list[str]:
-    """Index filespecs for one camera, in the index's per-camera sorted order."""
-    range_dir = f'{numbers[0]:010d}_{numbers[-1]:010d}'
-    return [f'data/{range_dir}/{camera}{num:010d}_1.IMG' for num in numbers]
 
 
 def _yielded_names(groups: list[Any]) -> list[str]:
@@ -74,10 +30,10 @@ def test_last_image_num_keeps_wac_frames(
     # sequence resets partway through the volume. In-range WAC frames after the
     # reset must still be yielded (issue #136).
     numbers = [1000000100, 1000000101, 1000000102, 1000000103, 1000000104]
-    _install_fake_index(
+    install_fake_index(
         ds,
         monkeypatch,
-        {'COISS_2001': _coiss_filespecs('N', numbers) + _coiss_filespecs('W', numbers)},
+        {'COISS_2001': coiss_filespecs('N', numbers) + coiss_filespecs('W', numbers)},
     )
 
     groups = list(ds.yield_image_files_index(volumes=['COISS_2001'], img_end_num=1000000102))
@@ -100,13 +56,13 @@ def test_scan_stops_after_first_volume_fully_past_range(
     in_range = [1000000100, 1000000101]
     past_range = [1000000200, 1000000201]
     far_past_range = [1000000300, 1000000301]
-    volumes_read = _install_fake_index(
+    volumes_read = install_fake_index(
         ds,
         monkeypatch,
         {
-            'COISS_2001': _coiss_filespecs('N', in_range) + _coiss_filespecs('W', in_range),
-            'COISS_2002': _coiss_filespecs('N', past_range),
-            'COISS_2003': _coiss_filespecs('N', far_past_range),
+            'COISS_2001': coiss_filespecs('N', in_range) + coiss_filespecs('W', in_range),
+            'COISS_2002': coiss_filespecs('N', past_range),
+            'COISS_2003': coiss_filespecs('N', far_past_range),
         },
     )
 
@@ -127,12 +83,12 @@ def test_img_name_list_range_clamp_still_stops_scan(
     # name list must still report past-the-range so the volume scan terminates.
     numbers = [1000000100, 1000000101, 1000000102]
     later = [1000000200, 1000000201]
-    volumes_read = _install_fake_index(
+    volumes_read = install_fake_index(
         ds,
         monkeypatch,
         {
-            'COISS_2001': _coiss_filespecs('N', numbers) + _coiss_filespecs('W', numbers),
-            'COISS_2002': _coiss_filespecs('N', later),
+            'COISS_2001': coiss_filespecs('N', numbers) + coiss_filespecs('W', numbers),
+            'COISS_2002': coiss_filespecs('N', later),
         },
     )
 
@@ -154,10 +110,10 @@ _FILTER_NUMS = [1000000100, 1000000101, 1000000102]
 
 def _install_two_camera_index(ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch) -> None:
     """Install a COISS_2001 index with three NAC and three WAC frames."""
-    _install_fake_index(
+    install_fake_index(
         ds,
         monkeypatch,
-        {'COISS_2001': _coiss_filespecs('N', _FILTER_NUMS) + _coiss_filespecs('W', _FILTER_NUMS)},
+        {'COISS_2001': coiss_filespecs('N', _FILTER_NUMS) + coiss_filespecs('W', _FILTER_NUMS)},
     )
 
 
@@ -937,12 +893,12 @@ def test_choose_random_images_pool_spans_all_volumes(
     # volume boundary, in shuffled (not enumeration) order.
     nums1 = [1000000100, 1000000101, 1000000102]
     nums2 = [1000000200, 1000000201, 1000000202]
-    volumes_read = _install_fake_index(
+    volumes_read = install_fake_index(
         ds,
         monkeypatch,
         {
-            'COISS_2001': _coiss_filespecs('N', nums1),
-            'COISS_2002': _coiss_filespecs('N', nums2),
+            'COISS_2001': coiss_filespecs('N', nums1),
+            'COISS_2002': coiss_filespecs('N', nums2),
         },
     )
     monkeypatch.setattr(random, 'shuffle', lambda pool: pool.reverse())
@@ -981,12 +937,12 @@ def test_choose_random_images_with_offset_filter(
     # candidates, and asking for more than exist returns exactly the candidates.
     nums1 = [1000000100, 1000000101, 1000000102]
     nums2 = [1000000200, 1000000201, 1000000202]
-    _install_fake_index(
+    install_fake_index(
         ds,
         monkeypatch,
         {
-            'COISS_2001': _coiss_filespecs('N', nums1),
-            'COISS_2002': _coiss_filespecs('N', nums2),
+            'COISS_2001': coiss_filespecs('N', nums1),
+            'COISS_2002': coiss_filespecs('N', nums2),
         },
     )
     _write_result_file(tmp_path, 'COISS_2001', nums1, 'N', 1000000101, '_metadata.json')
@@ -1065,8 +1021,8 @@ def test_the_negative_error_filter_is_one_of_the_selection_arguments() -> None:
 def test_yielded_imagefile_carries_label_resolver(
     ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install_fake_index(
-        ds, monkeypatch, {'COISS_2001': _coiss_filespecs('N', [1000000100, 1000000100])[:1]}
+    install_fake_index(
+        ds, monkeypatch, {'COISS_2001': coiss_filespecs('N', [1000000100, 1000000100])[:1]}
     )
 
     groups = list(ds.yield_image_files_index(volumes=['COISS_2001']))
