@@ -74,13 +74,26 @@ PR #484 (#447, the round-trip residual) has been open since 2026-08-09,
 is green and mergeable, and is fifty commits behind `main`. Rebase and
 merge it, or say what it is waiting on. Nothing else is in flight.
 
-### 0.1c Label gaps (two minutes)
+### 0.1c Assignees (the one labelling gap left)
 
-Every issue is supposed to carry A-type, B-location, Priority and Effort
-labels with assignee `rfrenchseti`. Nine do not. Five have no priority --
-#23, #28, #34, #53, #78, all of them big parent issues, which is probably why
--- and four have no effort: #150, #152, #153, #239. A parent issue with no
-priority sorts as if it did not matter.
+Every open issue now carries exactly one Priority and one Effort label and at
+least one each of A-type and B-location; the `Priority TBD` label is unused
+and can be deleted from the repository if you want it gone.
+
+What is still uneven is the assignee. 52 open issues have none, against a
+convention of `rfrenchseti` on all of them, so any "assigned to me" filter is
+short by about a fifth of the backlog. Mass-assigning is one command; it is
+left to you because it notifies.
+
+Five priorities were assigned by inference from these plans rather than by
+you, and are the ones most worth a glance: **#53** PDS4 bundle generator
+parent as Essential (the plans call output bundles required for all four
+instruments, and none of it works end to end); **#28** backplane generator
+parent as Important (a scope decision gating #54/#55/#57/#63/#77);
+**#34** PDS4 input as Defer (the plans say it is not required for project
+completion); and **#23** body shape models and **#78** CraterMaker as Defer
+(both sit with the far-off Track F items). Override any of them in one
+command.
 
 ### 0.2 Adopt the calibration's falsification criterion (#334)
 

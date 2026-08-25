@@ -774,5 +774,18 @@ nothing gates on hardware), #428 the upstream `rms-pdslogger`
 registry-eviction request (nothing in this repo depends on it; the
 constraint is worth recording where the next person to reach for a
 logger-per-image design will find it), #494 Cassini BOTSIM pairs defined two
-different ways (one definition, before #27 builds on either), and #518 state
-the encoding wherever a document or text file is read or written.
+different ways (one definition, before #27 builds on either), #518 state
+the encoding wherever a document or text file is read or written, and #552
+remove the `AttrDict` `_IS_IMMUTABLE` marker once oops confines its
+mutability bookkeeping to its own objects.
+
+#552 is worth reading before touching `AttrDict` (#39), because it records
+a live constraint rather than a wish: an `AttrDict` is its own instance
+dictionary, so any attribute a library sets on one becomes a configuration
+key. On the oops `mark-2026-02` branch, `oops.mutable._get_info` walks
+everything reachable from an Observation — which reaches the shared `Config`
+through the observation and so every section of it — and writes
+`_MUTABLE_info` onto each. `validate_logging_config` then refused the
+logging section and `sd_create_ck` and the `_cloud_tasks` drivers exited 1.
+The marker is the opt-out that stops it; it is a workaround in another
+package's private namespace, and #552 is the tracking issue for removing it.
