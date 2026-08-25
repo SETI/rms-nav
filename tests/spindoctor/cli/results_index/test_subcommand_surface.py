@@ -371,7 +371,7 @@ def test_the_run_header_names_the_subcommand_that_is_running(
     command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A log that opens by naming a pass nobody asked for is worse than none."""
-    url = f'sqlite:///{tmp_path / "index.sqlite3"}'
+    url = index_url(tmp_path / 'index.sqlite3')
     argv = [command, '--results-index-db', url, '--nav-results-root', str(tmp_path / 'results')]
     if command == sd_results_index.DIVIDE:
         argv += ['--tasks-file', str(tmp_path / 'tasks.json')]
