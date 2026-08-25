@@ -53,8 +53,14 @@ Sections
 
 Top-level YAML keys are exposed as
 :class:`~spindoctor.support.attrdict.AttrDict` properties so code can write
-``cfg.bodies.use_lambert`` instead of ``cfg['bodies']['use_lambert']``. The
-shipping sections:
+``cfg.bodies.use_lambert`` instead of ``cfg['bodies']['use_lambert']``. That
+convenience has a cost: an ``AttrDict`` is its own instance dictionary, so
+anything that sets an attribute on a section adds a key to it. A library that
+caches bookkeeping on the objects it traverses will therefore write into
+configuration data if it reaches a section, and
+:func:`~spindoctor.config.logging_keys.validate_logging_config` rejects the key
+it leaves behind. ``AttrDict`` advertises the marker such a library uses to
+recognize an object it must not annotate. The shipping sections:
 
 - ``general`` — global settings shared across programs.
 - ``logging`` — logger defaults, per-module levels, and per-program
