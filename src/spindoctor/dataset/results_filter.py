@@ -364,7 +364,7 @@ class ResultsFilter:
         has_no_offset_error: bool = False,
         has_offset_spice_error: bool = False,
         has_offset_nonspice_error: bool = False,
-        results_db_url: str | None = None,
+        results_index_db_url: str | None = None,
         logger: PdsLogger,
     ) -> None:
         """Validates the flag combination and asks what the results root holds.
@@ -395,7 +395,7 @@ class ResultsFilter:
                 indicates a fatal error from missing SPICE data.
             has_offset_nonspice_error: Only keep images whose offset metadata
                 file indicates a fatal error other than missing SPICE data.
-            results_db_url: Connection URL of a results index to answer every
+            results_index_db_url: Connection URL of a results index to answer every
                 filter from, or None to read the results tree.  A URL that
                 cannot be used is an error rather than a reason to fall back
                 to the tree.
@@ -486,7 +486,7 @@ class ResultsFilter:
             nav_results_root if isinstance(nav_results_root, FCPath) else FCPath(nav_results_root)
         )
         self._logger = logger
-        self._results_db_url = results_db_url
+        self._results_index_db_url = results_index_db_url
         # Held open only while there is a second question to ask, since a source
         # over an index holds a connection pool and a run that has nothing left
         # to ask should not.
@@ -713,7 +713,7 @@ class ResultsFilter:
         try:
             return open_record_source(
                 [self._nav_results_root],
-                results_db_url=self._results_db_url,
+                results_index_db_url=self._results_index_db_url,
                 logger=self._logger,
             )
         except ValueError as exc:
@@ -872,7 +872,7 @@ class ResultsFilter:
             SelectionError: If the index cannot be read for the age of its
                 answer, which is the same refusal reading it for the answer is.
         """
-        if self._results_db_url is None:
+        if self._results_index_db_url is None:
             if documents is None:
                 self._logger.info(
                     '*** Results scan will ask %s about each candidate image',
@@ -886,7 +886,7 @@ class ResultsFilter:
                 )
             return
         try:
-            ingested_utc = snapshot_finish_time(self._results_db_url, self._nav_results_root)
+            ingested_utc = snapshot_finish_time(self._results_index_db_url, self._nav_results_root)
         except ValueError as exc:
             raise SelectionError(str(exc)) from exc
         if documents is None:

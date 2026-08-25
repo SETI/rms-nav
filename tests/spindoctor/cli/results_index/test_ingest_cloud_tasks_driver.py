@@ -12,7 +12,6 @@ The worker between the two is in ``test_ingest_cloud_tasks_worker``.
 """
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +31,6 @@ from tests.spindoctor.conftest import (
     write_metadata,
 )
 
-from spindoctor.cli import sd_results_index
 from spindoctor.results_index import IMAGES, INGEST_RUNS, normalize_root_url, open_index
 
 # ---------------------------------------------------------------------------
@@ -83,11 +81,12 @@ def dividing_a_root_that_is_not_there(
     """
     return run_driver(
         [
+            'divide',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             str(tmp_path / 'absent'),
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,
@@ -128,13 +127,14 @@ def test_two_spellings_of_one_root_are_logged_once(
     write_metadata(root, STUB, metadata_document())
     _status, written = run_driver(
         [
+            'divide',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             root.as_posix(),
             '--nav-results-root',
             f'{root.as_posix()}/',
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,
@@ -158,11 +158,12 @@ def naming_a_root_that_is_not_a_location(
     """
     return run_driver(
         [
+            'divide',
             '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             spelling,
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,
@@ -210,56 +211,6 @@ def test_a_root_that_is_not_a_location_says_so(
     assert any('is not a location that can be read' in line for line in written)
 
 
-def refusing_both_cloud_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SystemExit:
-    """Parse a command line asking for both cloud modes at once.
-
-    Parameters:
-        tmp_path: Directory the two named files would live under.
-        monkeypatch: Fixture the argument vector is replaced through.
-
-    Returns:
-        The exit the parser raised.
-    """
-    monkeypatch.setattr(sys, 'argv', ['sd_results_index'])
-    with pytest.raises(SystemExit) as caught:
-        sd_results_index.parse_args(
-            [
-                '--output-cloud-tasks-file',
-                str(tmp_path / 'tasks.json'),
-                '--complete-cloud-tasks-file',
-                str(tmp_path / 'events.log'),
-            ]
-        )
-    return caught.value
-
-
-def test_the_two_cloud_modes_cannot_be_asked_for_at_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Dividing the work up and adding it together are different runs.
-
-    Asking for both would write a tasks file and then complete the run it had
-    just created, before a single worker had read anything.
-    """
-    assert refusing_both_cloud_modes(tmp_path, monkeypatch).code == 2
-
-
-def test_the_two_cloud_modes_are_refused_by_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A status of 2 is what argparse exits with for any command line at all.
-
-    A renamed option, a missing value, a typo: all of them are status 2, so what
-    says this refusal is the one meant is the message naming the two options and
-    the reason.  Naming one of them is not enough either: an option that does
-    not exist is spelled back in the "unrecognized arguments" message, so a
-    parser that had dropped both would satisfy that much of it.
-    """
-    refusing_both_cloud_modes(tmp_path, monkeypatch)
-    refusal = '--complete-cloud-tasks-file: not allowed with argument --output-cloud-tasks-file'
-    assert refusal in capsys.readouterr().err
-
-
 # ---------------------------------------------------------------------------
 # The command line that puts it back together
 # ---------------------------------------------------------------------------
@@ -298,11 +249,12 @@ def test_the_driver_completes_the_run_from_an_event_log(
     write_event_log_of_results(tmp_path / 'events.log', results)
     status, _written = run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,
@@ -319,11 +271,12 @@ def test_completing_a_run_the_tasks_did_not_cover_exits_one(
     write_event_log_of_results(tmp_path / 'events.log', [])
     status, _written = run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,
@@ -340,11 +293,12 @@ def test_completing_a_run_the_tasks_did_not_cover_says_so(
     write_event_log_of_results(tmp_path / 'events.log', [])
     _status, written = run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,
@@ -369,11 +323,12 @@ def test_the_completion_summary_says_why_a_file_was_refused(
     write_event_log_of_results(tmp_path / 'events.log', results)
     _status, written = run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,
@@ -409,11 +364,12 @@ def test_a_result_written_under_another_root_is_named_in_the_summary(
     )
     _status, written = run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,
@@ -439,11 +395,12 @@ def completing_a_mistyped_root(
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
+            'divide',
             '--results-index-db',
             url,
             '--nav-results-root',
             str(mistyped),
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,
@@ -452,11 +409,12 @@ def completing_a_mistyped_root(
     write_event_log_of_results(tmp_path / 'events.log', [])
     return run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             str(mistyped),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,
@@ -529,11 +487,12 @@ def missing_event_log_run(
     url = fanned_out(tmp_path, monkeypatch)
     return run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'nowhere.log'),
         ],
         monkeypatch,
@@ -590,11 +549,12 @@ def binary_event_log_run(
     (tmp_path / 'events.log.gz').write_bytes(b'\x1f\x8b\x08\x00\xff\xfe\x00\x00')
     return run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log.gz'),
         ],
         monkeypatch,
@@ -631,52 +591,6 @@ def test_an_event_log_that_is_not_text_exits_one(
     assert status == 1
 
 
-def test_forcing_a_completion_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Nothing is read here, so --force could only ever be ignored.
-
-    An operator who typed it meant the documents to be read again, which is a
-    property of the fan-out that cut the shares and is decided one step earlier.
-    """
-    url = fanned_out(tmp_path, monkeypatch)
-    write_event_log_of_results(tmp_path / 'events.log', [])
-    status, _written = run_driver(
-        [
-            '--results-index-db',
-            url,
-            '--nav-results-root',
-            (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
-            str(tmp_path / 'events.log'),
-            '--force',
-        ],
-        monkeypatch,
-        tmp_path,
-    )
-    assert status == 1
-
-
-def test_forcing_a_completion_says_what_to_do_instead(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A refusal nobody can act on is only half a refusal."""
-    url = fanned_out(tmp_path, monkeypatch)
-    write_event_log_of_results(tmp_path / 'events.log', [])
-    _status, written = run_driver(
-        [
-            '--results-index-db',
-            url,
-            '--nav-results-root',
-            (tmp_path / 'results').as_posix(),
-            '--complete-cloud-tasks-file',
-            str(tmp_path / 'events.log'),
-            '--force',
-        ],
-        monkeypatch,
-        tmp_path,
-    )
-    assert any('--output-cloud-tasks-file with --force' in line for line in written)
-
-
 def completing_a_root_nobody_divided_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[int | None, list[str]]:
@@ -695,11 +609,12 @@ def completing_a_root_nobody_divided_up(
     write_event_log_of_results(tmp_path / 'events.log', [])
     return run_driver(
         [
+            'complete',
             '--results-index-db',
             url,
             '--nav-results-root',
             str(tmp_path / 'other-results'),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,
@@ -739,11 +654,12 @@ def test_completing_against_an_index_that_is_not_there_is_refused(
     database = tmp_path / 'index.sqlite3'
     status, _written = run_driver(
         [
+            'complete',
             '--results-index-db',
             index_url(database),
             '--nav-results-root',
             str(tmp_path / 'results'),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,
@@ -760,11 +676,12 @@ def test_completing_against_an_index_that_is_not_there_creates_none(
     database = tmp_path / 'index.sqlite3'
     run_driver(
         [
+            'complete',
             '--results-index-db',
             index_url(database),
             '--nav-results-root',
             str(tmp_path / 'results'),
-            '--complete-cloud-tasks-file',
+            '--events-log',
             str(tmp_path / 'events.log'),
         ],
         monkeypatch,

@@ -5,6 +5,31 @@ Dispatch script for the ``sd_results_index`` console entry point.  See
 ``spindoctor.cli.results_index`` for what one pass does and
 ``spindoctor.cli.stats`` for the statistics-system overview.
 
+The program is a subject with four verbs under it, one of which every command
+line names:
+
+``ingest``
+    Walk each named results root and read the documents under it into the
+    index.
+``divide``
+    List each root once, remove the rows whose documents have left it, and
+    write out the shares ``sd_results_index_cloud_tasks`` reads.
+``complete``
+    Read the event log those workers wrote, add their tallies up, and stamp
+    each named root's ingest as finished.  Until that step a consumer treats
+    the roots as ones nobody has ingested, which is what keeps absence of a row
+    from being read as an answer while the workers are still writing.
+``drop``
+    Remove the index's own tables from the database and stop, reading no tree.
+
+Every option belongs to the verbs that act on it and to no others, so a command
+line asking for two different things is a usage error naming the option rather
+than a program deciding which half of it to do.  ``--results-index-db``,
+``--config-file`` and the logging options belong to all four; ``--nav-results-root``
+to the three that read a tree; ``--force`` and ``--no-prune`` to the two that
+read documents and remove rows; and ``--yes`` to the drop, which is the only
+thing this program asks about.
+
 The roots are resolved the way every consumer resolves a navigation results
 root -- the command line, then ``environment.nav_results_root``, then
 ``NAV_RESULTS_ROOT`` -- because the root is half of the key every row is stored
@@ -21,10 +46,10 @@ that the image was never navigated, since skipping a delete adds nothing, and
 what is saved is the deletes and, where nothing else wants it, the query that
 reads what the index already holds about the root.
 
-``--drop-index`` is the opposite operation and shares only the URL with the
-rest: it removes the index's own tables from the database that URL names and
-stops there, walking no tree.  It is what makes emptying an index and starting
-over something an operator can reach without hand-written SQL, on a shared
+``drop`` is the opposite operation and shares only the URL with the rest: it
+removes the index's own tables from the database that URL names and stops
+there, walking no tree.  It is what makes emptying an index and starting over
+something an operator can reach without hand-written SQL, on a shared
 PostgreSQL server as well as on a file -- which the schema version gate depends
 on, since a version bump is deliberately not migrated and rebuilding is the
 whole of the remedy.  It drops from one schema, the one this database's own
@@ -36,14 +61,6 @@ that holds nothing, or one already carrying a stamp of SpinDoctor's, and refuses
 a schema holding a table it did not create -- so a stamp never comes to stand
 over somebody else's table, and the six names the drop removes from a stamped
 schema are six tables SpinDoctor created.
-
-One pass may also be spread over a queue of workers.  ``--output-cloud-tasks-file``
-lists each root once, removes the rows whose documents have left the tree, and
-writes out the shares for ``sd_results_index_cloud_tasks`` to read; when those
-have run, ``--complete-cloud-tasks-file`` adds their tallies up and stamps each
-root's ingest as finished.  Until that last step a consumer treats the roots as
-ones nobody has ingested, which is what keeps absence of a row from being read
-as an answer while the workers are still writing.
 """
 
 import argparse
@@ -88,21 +105,38 @@ PROGRAM_NAME = SD_RESULTS_INDEX
 ``logging.programs`` configuration block for this program."""
 
 
-def parse_args(command_list: list[str]) -> argparse.Namespace:
-    """Build the parser and read the command line.
+INGEST = 'ingest'
+"""Subcommand that reads the documents under each results root into the index."""
+
+DIVIDE = 'divide'
+"""Subcommand that divides each results root into shares for a queue of workers."""
+
+COMPLETE = 'complete'
+"""Subcommand that adds up what those workers did and finishes each root's run."""
+
+DROP = 'drop'
+"""Subcommand that removes the results index's own tables and stops."""
+
+_READS_A_TREE = (INGEST, DIVIDE, COMPLETE)
+"""The subcommands a navigation results root is resolved for.
+
+The drop is about the database alone and names no root, so requiring one would
+refuse the command on a machine holding the index and not the tree.
+"""
+
+
+def _add_environment_arguments(parser: argparse.ArgumentParser, *, reads_a_tree: bool) -> None:
+    """Add the options a subcommand resolves its surroundings from.
 
     Parameters:
-        command_list: Arguments, without the program name.
-
-    Returns:
-        The parsed arguments.
+        parser: The subcommand's parser.
+        reads_a_tree: Whether this subcommand walks a navigation results tree.
+            False leaves ``--nav-results-root`` off, so a subcommand that reads
+            no tree refuses the option naming one instead of accepting it and
+            reading nothing.
     """
-    cmdparser = argparse.ArgumentParser(
-        description='Read navigation metadata documents into the results index.'
-    )
-
-    environment_group = cmdparser.add_argument_group('Environment')
-    environment_group.add_argument(
+    group = parser.add_argument_group('Environment')
+    group.add_argument(
         '--config-file',
         action='append',
         default=None,
@@ -110,42 +144,55 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         may be specified multiple times. If not provided, attempts to load
         ./nav_default_config.yaml if present.""",
     )
-    environment_group.add_argument(
-        '--nav-results-root',
-        action='append',
-        dest='nav_results_roots',
-        default=None,
-        metavar='ROOT',
-        help="""Root directory of a navigation results tree to read (a local
-        directory or any URL the filecache layer accepts); may be specified
-        multiple times. Overrides NAV_RESULTS_ROOT and the nav_results_root
-        configuration variable.""",
-    )
-    environment_group.add_argument(
+    if reads_a_tree:
+        group.add_argument(
+            '--nav-results-root',
+            action='append',
+            dest='nav_results_roots',
+            default=None,
+            metavar='ROOT',
+            help="""Root directory of a navigation results tree to read (a local
+            directory or any URL the filecache layer accepts); may be specified
+            multiple times. Overrides NAV_RESULTS_ROOT and the nav_results_root
+            configuration variable.""",
+        )
+    group.add_argument(
         '--results-index-db',
         default=None,
         metavar='URL',
-        help="""Connection URL of the results index to write (a sqlite: URL
-        naming a local path, or a postgresql+psycopg: URL naming a server);
-        overrides the environment.results_index_db configuration variable and
-        NAV_RESULTS_INDEX_DB. The tables are created if they are absent, in the schema this
-        database's own schema_meta stamp was found in or, where there is no such
-        stamp, the one a table created without a schema name lands in. That
-        schema is refused, and nothing is created or stamped in it, when it
-        already holds any table the index does not own or any table of the
-        index's own names that no stamp of ours stands over.""",
+        help="""Connection URL of the results index (a sqlite: URL naming a
+        local path, or a postgresql+psycopg: URL naming a server); overrides the
+        environment.results_index_db configuration variable and
+        NAV_RESULTS_INDEX_DB. An ingest creates the tables if they are absent, in the
+        schema this database's own schema_meta stamp was found in or, where
+        there is no such stamp, the one a table created without a schema name
+        lands in. That schema is refused, and nothing is created or stamped in
+        it, when it already holds any table the index does not own or any table
+        of the index's own names that no stamp of ours stands over.""",
     )
 
-    ingest_group = cmdparser.add_argument_group('Ingest')
-    ingest_group.add_argument(
+
+def _add_reading_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the options saying what a pass reads and what it removes.
+
+    Both belong to the two subcommands that read documents and remove rows.  A
+    completion does neither -- the fan-out that cut the shares held the one
+    listing of the root and removed there, and each worker reads its share from
+    the metrics that share carries -- and a drop reads no tree at all, so
+    neither of those offers either option.
+
+    Parameters:
+        parser: The subcommand's parser.
+    """
+    group = parser.add_argument_group('Ingest')
+    group.add_argument(
         '--force',
         action='store_true',
         default=False,
         help="""Read every document, including ones whose recorded size and
-        modification time still match the tree. Refused with
-        --complete-cloud-tasks-file, which reads no document.""",
+        modification time still match the tree.""",
     )
-    ingest_group.add_argument(
+    group.add_argument(
         '--no-prune',
         dest='prune',
         action='store_false',
@@ -157,64 +204,116 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         longer has. Absence of a row is untouched and still means the image was
         never navigated, which is what makes this safe to offer at all. What it
         saves is the deletes, and, where nothing else wants it, the query that
-        reads what the index already holds about the root: with --force as well,
-        since the skip rule is then not consulting it either, and under
-        --output-cloud-tasks-file whether or not --force is given, since a
-        fan-out reads it for the removals alone. It saves no part of the walk.
-        Refused with --complete-cloud-tasks-file, which removes no row, and with
-        --drop-index.""",
+        reads what the index already holds about the root: under ingest with
+        --force as well, since the skip rule is then not consulting it either,
+        and under divide whether or not --force is given, since a fan-out reads
+        it for the removals alone. It saves no part of the walk.""",
     )
 
-    drop_group = cmdparser.add_argument_group('Drop')
-    drop_group.add_argument(
-        '--drop-index',
-        action='store_true',
-        default=False,
-        help="""Remove the results index's own tables from the database
-        --results-index-db names, and stop: no results root is read and no document is
-        ingested. The tables that go are the index's own six names, from the one
-        schema this database's own schema_meta stamp was found in; no other
-        table of that schema, and no other schema, is touched. What makes those
-        six SpinDoctor's own is that an ingest refuses to build an index in a
-        schema holding anything it did not create, so a schema carrying that
-        stamp holds this index and nothing else. A database holding none of
-        those tables is left alone and said to be, and one holding tables of
-        those names that no stamp of ours stands over is refused. Refused
-        together with --force, --nav-results-root and either cloud-tasks mode,
-        none of which this does.""",
+
+def parse_args(command_list: list[str]) -> argparse.Namespace:
+    """Build the parser and read the command line.
+
+    Each mode is a subcommand carrying the options that mode acts on, so two
+    modes cannot be asked for at once and an option belonging to another mode is
+    a usage error naming it rather than a request the program has to reconcile.
+
+    Parameters:
+        command_list: Arguments, without the program name.
+
+    Returns:
+        The parsed arguments, with the subcommand under ``command``.
+    """
+    cmdparser = argparse.ArgumentParser(
+        description='Read navigation metadata documents into the results index.'
     )
+    subcommands = cmdparser.add_subparsers(
+        title='Commands',
+        dest='command',
+        required=True,
+        metavar='COMMAND',
+    )
+
+    ingest = subcommands.add_parser(
+        INGEST,
+        help='Read the documents under each results root into the index',
+        description="""Walk each named navigation results root and read every
+        metadata document under it into the results index, removing the rows
+        whose documents have left the tree.""",
+    )
+    _add_environment_arguments(ingest, reads_a_tree=True)
+    _add_reading_arguments(ingest)
+    add_logging_arguments(ingest, has_image_logger=False)
+
+    divide = subcommands.add_parser(
+        DIVIDE,
+        help='Divide each results root into shares for a queue of workers',
+        description="""List each named navigation results root once, remove the
+        rows whose documents have left it, and write out the shares
+        sd_results_index_cloud_tasks reads. No document is read here, and each
+        root stays unfinished until sd_results_index complete adds up what the
+        workers did.""",
+    )
+    _add_environment_arguments(divide, reads_a_tree=True)
+    _add_reading_arguments(divide)
+    divide_group = divide.add_argument_group('Cloud tasks')
+    divide_group.add_argument(
+        '--tasks-file',
+        required=True,
+        metavar='PATH',
+        help="""Where to write the JSON task descriptions file, in the shape a
+        cloud_tasks queue loads and sd_results_index_cloud_tasks reads.""",
+    )
+    add_logging_arguments(divide, has_image_logger=False)
+
+    complete = subcommands.add_parser(
+        COMPLETE,
+        help="Add up what the workers did and finish each root's ingest run",
+        description="""Read the cloud_tasks event log the workers wrote, add up
+        what their tasks did, and record it against each named root's ingest
+        run. A root whose tasks do not account for exactly the files its listing
+        found is left unfinished and named. No document is read and no row is
+        removed here, so --force and --no-prune belong to the sd_results_index
+        divide that cut the shares and are not offered.""",
+    )
+    _add_environment_arguments(complete, reads_a_tree=True)
+    complete_group = complete.add_argument_group('Cloud tasks')
+    complete_group.add_argument(
+        '--events-log',
+        required=True,
+        metavar='PATH',
+        help="""The cloud_tasks event log the workers wrote, whose
+        task_completed events carry what each share ingested, skipped and could
+        not read.""",
+    )
+    add_logging_arguments(complete, has_image_logger=False)
+
+    drop = subcommands.add_parser(
+        DROP,
+        help="Remove the results index's tables from the database and stop",
+        description="""Remove the results index's own tables from the database
+        --results-index-db names, and stop: no results root is read and no
+        document is ingested. The tables that go are the index's own six names,
+        from the one schema this database's own schema_meta stamp was found in;
+        no other table of that schema, and no other schema, is touched. What
+        makes those six SpinDoctor's own is that an ingest refuses to build an
+        index in a schema holding anything it did not create, so a schema
+        carrying that stamp holds this index and nothing else. A database
+        holding none of those tables is left alone and said to be, and one
+        holding tables of those names that no stamp of ours stands over is
+        refused. It reads no tree and ingests nothing, so it offers none of the
+        options that describe an ingest.""",
+    )
+    _add_environment_arguments(drop, reads_a_tree=False)
+    drop_group = drop.add_argument_group('Drop')
     drop_group.add_argument(
         '--yes',
         action='store_true',
         default=False,
         help="""Drop without asking for confirmation, for a run with nobody at
-        the terminal. Refused without --drop-index, which is the only thing this
-        program asks about.""",
+        the terminal.""",
     )
-
-    cloud_group = cmdparser.add_argument_group('Cloud tasks')
-    cloud_mode = cloud_group.add_mutually_exclusive_group()
-    cloud_mode.add_argument(
-        '--output-cloud-tasks-file',
-        default=None,
-        metavar='PATH',
-        help="""Write a JSON task descriptions file suitable for loading into a
-        cloud_tasks queue (consumed by sd_results_index_cloud_tasks) and read no
-        document here. Each root is still listed once, and the rows whose
-        documents have left it are still removed; its ingest stays unfinished
-        until --complete-cloud-tasks-file adds up what the workers did.""",
-    )
-    cloud_mode.add_argument(
-        '--complete-cloud-tasks-file',
-        default=None,
-        metavar='PATH',
-        help="""Read the cloud_tasks event log the workers wrote, add up what
-        their tasks did, and record it against each named root's ingest run.
-        A root whose tasks do not account for exactly the files its listing
-        found is left unfinished and named.""",
-    )
-
-    add_logging_arguments(cmdparser, has_image_logger=False)
+    add_logging_arguments(drop, has_image_logger=False)
 
     return cmdparser.parse_args(command_list)
 
@@ -308,12 +407,12 @@ def _log_completion(completion: TaskCompletion) -> None:
         MAIN_LOGGER.error(
             'Left unfinished, because its ingest run never recorded what its listing found, '
             'so nothing says what this root holds: %s. Divide the root up with '
-            '--output-cloud-tasks-file, run its tasks, and complete that run.',
+            'sd_results_index divide, run its tasks, and complete that run.',
             root,
         )
     for root in completion.roots_without_a_run:
         MAIN_LOGGER.error(
-            'No unfinished ingest run to complete for %s: run --output-cloud-tasks-file over '
+            'No unfinished ingest run to complete for %s: run sd_results_index divide over '
             'that root first, and complete the run that fanned out',
             root,
         )
@@ -410,7 +509,7 @@ def _write_cloud_tasks(
         )
     MAIN_LOGGER.info(
         'Each root stays unfinished until the workers have run and '
-        '--complete-cloud-tasks-file has added up what they did'
+        'sd_results_index complete has added up what they did'
     )
     return 1 if fan_out.counts.roots_unreadable else 0
 
@@ -462,63 +561,14 @@ def _complete_cloud_tasks(engine: sqlalchemy.Engine, roots: list[str], *, path: 
     return 1 if unfinished else 0
 
 
-def _mode_refusal(arguments: argparse.Namespace) -> str | None:
-    """Return why a command line cannot be run as it stands, or None.
-
-    Refused rather than ignored, on the same grounds as ``--force`` under a
-    completion below: an operator who typed an option meant something by it, and
-    a program that silently does one of the two things asked of it has decided
-    which one on their behalf.  ``--drop-index`` removes the index and stops, so
-    every option describing an ingest is at odds with it rather than modifying
-    it; and ``--yes`` answers a question only the drop asks.
-
-    ``--nav-results-root`` is refused only when it was typed.  The same root
-    reaches this program from the configuration and from the environment, where
-    it is a machine's standing setting rather than a request, and refusing a
-    drop because the machine has a results tree would refuse it nearly
-    everywhere.
-
-    Parameters:
-        arguments: The parsed command line.
-
-    Returns:
-        The refusal to report, or None when the arguments agree with each other.
-    """
-    if not arguments.drop_index:
-        if arguments.yes:
-            return (
-                '--yes says not to ask before dropping the results index, and this command '
-                'line asks for no drop. Add --drop-index, or leave --yes off.'
-            )
-        return None
-    conflicting = [
-        name
-        for name, given in (
-            ('--force', arguments.force),
-            ('--no-prune', not arguments.prune),
-            ('--nav-results-root', arguments.nav_results_roots is not None),
-            ('--output-cloud-tasks-file', arguments.output_cloud_tasks_file is not None),
-            ('--complete-cloud-tasks-file', arguments.complete_cloud_tasks_file is not None),
-        )
-        if given
-    ]
-    if conflicting:
-        return (
-            f'--drop-index removes the index and stops, reading no document, so it has '
-            f'nothing to do with {", ".join(conflicting)}. Drop first, then run the ingest '
-            f'you want against what it left behind.'
-        )
-    return None
-
-
 def main() -> None:
     """Console entry point for ``sd_results_index``.
 
-    Resolves the index URL and, unless the command line asks for a drop, the
-    results roots as well; then, according to the mode named on the command
-    line, removes the index's tables, reads every document under those roots,
-    divides them into cloud tasks, or adds up what those tasks did.  The outcome
-    goes to the main log whichever mode ran.
+    Resolves the index URL and, for every subcommand but the drop, the results
+    roots as well; then does what the subcommand names -- removes the index's
+    tables, reads every document under those roots, divides them into cloud
+    tasks, or adds up what those tasks did.  The outcome goes to the main log
+    whichever subcommand ran.
 
     Raises:
         SystemExit: Always, since this is a console entry point.  The status
@@ -540,26 +590,28 @@ def main() -> None:
             when the database could not be opened or read, when it holds tables
             of those names that nothing proves are the index's, when a table
             would not drop, or when whoever was asked said anything but yes.
+            A command line the parser will not take exits 2 with a usage error
+            on standard error and does nothing at all: no subcommand, an unknown
+            one, a subcommand missing the path it acts on, or an option
+            belonging to one of the other three.
     """
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
-    # One pass may cover several roots, which is what makes ingest different
-    # from every other program; the shared root resolver reads one attribute,
-    # so the first named root is the one this run is logged under and the rest
-    # are further trees to walk.  With none named, the resolver falls through to
-    # the configuration variable and the environment as it does everywhere else.
-    arguments.nav_results_root = (arguments.nav_results_roots or [None])[0]
+    if arguments.command in _READS_A_TREE:
+        # One pass may cover several roots, which is what makes ingest different
+        # from every other program; the shared root resolver reads one
+        # attribute, so the first named root is the one this run is logged under
+        # and the rest are further trees to walk.  With none named, the resolver
+        # falls through to the configuration variable and the environment as it
+        # does everywhere else, which is also how it answers for the drop, whose
+        # command line has no root on it to read.
+        arguments.nav_results_root = (arguments.nav_results_roots or [None])[0]
 
     # Read configuration files
     with reporting_logging_errors():
         load_default_and_user_config(arguments, DEFAULT_CONFIG)
     with reporting_logging_errors():
         build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
-
-    refusal = _mode_refusal(arguments)
-    if refusal is not None:
-        MAIN_LOGGER.fatal('%s', refusal)
-        sys.exit(1)
 
     # A level that names the index with an empty value is a different failure from
     # naming none at all, and its message names that level, so it is reported as
@@ -576,7 +628,7 @@ def main() -> None:
         )
         sys.exit(1)
 
-    if arguments.drop_index:
+    if arguments.command == DROP:
         # Before the roots are resolved, and instead of them: a drop is about
         # the database alone, and requiring a results root for it would refuse
         # the command on a machine that has the index and not the tree.
@@ -605,53 +657,33 @@ def main() -> None:
     # that is not there is a wrong URL rather than a first run: creating an
     # empty one would answer "no run to complete" for a root whose run is
     # sitting in the index the operator meant to name.
-    completing = arguments.complete_cloud_tasks_file is not None
+    completing = arguments.command == COMPLETE
 
-    MAIN_LOGGER.info('Starting results index ingest')
+    # The subcommand, not a fixed word: a run's log opens by saying which of the
+    # four it is, and a divide or a completion reported as an ingest is a log
+    # that names a pass nobody asked for.
+    MAIN_LOGGER.info('Starting results index %s', arguments.command)
     MAIN_LOGGER.info('Roots: %s', ', '.join(roots))
     if not completing:
         MAIN_LOGGER.info('Force: %s', arguments.force)
     MAIN_LOGGER.info('Arguments: %s', masked_command_line(command_list))
 
-    if completing and arguments.force:
-        # Refused rather than ignored.  Completion reads no document, so there
-        # is nothing for --force to re-read; an operator who typed it meant the
-        # shares to be read again, and that is a property of the fan-out that
-        # cut them, decided one step earlier.
-        MAIN_LOGGER.fatal(
-            '--force has no meaning when adding up what the workers did, since no document '
-            'is read here. Re-run --output-cloud-tasks-file with --force and run the tasks '
-            'it writes.'
-        )
-        sys.exit(1)
-    if completing and not arguments.prune:
-        # Refused rather than ignored, on the same grounds as --force above.
-        # Completion removes no row: the fan-out that cut the shares held the
-        # one listing of the root and removed there, so whether this index keeps
-        # the rows of documents that have left the tree was settled a step
-        # earlier and cannot be revisited here.
-        MAIN_LOGGER.fatal(
-            '--no-prune has no meaning when adding up what the workers did, since no row is '
-            'removed here. The rows of documents that have left the tree go, or stay, at the '
-            '--output-cloud-tasks-file that listed the root.'
-        )
-        sys.exit(1)
     try:
         engine = open_index(url, create=not completing)
     except ValueError as exc:
         MAIN_LOGGER.fatal('Cannot open the results index: %s', exc)
         sys.exit(1)
     try:
-        if arguments.output_cloud_tasks_file is not None:
+        if arguments.command == DIVIDE:
             status = _write_cloud_tasks(
                 engine,
                 roots,
                 force=arguments.force,
                 prune=arguments.prune,
-                path=arguments.output_cloud_tasks_file,
+                path=arguments.tasks_file,
             )
         elif completing:
-            status = _complete_cloud_tasks(engine, roots, path=arguments.complete_cloud_tasks_file)
+            status = _complete_cloud_tasks(engine, roots, path=arguments.events_log)
         else:
             status = _run_ingest(engine, roots, force=arguments.force, prune=arguments.prune)
     except UnwritableRowError as exc:

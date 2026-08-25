@@ -323,7 +323,7 @@ per instrument, and Voyager needs a different id per spacecraft under one
 key.
 
 These field names and shapes are also the ones the results-index schema
-declares in advance (`plans/RESULTS_DB_PLAN.md` section 2.3); changing them
+declares in advance (`plans/RESULTS_INDEX_PLAN.md` section 2.3); changing them
 here means changing them there.
 
 ### 2.4 Where it is computed

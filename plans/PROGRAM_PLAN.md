@@ -15,7 +15,7 @@ reconciled 2026-08-07.*
 | `plans/COHORT_CURATION_PLAN.md` | The operational playbook for growing the curated image library: metadata-driven discovery, operator review votes, sidecar generation. |
 | `plans/OPERATOR_PLAYBOOK.md` | The operator's dispatch sheet: which decisions are pending, which sessions to launch, and in what order. |
 | `plans/CK_KERNEL_PLAN.md` | The design of record for recording each navigated image's corrected attitude as a C-matrix and generating SPICE C-kernels from it. Implemented; its section 0 carries the status and what remains. |
-| `plans/RESULTS_DB_PLAN.md` | Implementation plan for the optional, rebuildable index over the navigation results tree. Self-contained; executable without the plans above. |
+| `plans/RESULTS_INDEX_PLAN.md` | Implementation plan for the optional, rebuildable index over the navigation results tree. Self-contained; executable without the plans above. |
 | `plans/archive/` | Superseded and fully-executed plans, kept as historical records with dates in their filenames. Nothing in there is current work, though the executed designs remain the reference for what shipped. |
 
 ---
@@ -324,7 +324,7 @@ exists (with the pixel offset as the documented fallback for
 fitted-rotation, offset-only and malformed records, and uncorrected
 pointing with the reason recorded when neither is usable), closing #50. What that leaves is the
 follow-ups in the CK plan's section 7. The remaining decided item with a
-self-contained plan of its own is `plans/RESULTS_DB_PLAN.md` (an optional,
+self-contained plan of its own is `plans/RESULTS_INDEX_PLAN.md` (an optional,
 rebuildable index over the results tree, so programs stop reading one JSON
 document per image on a cloud root; #430).
 

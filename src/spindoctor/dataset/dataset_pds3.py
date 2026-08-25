@@ -630,7 +630,7 @@ class DataSetPDS3(DataSet):
             nav_results_root: str | Path | FCPath | None = None,
                 Results root for the filters above.  None resolves via the
                 arguments, configuration, or NAV_RESULTS_ROOT environment variable.
-            results_db_url: str | None = None,
+            results_index_db_url: str | None = None,
                 Results index answering the filters above, so that an
                 enumeration reads rows instead of walking the results tree and
                 reading its documents.  None resolves via the arguments,
@@ -669,7 +669,7 @@ class DataSetPDS3(DataSet):
         has_offset_spice_error: bool = kwargs.pop('has_offset_spice_error', False)
         has_offset_nonspice_error: bool = kwargs.pop('has_offset_nonspice_error', False)
         nav_results_root: str | Path | FCPath | None = kwargs.pop('nav_results_root', None)
-        results_db_url: str | None = kwargs.pop('results_db_url', None)
+        results_index_db_url: str | None = kwargs.pop('results_index_db_url', None)
         choose_random_images: int | None = kwargs.pop('choose_random_images', None)
         if choose_random_images is not None and choose_random_images <= 0:
             raise ValueError(
@@ -763,7 +763,7 @@ class DataSetPDS3(DataSet):
             resolved_arguments = arguments if arguments is not None else argparse.Namespace()
             if nav_results_root is None:
                 nav_results_root = get_nav_results_root(resolved_arguments, self.config)
-            if results_db_url is None and 'results_index_db' in vars(resolved_arguments):
+            if results_index_db_url is None and 'results_index_db' in vars(resolved_arguments):
                 # Only a program that declares --results-index-db reads an index, and
                 # the presence of the argument is that declaration. The URL
                 # resolves from the configuration and the environment as every
@@ -773,7 +773,7 @@ class DataSetPDS3(DataSet):
                 # exported for another one, and a caller that names no argument
                 # at all is asking for the tree.
                 try:
-                    results_db_url = get_results_index_db_url(resolved_arguments, self.config)
+                    results_index_db_url = get_results_index_db_url(resolved_arguments, self.config)
                 except ValueError as exc:
                     # A level that named the index with an empty value is a run
                     # that was configured wrong, and its message already says
@@ -787,7 +787,7 @@ class DataSetPDS3(DataSet):
                 valid_volumes,
                 nav_results_root,
                 logger=logger,
-                results_db_url=results_db_url,
+                results_index_db_url=results_index_db_url,
                 **results_filter_flags,
             )
 

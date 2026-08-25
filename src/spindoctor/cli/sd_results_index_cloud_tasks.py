@@ -2,9 +2,9 @@
 """Ingest one share of a navigation results root, driven by a cloud-tasks queue.
 
 Dispatch script for the ``sd_results_index_cloud_tasks`` console entry point.
-Its interactive sibling ``sd_results_index`` divides a root into shares with
-``--output-cloud-tasks-file`` and adds up what the workers did with
-``--complete-cloud-tasks-file``; this is what reads one of those shares.
+Its interactive sibling ``sd_results_index divide`` divides a root into shares
+and ``sd_results_index complete`` adds up what the workers did; this is what
+reads one of those shares.
 
 A worker is handed the files of its share, not a root to walk: the listing
 happens once, where the work is divided up.  It therefore also removes no row.
@@ -85,11 +85,11 @@ def process_task(
         # all and is reported as its own status so a tally can tell them apart.
         return False, {
             'status': 'error',
-            'status_error': 'unusable_results_db',
+            'status_error': 'unusable_results_index_db',
             'status_exception': str(exc),
         }
     if url is None:
-        return False, {'status': 'error', 'status_error': 'no_results_db'}
+        return False, {'status': 'error', 'status_error': 'no_results_index_db'}
 
     try:
         # create=False: the program that divided the work up made the schema.

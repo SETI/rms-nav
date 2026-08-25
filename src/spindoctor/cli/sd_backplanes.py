@@ -176,7 +176,7 @@ def main() -> None:
     backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
     backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
-    results_db_url = get_results_index_db_url(arguments, DEFAULT_CONFIG)
+    results_index_db_url = get_results_index_db_url(arguments, DEFAULT_CONFIG)
 
     MAIN_LOGGER.info('Starting backplanes generation')
     MAIN_LOGGER.info('Dataset: %s', DATASET_NAME)
@@ -184,7 +184,9 @@ def main() -> None:
     MAIN_LOGGER.info('Backplane results root: %s', backplane_results_root.as_posix())
     MAIN_LOGGER.info(
         'Results index: %s',
-        masked_url(results_db_url) if results_db_url is not None else 'none (reading files)',
+        masked_url(results_index_db_url)
+        if results_index_db_url is not None
+        else 'none (reading files)',
     )
     MAIN_LOGGER.info('Dry run: %s', arguments.dry_run)
     MAIN_LOGGER.info('No write output files: %s', arguments.no_write_output_files)
@@ -246,7 +248,9 @@ def main() -> None:
     # A resolved index that will not open, or a root it has not fully ingested,
     # fails the run here.  Falling back to reading files would turn a
     # misconfigured run into a slow, silently different one.
-    pointing_source = build_pointing_source(nav_results_root, results_db_url=results_db_url)
+    pointing_source = build_pointing_source(
+        nav_results_root, results_index_db_url=results_index_db_url
+    )
     n_done = 0
     n_skipped = 0
     n_failed = 0

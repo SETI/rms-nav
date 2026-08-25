@@ -315,8 +315,8 @@ recently the last pass finished. A tree restored by a copy that preserves times,
 a document patched and stamped back from a sibling, and a backend reporting one
 modification time for two writes all produce it; an ordinary re-navigation
 writes a different length at a later time and does not. Running
-``sd_results_index --force`` over the root re-reads every document and is what
-puts such a row right.
+``sd_results_index ingest --force`` over the root re-reads every document and is
+what puts such a row right.
 
 An index is also a snapshot of the tree as of the last ingest over that root,
 with no staleness detection: an image navigated since is one the index does not
@@ -324,7 +324,8 @@ hold, so ``--has-no-offset-file`` selects it again, and a result file deleted
 since is one the index still holds, so ``--has-offset-file`` selects an image
 whose metadata file is gone. The run log says when the pass that filled the
 index finished and how long ago that was, which is what says whether either
-applies to this run. Run ``sd_results_index`` to bring the index up to date, or
+applies to this run. Run ``sd_results_index ingest`` to bring the index up to
+date, or
 pass ``--results-index-db none``, which names no index, for a run that must read
 the tree. That age is
 what decides the answer outside the paragraphs above; inside them it decides
@@ -336,7 +337,7 @@ holds a root that was only partly walked. A results root that cannot be listed
 at all is the other case and does not stop the pass: that root alone is left
 unfinished, which every consumer already refuses, and the ingest goes on to the
 next root. Fix what stopped the walk -- a directory permission, a share that was
-not answering -- and run ``sd_results_index`` again.
+not answering -- and run ``sd_results_index ingest`` again.
 
 Miscellaneous
 ^^^^^^^^^^^^^

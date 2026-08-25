@@ -64,7 +64,7 @@ validating any of them.
 """
 
 PLANS = FCPath(Path(__file__).resolve().parents[3]) / 'plans'
-PLAN = PLANS / 'RESULTS_DB_PLAN.md'
+PLAN = PLANS / 'RESULTS_INDEX_PLAN.md'
 """The plan, which states the enumeration twice: in Phase 5 and in criterion 1."""
 
 NAVIGATION_GUIDE = (

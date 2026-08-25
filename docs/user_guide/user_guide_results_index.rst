@@ -162,8 +162,8 @@ directions:
 - A result file deleted since the last pass is one the index still holds, so
   ``--has-offset-file`` hands on an image whose document is gone.
 
-Both are answered by running ``sd_results_index`` again, which is cheap over a
-tree that has barely changed: a document whose size and modification time still
+Both are answered by running ``sd_results_index ingest`` again, which is cheap
+over a tree that has barely changed: a document whose size and modification time still
 match is not read at all. Every run that answers from a results index reports
 when the pass that filled it finished and how long ago that was, so the age of
 the answer is in the run log beside the answer.
@@ -174,15 +174,47 @@ are enumerated in :doc:`user_guide_navigation` under the selection filters, and
 the reason vocabulary the backplane and reprojection stages report is in
 :doc:`user_guide_backplanes` and :doc:`user_guide_reprojection`.
 
+How a results index is asked for
+================================
+
+``sd_results_index`` takes the action as a subcommand:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Subcommand
+     - What it does
+   * - ``ingest``
+     - Walks each named results root and reads the documents under it into the
+       results index.
+   * - ``divide``
+     - Lists each root once, removes the rows whose documents have left it, and
+       writes out the shares a queue of workers reads.
+   * - ``complete``
+     - Adds up what those workers did and stamps each root's ingest as
+       finished.
+   * - ``drop``
+     - Removes the results index's own tables from the database and stops.
+
+Each subcommand takes the options it acts on and no others, so a command line
+asking for two different things is refused with a usage message naming the
+option instead of being run as one of them. ``--results-index-db``,
+``--config-file`` and the logging options belong to all four;
+``--nav-results-root`` to the three that read a tree; ``--force`` and
+``--no-prune`` to ``ingest`` and ``divide``; and ``--yes`` to ``drop``. Such a
+refusal exits 2 and does nothing at all --- no database is opened and no tree is
+walked.
+
 Building a results index
 ========================
 
 .. code-block:: bash
 
-    sd_results_index --nav-results-root /data/nav-offset-results \
+    sd_results_index ingest --nav-results-root /data/nav-offset-results \
         --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
 
-``sd_results_index`` walks each navigation-results root recursively for
+``sd_results_index ingest`` walks each navigation-results root recursively for
 ``*_metadata.json`` files (the documents
 :func:`~spindoctor.navigate_image_files.navigate_image_files` writes under
 ``nav_results_root``) and loads them into the results index. Roots may be local
@@ -257,8 +289,8 @@ afterwards. A tree restored by a copy that preserves modification times, a
 document patched and then stamped back from a sibling, and a backend reporting
 one modification time for two writes of equal length all produce that; an
 ordinary re-navigation writes a different length at a later time and does not.
-``sd_results_index --force`` re-reads every document and is what puts such a row
-right. Reading each file to find out whether it needs reading is the retrieval
+``sd_results_index ingest --force`` re-reads every document and is what puts
+such a row right. Reading each file to find out whether it needs reading is the retrieval
 the skip exists to avoid, which is why the remedy is a flag rather than a finer
 comparison.
 
@@ -266,8 +298,8 @@ comparison.
 record says what was wrong with the file, not which build read it, so a document
 refused by one build is skipped by every later one, including a build that has
 since learned to read it. After upgrading SpinDoctor, run
-``sd_results_index --force`` once over each root to re-offer everything it
-refused.
+``sd_results_index ingest --force`` once over each root to re-offer everything
+it refused.
 
 **Ingestion is idempotent.** The results index holds one row per image, and
 re-ingesting the same or an updated document replaces that image's row and its
@@ -309,7 +341,7 @@ where nothing else wants the answer:
   saves the deletes and still runs the query. ``--no-prune --force`` saves the
   query as well, since a forced pass reads every document regardless and so has
   nothing to skip.
-* ``--output-cloud-tasks-file`` issues it for the removals alone; each worker
+* ``sd_results_index divide`` issues it for the removals alone; each worker
   decides what to skip from the metrics its own share carries. So ``--no-prune``
   saves the query there whether or not ``--force`` is given.
 
@@ -318,9 +350,10 @@ the count it would otherwise report, so a run log read later says which
 guarantee the results index under it was built with. Running the ingest again
 without the flag is what puts a root right.
 
-``--no-prune`` is refused with ``--complete-cloud-tasks-file``, which removes no
-row -- whether a fan-out's rows went was settled at the fan-out -- and with
-``--drop-index``, which reads no tree at all.
+``--no-prune`` belongs to ``ingest`` and ``divide``, and neither of the other two
+subcommands offers it: ``complete`` removes no row --- whether a fan-out's rows
+went was settled at the ``divide`` that listed the root --- and ``drop`` reads no
+tree at all.
 
 **A root the results index has no completed ingest of is refused, not
 answered.** Absence of a row would otherwise read as "this image was never
@@ -361,22 +394,24 @@ That tally is what this pass read, and not what the root holds. A refused file
 is recorded in ``failed_files``, and every pass after it skips the file
 unchanged rather than reading it again, so a second pass over the same tree
 refuses nothing and tallies nothing and a summary of zero refusals is a summary
-of what changed. ``sd_results_index --force`` reads every document again, which
-puts the reasons and the example files back into the summary; the root's whole
+of what changed. ``sd_results_index ingest --force`` reads every document again,
+which puts the reasons and the example files back into the summary; the root's whole
 set of them is otherwise a query over ``failed_files`` away.
 
 **A directory under a root that the walk cannot list stops the ingest.** One
 this user may not read, or on a share that stopped answering, is reported as an
 error naming the directory, and the pass ends there: the root it was under gets
 no finish time, no root named after it on the same command line is walked, and
-``sd_results_index`` exits 1. Fix what stopped the walk and run it again.
+``sd_results_index ingest`` exits 1. Fix what stopped the walk and run it
+again.
 
 **A document the results index will not store stops it too.** A file that read
 as a navigation result and whose rows the database then refused is a defect in
 SpinDoctor -- in what it writes, or in the columns it writes into -- rather than
 anything about the file, and the next document of that shape would be refused
 the same way. The pass ends there, naming the file and what the database said,
-the root gets no finish time, and ``sd_results_index`` exits 1. Every document
+the root gets no finish time, and ``sd_results_index ingest`` exits 1. Every
+document
 written before it stays in, so a rerun after the fix reads only what is left.
 The alternative -- counting the file and carrying on -- put it in neither
 ``images`` nor ``failed_files`` under a run stamped finished, which made an
@@ -432,14 +467,16 @@ a link *inside* the tree being walked, which is what the paragraph above is
 about.
 
 **The exit status says whether the pass completed, not what it found.**
-``sd_results_index`` exits 0 when every named root was walked, whatever mix of
-documents was read, skipped and refused, and 1 when the run could not complete:
-no index or no results root could be resolved, a named root is not a location
-that can be read, the results index could not be opened, a root could not be
-listed at all, or a directory under one could not be listed, which stops the
-pass where it is found. A scheduled invocation therefore reads the same status
-from the same tree every time, and a status of 1 always means something needs
-fixing rather than that a tree happens to hold no results.
+``sd_results_index ingest`` exits 0 when every named root was walked, whatever
+mix of documents was read, skipped and refused, and 1 when the run could not
+complete: no index or no results root could be resolved, a named root is not a
+location that can be read, the results index could not be opened, a root could
+not be listed at all, or a directory under one could not be listed, which stops
+the pass where it is found. A scheduled invocation therefore reads the same
+status from the same tree every time, and a status of 1 always means something
+needs fixing rather than that a tree happens to hold no results. A command line
+no subcommand takes exits 2 instead, with a usage message naming the option, and
+nothing is opened or walked.
 
 Ingesting over a queue of workers
 =================================
@@ -452,9 +489,9 @@ and the middle one is where the work happens:
 
     # 1. List each root, remove the rows of documents that have left it, and
     #    write out the shares.
-    sd_results_index --nav-results-root /data/nav-offset-results \
+    sd_results_index divide --nav-results-root /data/nav-offset-results \
         --results-index-db postgresql+psycopg://user@dbhost/spindoctor \
-        --output-cloud-tasks-file ingest_tasks.json
+        --tasks-file ingest_tasks.json
 
     # 2. Run the workers over those tasks, however the queue is driven. Each
     #    worker writes its results into an event log.
@@ -462,9 +499,9 @@ and the middle one is where the work happens:
         --results-index-db postgresql+psycopg://user@dbhost/spindoctor ...
 
     # 3. Add the workers' tallies up and record them against each root.
-    sd_results_index --nav-results-root /data/nav-offset-results \
+    sd_results_index complete --nav-results-root /data/nav-offset-results \
         --results-index-db postgresql+psycopg://user@dbhost/spindoctor \
-        --complete-cloud-tasks-file events.log
+        --events-log events.log
 
 **Workers on one machine can share a SQLite index**; workers on several cannot.
 A ``sqlite:`` URL names a local file, so a run spread across machines connects
@@ -499,7 +536,8 @@ results index. Nothing incorrect is lost -- the rows removed are exactly those
 whose documents the listing did not find -- and the root stays unfinished
 throughout, so no consumer reads a wrong answer from it. What it costs is the
 rest of the root's content in the index, which comes back by running the three
-steps through to the end, or an ordinary ``sd_results_index`` over the root.
+steps through to the end, or an ordinary ``sd_results_index ingest`` over the
+root.
 
 **Two passes over one root at the same time are a documented limit.** Nothing
 refuses a fan-out over a root whose newest run is still unfinished, and two that
@@ -516,8 +554,8 @@ time.
 many files it found; step 3 adds up how many the tasks ingested, skipped and
 refused, counting each task's report once. If the tasks account for fewer files
 than the listing found -- a task that failed, timed out, or was never run --
-the root is named, its run is left unfinished, and ``sd_results_index`` exits
-1. Re-run the outstanding tasks and run step 3 again over a log holding the
+the root is named, its run is left unfinished, and ``sd_results_index complete``
+exits 1. Re-run the outstanding tasks and run step 3 again over a log holding the
 re-run results; a task re-run over a share it already ingested reads nothing,
 because its files match what the results index records, so it reports them as
 skipped. A task that reports twice is still one task: the later report stands
@@ -557,11 +595,12 @@ of what it holds, and step 3 will not finish it: there is nothing for its tasks
 to be measured against, and a root completed on that basis would report every
 image under it as never navigated. Correct the root and run step 1 again.
 
-``--force`` belongs to step 1, and is refused in step 3, which reads no
-document. A pass whose shares must ignore what the results index records is one
-whose fan-out was run with ``--force``. ``--no-prune`` is refused in step 3 on
-the same reasoning from the other side: step 3 removes no row, so whether a root
-keeps the rows of documents that have left it was settled at step 1.
+``--force`` belongs to step 1, and ``complete`` does not offer it, because step 3
+reads no document. A pass whose shares must ignore what the results index records
+is one whose ``divide`` was run with ``--force``. ``--no-prune`` is absent from
+step 3 on the same reasoning from the other side: step 3 removes no row, so
+whether a root keeps the rows of documents that have left it was settled at step
+1.
 
 The tasks file is a JSON array in the shape a ``cloud_tasks`` queue loads. Each
 entry has a ``task_id`` and a ``data`` object carrying ``run_id`` (the ingest
@@ -596,12 +635,12 @@ database and read the tree again.
 
 .. code-block:: bash
 
-    sd_results_index --drop-index \
+    sd_results_index drop \
         --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
-    sd_results_index --nav-results-root /data/nav-offset-results \
+    sd_results_index ingest --nav-results-root /data/nav-offset-results \
         --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
 
-Under ``--drop-index`` the exit status says whether the results index is gone: 0
+Under ``drop`` the exit status says whether the results index is gone: 0
 when the tables went, and 0 again when the database held none of them, since an
 index that is already absent is the state the command was asked for. It is 1
 when the database could not be opened or read, when it holds tables of those
@@ -609,11 +648,12 @@ names that nothing proves are the index's, when a table would not drop, and when
 whoever was asked answered anything but yes.
 
 Starting a results tree over -- delete the results, navigate again, ingest again
--- has a counterpart on the results index, and it is a flag on the same command:
+-- has a counterpart on the results index, and it is a subcommand of the same
+program:
 
 .. code-block:: bash
 
-    sd_results_index --drop-index \
+    sd_results_index drop \
         --results-index-db postgresql+psycopg://user@dbhost/spindoctor
 
 **It drops and stops.** No results root is read and no document is ingested, so
@@ -663,16 +703,15 @@ than as consent. Every refusal, the question itself, and the first line of the
 account name the index URL with its password hidden; the lines that continue
 that account carry the schema and the counts rather than repeating the URL.
 
-**It does one thing, so it refuses to be asked for two.** ``--drop-index``
-together with ``--force``, ``--no-prune``, ``--nav-results-root``,
-``--output-cloud-tasks-file`` or ``--complete-cloud-tasks-file`` is refused
-before anything is opened and exits 1, naming the option it will not combine
-with: a drop reads no document and walks no tree, so each of those was meant for
-a different command. A results
-root reaching the program from ``NAV_RESULTS_ROOT`` or from the configuration is
-a machine's standing setting rather than a request, and is simply unused.
-``--yes`` without ``--drop-index`` is refused for the same reason from the other
-side: it answers a question only the drop asks.
+**It does one thing, so it cannot be asked for two.** ``drop`` offers neither
+``--force``, ``--no-prune`` and ``--nav-results-root`` nor either of the two
+cloud-task paths: a drop reads no document and walks no tree, so each of those
+was meant for a different subcommand. Typing one is a usage error naming the
+option, before anything is opened and with a status of 2. A results root reaching
+the program from ``NAV_RESULTS_ROOT`` or from the configuration is a machine's
+standing setting rather than a request, and is simply unused. ``--yes`` is
+offered by ``drop`` alone for the same reason from the other side: it answers a
+question only the drop asks.
 
 **It works on the databases nothing else will open**, which is the point: an
 index stamped with a schema version this build does not read, or one whose stamp
@@ -697,12 +736,13 @@ neither leaves an empty database behind.
 **What is left behind is a database, not a hole.** Every consumer reads a
 dropped index exactly as it reads one nobody has ever ingested into -- "not
 ingested", with a message naming ``sd_results_index`` -- and the next
-``sd_results_index`` builds it again from the metadata documents. On PostgreSQL
-the two states are literally the same database. On SQLite the file itself
-remains, empty, and the drop deliberately does not delete it, so that one flag
-means one thing on both backends. Deleting the file instead removes the database
-rather than the results index, which every consumer reads the same way but which
-a later ``--drop-index`` refuses rather than reporting as nothing to do.
+``sd_results_index ingest`` builds it again from the metadata documents. On
+PostgreSQL the two states are literally the same database. On SQLite the file
+itself remains, empty, and the drop deliberately does not delete it, so that one
+subcommand means one thing on both backends. Deleting the file instead removes
+the database rather than the results index, which every consumer reads the same
+way but which a later ``sd_results_index drop`` refuses rather than reporting as
+nothing to do.
 
 **An interruption costs nothing.** The whole drop is one transaction on both
 backends: PostgreSQL rolls DDL back with everything else, and on SQLite -- whose

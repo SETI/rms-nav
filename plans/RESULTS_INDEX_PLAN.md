@@ -393,7 +393,7 @@ open_index(url: str, *, create: bool = False) -> Engine
   from the current opener's silent-create behavior.
 - Either way, a `schema_version` that does not match the version the code
   was built for raises, naming both versions and instructing the reader to
-  empty the database with `sd_results_index --drop-index` and re-ingest
+  empty the database with `sd_results_index drop` and re-ingest
   (section 2.11). The stamped version is read and checked
   before anything is written, so a refused `create=True` open creates no table
   and writes no row; creating this version's tables inside a database
@@ -571,7 +571,7 @@ reports every other misconfiguration: the dataset layer re-raises it as
 `SelectionError` so `sd_offset` prints it and exits 1; `sd_stats_report` prints
 it on the stream its other refusals print to and returns 1; `sd_results_index`
 logs it fatal and exits 1; the three cloud-task workers return it as
-`unusable_results_db` with the message attached; and `sd_backplanes`, `sd_mosaic`
+`unusable_results_index_db` with the message attached; and `sd_backplanes`, `sd_mosaic`
 and `sd_create_ck` let it out of `main` exactly as they let out an index that
 will not open and a malformed time bound.
 
@@ -713,7 +713,7 @@ of a root.
 
 **`--no-prune` keeps them, and is documented as a correctness relaxation rather than a speed feature.** Presence stops implying the document is still there: a row outlives its document, so a consumer asking whether an image has been navigated is answered yes for one whose result the tree no longer holds, and `--has-offset-file` hands such an image to a downstream stage. Absence is untouched, because skipping a delete adds no row -- `--has-no-offset-file`, "this image was never navigated" and `require_ingested_roots` all keep exactly the meaning they had. That is what makes the flag offerable at all, and it holds only because the ingest is whole-root: there is no subtree ingest, so a pass that reaches the prune listed everything.
 
-**What it saves is a query and the deletes, never the walk, and which of those depends on the mode.** The rows the index already holds for a root have two readers -- the skip rule in `_files_to_read` and the prune -- and one predicate, `_reads_recorded_rows`, decides whether to run the query on the strength of either wanting it. So an ordinary pass under `--no-prune` still runs it for the skip rule and stops only under `--force` as well; a fan-out, whose workers skip from the metrics their own shares carry, reads it for the prune alone and therefore stops running it either way. The closing summary says the pass left those rows in place, in the position the count of removals occupies otherwise, so a run log read later says which guarantee the index under it was built with. The flag is refused with `--complete-cloud-tasks-file`, which removes no row, and belongs to the list `--drop-index` refuses; nothing new is stored for it, because a field with no reader is not stored.
+**What it saves is a query and the deletes, never the walk, and which of those depends on the mode.** The rows the index already holds for a root have two readers -- the skip rule in `_files_to_read` and the prune -- and one predicate, `_reads_recorded_rows`, decides whether to run the query on the strength of either wanting it. So an ordinary pass under `--no-prune` still runs it for the skip rule and stops only under `--force` as well; a fan-out, whose workers skip from the metrics their own shares carry, reads it for the prune alone and therefore stops running it either way. The closing summary says the pass left those rows in place, in the position the count of removals occupies otherwise, so a run log read later says which guarantee the index under it was built with. The flag belongs to `ingest` and `divide` alone: `complete` removes no row, and `drop` reads no tree; nothing new is stored for it, because a field with no reader is not stored.
 
 **Per-root bookkeeping.** An `ingest_runs` table records, per root:
 `root_url`, `started_utc`, `finished_utc` (NULL while running),
@@ -859,12 +859,12 @@ counts return in task results and are aggregated and written to
 `ingest_runs` by the enqueuer at completion; workers never touch
 `ingest_runs`.
 
-**The enqueuer is `sd_results_index` in two further modes**, since the fan-out
-resolves the same roots and the same index URL as the pass it replaces:
-`--output-cloud-tasks-file` lists, prunes, records what the walk found on each
-run row, and writes the shares out; `--complete-cloud-tasks-file` reads the
-`cloud_tasks` event log, adds the tallies up, and stamps the runs. The two are
-mutually exclusive. Completion opens with `create=False`: the runs it means to
+**The enqueuer is `sd_results_index` in two further subcommands**, since the
+fan-out resolves the same roots and the same index URL as the pass it replaces:
+`divide --tasks-file` lists, prunes, records what the walk found on each run row,
+and writes the shares out; `complete --events-log` reads the `cloud_tasks` event
+log, adds the tallies up, and stamps the runs. The two are separate
+subcommands. Completion opens with `create=False`: the runs it means to
 finish are in the index the fan-out wrote, and creating an empty one would report
 every root as never fanned out.
 
@@ -1130,9 +1130,9 @@ version bump is deliberately not migrated, and the remedy that gate prescribes
 is delete-and-re-ingest. With no command behind it that remedy would be `rm` on
 SQLite and, on PostgreSQL, `psql` with the right connection string and a
 knowledge of which tables SpinDoctor owns in a database that may hold somebody
-else's; `--drop-index` is one flag for it on either backend.
+else's; `sd_results_index drop` is one command for it on either backend.
 
-`sd_results_index --drop-index` removes the index's tables from whatever backend
+`sd_results_index drop` removes the index's tables from whatever backend
 the URL names and **stops** -- it reads no results root and ingests no
 document. Dropping is a deliberate act rather than the first step of a long
 pass, and a command that did both would make a mistyped URL expensive twice
@@ -1248,7 +1248,7 @@ the messages and the exit status are the CLI's, in `spindoctor/cli/results_index
   emptied file remains and the drop deliberately does not delete it, so that one
   flag means one thing on both backends; deleting the file removes the database
   rather than the index, which reads the same to every consumer but which a
-  later `--drop-index` refuses rather than reporting as nothing to do.
+  later `sd_results_index drop` refuses rather than reporting as nothing to do.
 - **A failure is named as what it was.** A drop can fail for a lock somebody
   holds, a view or another object depending on one of these tables, an account
   that does not own one of them, or a table that went between the reading and
@@ -1303,7 +1303,7 @@ four ways:
 - The schema holds nothing: create the tables and stamp it.
 - The schema carries a stamp of SpinDoctor's: it is the index's own whatever
   version that stamp names, and the version gate decides. This is the case
-  `--drop-index` exists for, so it must keep working for a stamp of any version;
+  `drop` exists for, so it must keep working for a stamp of any version;
   the evidence is deliberately the two marks rather than the column set, since a
   stamp of an older version has our tables with other columns.
 - The schema holds a table of one of the index's own names with no such stamp:
@@ -1907,7 +1907,7 @@ Details settled during execution:
   before a single task ran. What crosses is the worker's parsed command line,
   which is what the root and the index are named by, so that is what a task
   builds from. A named index that cannot be opened returns
-  `unusable_results_db` in the task result, which is how a worker reports every
+  `unusable_results_index_db` in the task result, which is how a worker reports every
   other environment failure and is what keeps a task that could not obtain its
   source from reprojecting its whole batch on uncorrected pointing and
   reporting a clean one. Pinned by a test that stands up a real spawn context
@@ -2160,7 +2160,7 @@ Details settled during execution, none of them a change of intent:
 - **The subtree restriction is one restriction, made once, above both storages.** It is a field of `Selection`, so a walk narrows to the directories it names and a query restricts both its arms by it. A stub with no subtree above it is matched by neither arm, because SQL's `IN` is false for NULL -- which is also how a bare scene name falls outside a walk of the selected volumes' directories. The subtrees are asked about one at a time rather than all at once, so that a subtree the results root holds no directory for costs only itself: a single request ends at the first subtree it cannot read, and on an enumeration over volumes nobody has navigated yet that would be every volume after the first.
 - **The URL reaches the filter through the dataset layer, and only from a
   program that declares the option.** `_yield_image_files_index` takes a
-  `results_db_url` keyword; when its caller passes none it resolves one through
+  `results_index_db_url` keyword; when its caller passes none it resolves one through
   `get_results_index_db_url` and its `none` sentinel, but only when the arguments it
   was handed carry a `results_index_db` attribute, which is what declaring
   `--results-index-db` supplies. That is section 2.6's rule, and it is what keeps

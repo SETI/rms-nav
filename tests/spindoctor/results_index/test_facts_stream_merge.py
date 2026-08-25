@@ -337,7 +337,7 @@ def test_a_child_row_belonging_to_no_yielded_image_fails_the_read(
     )
     with (
         open_record_source(
-            [two_roots.first], results_db_url=two_roots.url, columns=COLUMNS
+            [two_roots.first], results_index_db_url=two_roots.url, columns=COLUMNS
         ) as source,
         pytest.raises(ValueError, match='did not answer from one state'),
     ):

@@ -41,19 +41,19 @@ def _tree(tmp_path: Path) -> Path:
     return root
 
 
-def _scanned(root: Path, *, results_db_url: str | None, **flags: bool) -> None:
+def _scanned(root: Path, *, results_index_db_url: str | None, **flags: bool) -> None:
     """Run every candidate of the fixture tree through one filter and close it.
 
     Parameters:
         root: The results root under test.
-        results_db_url: The index to answer from, or None to read the tree.
+        results_index_db_url: The index to answer from, or None to read the tree.
         flags: The selection flags to apply.
     """
     with ResultsFilter(
         VOLUMES,
         str(root),
         logger=reporting_logger(),
-        results_db_url=results_db_url,
+        results_index_db_url=results_index_db_url,
         **flags,
     ) as results_filter:
         select_from(results_filter, candidate_files(root))
@@ -69,7 +69,7 @@ def test_a_scan_that_listed_the_volumes_says_what_the_tree_holds(
         capsys: Fixture the logger's own stream is read back through.
     """
     root = _tree(tmp_path)
-    _scanned(root, results_db_url=None, has_offset_file=True)
+    _scanned(root, results_index_db_url=None, has_offset_file=True)
     found = f'Results scan found {len(CANDIDATES) - 1} offset metadata files'
     assert found in capsys.readouterr().out
 
@@ -84,7 +84,7 @@ def test_a_scan_that_listed_the_volumes_says_what_the_index_holds(
         capsys: Fixture the logger's own stream is read back through.
     """
     root = _tree(tmp_path)
-    _scanned(root, results_db_url=index_of_two_roots(tmp_path, root), has_offset_file=True)
+    _scanned(root, results_index_db_url=index_of_two_roots(tmp_path, root), has_offset_file=True)
     held = f'Results index holds {len(CANDIDATES) - 1} offset metadata files'
     assert held in capsys.readouterr().out
 
@@ -99,7 +99,7 @@ def test_a_scan_that_names_its_candidates_says_so_before_it_starts(
         capsys: Fixture the logger's own stream is read back through.
     """
     root = _tree(tmp_path)
-    _scanned(root, results_db_url=None, has_no_offset_file=True)
+    _scanned(root, results_index_db_url=None, has_no_offset_file=True)
     assert 'Results scan will ask' in capsys.readouterr().out
 
 
@@ -116,7 +116,7 @@ def test_a_scan_that_names_its_candidates_still_reports_the_age_of_an_index(
         capsys: Fixture the logger's own stream is read back through.
     """
     root = _tree(tmp_path)
-    _scanned(root, results_db_url=index_of_two_roots(tmp_path, root), has_no_offset_file=True)
+    _scanned(root, results_index_db_url=index_of_two_roots(tmp_path, root), has_no_offset_file=True)
     assert 'Results index answers about the images under' in capsys.readouterr().out
 
 
@@ -130,7 +130,7 @@ def test_a_closed_scan_says_how_many_candidates_it_asked_about(
         capsys: Fixture the logger's own stream is read back through.
     """
     root = _tree(tmp_path)
-    _scanned(root, results_db_url=None, has_no_offset_file=True)
+    _scanned(root, results_index_db_url=None, has_no_offset_file=True)
     assert f'Results scan asked about {len(CANDIDATES)} images' in capsys.readouterr().out
 
 
@@ -144,7 +144,7 @@ def test_a_closed_scan_says_how_many_of_them_were_already_navigated(
         capsys: Fixture the logger's own stream is read back through.
     """
     root = _tree(tmp_path)
-    _scanned(root, results_db_url=None, has_no_offset_file=True)
+    _scanned(root, results_index_db_url=None, has_no_offset_file=True)
     found = len(CANDIDATES) - 1
     assert f'{found} of which had a navigation document' in capsys.readouterr().out
 

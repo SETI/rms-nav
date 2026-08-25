@@ -694,10 +694,12 @@ def main() -> None:
             pr.print_stats(sort='cumulative')
         return
 
-    results_db_url = get_results_index_db_url(args, DEFAULT_CONFIG)
+    results_index_db_url = get_results_index_db_url(args, DEFAULT_CONFIG)
     MAIN_LOGGER.info(
         'Results index: %s',
-        masked_url(results_db_url) if results_db_url is not None else 'none (reading files)',
+        masked_url(results_index_db_url)
+        if results_index_db_url is not None
+        else 'none (reading files)',
     )
     # A resolved index that will not open, or a root it has not fully ingested,
     # fails the run here rather than quietly reverting to reading files -- but
@@ -708,7 +710,7 @@ def main() -> None:
     reads_navigation_records = not args.skip_reproject and not args.dry_run
     pointing_source = build_pointing_source(
         nav_results_root_path,
-        results_db_url=results_db_url if reads_navigation_records else None,
+        results_index_db_url=results_index_db_url if reads_navigation_records else None,
     )
 
     try:

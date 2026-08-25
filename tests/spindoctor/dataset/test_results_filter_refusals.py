@@ -145,7 +145,7 @@ def _refusal_of(tree: Path, names: Sequence[str]) -> str | None:
     """
     flags = dict.fromkeys(names, True)
     try:
-        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **flags)
+        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_index_db_url=None, **flags)
     except SelectionError as exc:
         return str(exc)
     return None
@@ -229,7 +229,9 @@ def test_a_contradictory_pair_is_refused_before_the_index_is_opened(
     """
     absent = index_url(tmp_path / 'not-an-index.sqlite3')
     with pytest.raises(ValueError, match=CONTRADICTION_REFUSAL) as excinfo:
-        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=absent, **flags)
+        ResultsFilter(
+            VOLUMES, str(tree), logger=null_logger(), results_index_db_url=absent, **flags
+        )
     assert 'not-an-index.sqlite3' not in str(excinfo.value)
 
 
@@ -250,7 +252,7 @@ def test_a_refusal_names_every_flag_that_made_the_selection_impossible(
         flags: The contradictory pair.
     """
     with pytest.raises(SelectionError) as excinfo:
-        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_db_url=None, **flags)
+        ResultsFilter(VOLUMES, str(tree), logger=null_logger(), results_index_db_url=None, **flags)
     assert [name for name in flags if name not in str(excinfo.value)] == []
 
 
@@ -262,7 +264,7 @@ def test_a_root_with_no_completed_ingest_is_refused(tree: Path, indexed: str) ->
             VOLUMES,
             str(other_root),
             logger=null_logger(),
-            results_db_url=indexed,
+            results_index_db_url=indexed,
             has_offset_file=True,
         )
     assert other_root.as_posix() in str(excinfo.value)
@@ -275,7 +277,11 @@ def test_an_index_that_cannot_be_opened_is_not_a_reason_to_read_files(
     absent = index_url(tmp_path / 'not-an-index.sqlite3')
     with pytest.raises(ValueError, match='sd_results_index') as excinfo:
         ResultsFilter(
-            VOLUMES, str(tree), logger=null_logger(), results_db_url=absent, has_offset_file=True
+            VOLUMES,
+            str(tree),
+            logger=null_logger(),
+            results_index_db_url=absent,
+            has_offset_file=True,
         )
     assert 'not-an-index.sqlite3' in str(excinfo.value)
 
@@ -291,7 +297,7 @@ def test_an_index_that_will_not_answer_refuses_the_selection(tmp_path: Path) -> 
     url = index_without_a_table(tmp_path, root, 'failed_files')
     with pytest.raises(SelectionError, match='could not be read'):
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+            VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
         )
 
 
@@ -301,7 +307,7 @@ def test_an_index_that_will_not_answer_raises_no_database_exception(tmp_path: Pa
     url = index_without_a_table(tmp_path, root, 'failed_files')
     with pytest.raises(SelectionError) as excinfo:
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+            VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
         )
     assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
 
@@ -312,7 +318,11 @@ def test_an_index_that_cannot_be_opened_refuses_the_selection(tmp_path: Path) ->
     absent = index_url(tmp_path / 'not-an-index.sqlite3')
     with pytest.raises(SelectionError, match='sd_results_index'):
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=absent, has_offset_file=True
+            VOLUMES,
+            str(root),
+            logger=null_logger(),
+            results_index_db_url=absent,
+            has_offset_file=True,
         )
 
 
@@ -323,7 +333,7 @@ def test_a_root_the_index_does_not_cover_refuses_the_selection(tree: Path, index
             VOLUMES,
             str(tree.parent / 'never-ingested'),
             logger=null_logger(),
-            results_db_url=indexed,
+            results_index_db_url=indexed,
             has_offset_file=True,
         )
 
@@ -351,7 +361,7 @@ def test_the_refusal_does_not_repeat_the_query_that_failed(tmp_path: Path) -> No
     url = index_without_a_table(tmp_path, root, 'failed_files')
     with pytest.raises(SelectionError) as excinfo:
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+            VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
         )
     assert 'SELECT' not in str(excinfo.value)
 
@@ -362,7 +372,7 @@ def test_the_refusal_carries_what_the_driver_said(tmp_path: Path) -> None:
     url = index_without_a_table(tmp_path, root, 'failed_files')
     with pytest.raises(SelectionError, match='no such table: failed_files'):
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+            VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
         )
 
 
@@ -382,7 +392,7 @@ def test_a_failure_of_the_bookkeeping_query_is_translated_too(tmp_path: Path) ->
     url = index_without_a_table(tmp_path, root, 'ingest_runs')
     with pytest.raises(SelectionError, match='could not be read'):
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+            VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
         )
 
 
@@ -398,7 +408,7 @@ def test_a_failure_of_the_bookkeeping_query_raises_no_database_exception(
     url = index_without_a_table(tmp_path, root, 'ingest_runs')
     with pytest.raises(SelectionError) as excinfo:
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+            VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
         )
     assert not isinstance(excinfo.value, sqlalchemy.exc.SQLAlchemyError)
 
@@ -413,7 +423,7 @@ def test_a_failure_of_the_bookkeeping_query_names_the_table(tmp_path: Path) -> N
     url = index_without_a_table(tmp_path, root, 'ingest_runs')
     with pytest.raises(SelectionError, match='no such table: ingest_runs'):
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_offset_file=True
+            VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_offset_file=True
         )
 
 
@@ -432,7 +442,7 @@ def test_an_index_that_stops_answering_a_scan_of_candidates_refuses_the_selectio
     root, images = one_image_tree(tmp_path)
     url = index_without_a_table(tmp_path, root, 'failed_files')
     scan = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
+        VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_no_offset_file=True
     )
     with scan, pytest.raises(SelectionError, match='could not be read'):
         scan.filter_batch(images)
@@ -449,7 +459,7 @@ def test_an_index_that_stops_answering_a_scan_of_candidates_raises_no_database_e
     root, images = one_image_tree(tmp_path)
     url = index_without_a_table(tmp_path, root, 'failed_files')
     scan = ResultsFilter(
-        VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
+        VOLUMES, str(root), logger=null_logger(), results_index_db_url=url, has_no_offset_file=True
     )
     with scan, pytest.raises(SelectionError) as excinfo:
         scan.filter_batch(images)
@@ -479,7 +489,11 @@ def test_a_scan_of_candidates_refused_at_the_bookkeeping_query_leaves_no_storage
     monkeypatch.setattr(results_filter, 'open_record_source', opening)
     with pytest.raises(SelectionError, match='could not be read'):
         ResultsFilter(
-            VOLUMES, str(root), logger=null_logger(), results_db_url=url, has_no_offset_file=True
+            VOLUMES,
+            str(root),
+            logger=null_logger(),
+            results_index_db_url=url,
+            has_no_offset_file=True,
         )
     assert source.closes == 1
 
@@ -610,7 +624,7 @@ def test_a_refusal_from_the_report_releases_the_storage_as_well(
     source = _CountingSource()
     _opening(monkeypatch, source)
 
-    def refusing(results_db_url: str, root: Any) -> str:
+    def refusing(results_index_db_url: str, root: Any) -> str:
         raise ValueError('this results index could not be read')
 
     monkeypatch.setattr(results_filter, 'snapshot_finish_time', refusing)
@@ -619,7 +633,7 @@ def test_a_refusal_from_the_report_releases_the_storage_as_well(
             VOLUMES,
             str(tmp_path),
             logger=null_logger(),
-            results_db_url='sqlite+pysqlite:///nothing-is-opened',
+            results_index_db_url='sqlite+pysqlite:///nothing-is-opened',
             has_offset_error=True,
         )
     assert source.closes == 1

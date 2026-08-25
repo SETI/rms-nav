@@ -276,7 +276,7 @@ def test_a_results_index_answers_the_offset_file_filter(
             volumes=['COISS_2001'],
             has_offset_file=True,
             nav_results_root=str(results_root),
-            results_db_url=url,
+            results_index_db_url=url,
         )
     )
 

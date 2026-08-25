@@ -1,4 +1,4 @@
-"""Tests for ``sd_results_index --drop-index``.
+"""Tests for ``sd_results_index drop``.
 
 The destructive command, so what is asked of it is mostly what it does *not* do:
 it does not drop without an answer, it does not treat a closed standard input as
@@ -138,7 +138,7 @@ def _drop(
     Returns:
         The exit status, and one entry per line written to the main log.
     """
-    return run_driver(['--results-index-db', url, '--drop-index', *extra], monkeypatch, tmp_path)
+    return run_driver(['drop', '--results-index-db', url, *extra], monkeypatch, tmp_path)
 
 
 def _tables(url: str) -> list[str]:
@@ -388,11 +388,12 @@ def test_an_unfinished_ingest_run_is_reported_before_the_question(
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
+            'divide',
             '--results-index-db',
             url,
             '--nav-results-root',
             root.as_posix(),
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,
@@ -422,11 +423,12 @@ def test_an_unfinished_ingest_run_is_named_in_the_question_itself(
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
+            'divide',
             '--results-index-db',
             url,
             '--nav-results-root',
             root.as_posix(),
-            '--output-cloud-tasks-file',
+            '--tasks-file',
             str(tmp_path / 'tasks.json'),
         ],
         monkeypatch,
@@ -512,100 +514,6 @@ def test_nobody_is_asked_when_there_is_nothing_to_drop(
     _answering(monkeypatch, '')
     status, _written = _drop(url, monkeypatch, tmp_path)
     assert status == 0
-
-
-# ---------------------------------------------------------------------------
-# What a drop refuses to be combined with
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ('extra', 'named'),
-    [
-        (['--force'], '--force'),
-        (['--output-cloud-tasks-file', 'tasks.json'], '--output-cloud-tasks-file'),
-        (['--complete-cloud-tasks-file', 'events.log'], '--complete-cloud-tasks-file'),
-    ],
-)
-def test_a_drop_refuses_the_ingest_options(
-    extra: list[str],
-    named: str,
-    tmp_path: Path,
-    quiet_logger: pdslogger.PdsLogger,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Refused rather than ignored: a program may not choose which half to do.
-
-    Parameters:
-        extra: The ingest option the command line also carries.
-        named: What the refusal has to name.
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
-    url = _tree_with_an_index(tmp_path, quiet_logger)
-    _status, written = _drop(url, monkeypatch, tmp_path, *extra)
-    assert any(named in line for line in written)
-
-
-def test_a_refused_combination_leaves_the_index_alone(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The refusal is before the open, so nothing is opened and nothing goes.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
-    url = _tree_with_an_index(tmp_path, quiet_logger)
-    _drop(url, monkeypatch, tmp_path, '--force', '--yes')
-    assert _tables(url) == sorted(index_table_names())
-
-
-def test_a_refused_combination_exits_nonzero(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The status has to say the command did not run, not that it ran.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
-    url = _tree_with_an_index(tmp_path, quiet_logger)
-    status, _written = _drop(url, monkeypatch, tmp_path, '--force', '--yes')
-    assert status == 1
-
-
-def test_yes_without_a_drop_is_refused(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """It answers a question only the drop asks, so on its own it means nothing.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
-    url = _tree_with_an_index(tmp_path, quiet_logger)
-    status, _written = run_driver(['--results-index-db', url, '--yes'], monkeypatch, tmp_path)
-    assert status == 1
-
-
-def test_the_refusal_of_yes_alone_says_what_to_add(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An operator who typed it meant something, so the refusal says what.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
-    url = _tree_with_an_index(tmp_path, quiet_logger)
-    _status, written = run_driver(['--results-index-db', url, '--yes'], monkeypatch, tmp_path)
-    assert any('--drop-index' in line for line in written)
 
 
 # ---------------------------------------------------------------------------
@@ -804,7 +712,7 @@ def _selecting_against(url: str, tmp_path: Path, quiet_logger: pdslogger.PdsLogg
         ['VOL'],
         tmp_path / 'results',
         logger=quiet_logger,
-        results_db_url=url,
+        results_index_db_url=url,
         has_offset_file=True,
     )
 
@@ -1266,40 +1174,8 @@ def test_ctrl_c_during_the_drop_leaves_every_table(
 
 
 # ---------------------------------------------------------------------------
-# The option a drop has nothing to do with
+# A results root the drop never reads
 # ---------------------------------------------------------------------------
-
-
-def test_a_drop_refuses_a_results_root_that_was_typed(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A drop reads no tree, so a root named on the command line meant something else.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
-    url = _tree_with_an_index(tmp_path, quiet_logger)
-    _status, written = _drop(
-        url, monkeypatch, tmp_path, '--nav-results-root', str(tmp_path / 'results')
-    )
-    assert any('--nav-results-root' in line for line in written)
-
-
-def test_such_a_command_line_leaves_the_index_alone(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Refused before the open, so nothing is opened and nothing goes.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
-    url = _tree_with_an_index(tmp_path, quiet_logger)
-    _drop(url, monkeypatch, tmp_path, '--yes', '--nav-results-root', str(tmp_path / 'results'))
-    assert _tables(url) == sorted(index_table_names())
 
 
 def test_a_results_root_from_the_environment_does_not_refuse_a_drop(
@@ -1473,11 +1349,12 @@ def test_neither_state_lets_a_fan_out_be_completed(
     statuses = [
         run_driver(
             [
+                'complete',
                 '--results-index-db',
                 url,
                 '--nav-results-root',
                 str(tmp_path / 'results'),
-                '--complete-cloud-tasks-file',
+                '--events-log',
                 str(events),
             ],
             monkeypatch,
@@ -1501,7 +1378,7 @@ def test_both_states_are_rebuilt_by_the_ingest_that_creates(
     root = tmp_path / 'results'
     statuses = [
         run_driver(
-            ['--results-index-db', url, '--nav-results-root', root.as_posix()],
+            ['ingest', '--results-index-db', url, '--nav-results-root', root.as_posix()],
             monkeypatch,
             tmp_path,
         )[0]

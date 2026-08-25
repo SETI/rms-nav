@@ -248,7 +248,7 @@ def test_an_index_that_cannot_be_opened_fails_the_task(
         driver: Which of the two drivers is under test.
     """
     _, result = _refused_index_result(tmp_path, monkeypatch, driver)
-    assert result['status_error'] == 'unusable_results_db'
+    assert result['status_error'] == 'unusable_results_index_db'
 
 
 @pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
@@ -296,7 +296,7 @@ def test_an_index_named_with_an_empty_value_fails_the_task(
         driver: Which of the two drivers is under test.
     """
     _, result = _empty_index_result(tmp_path, monkeypatch, driver)
-    assert result['status_error'] == 'unusable_results_db'
+    assert result['status_error'] == 'unusable_results_index_db'
 
 
 @pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])

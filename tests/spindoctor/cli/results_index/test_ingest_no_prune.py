@@ -383,9 +383,14 @@ def test_a_fan_out_that_does_not_prune_still_cuts_every_document_into_a_share(
 
 
 def _run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, url: str, root: Path, *extra: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    root: Path,
+    *extra: str,
+    command: str = 'ingest',
 ) -> tuple[int | None, list[str]]:
-    """Run ``sd_results_index`` over one root.
+    """Run one ``sd_results_index`` subcommand over one root.
 
     Parameters:
         tmp_path: Directory the logs are written under.
@@ -393,12 +398,13 @@ def _run(
         url: The index URL.
         root: The results root.
         *extra: Further arguments.
+        command: The subcommand to run.
 
     Returns:
         The exit status, and one entry per line written to the main log.
     """
     return run_driver(
-        ['--results-index-db', url, '--nav-results-root', root.as_posix(), *extra],
+        [command, '--results-index-db', url, '--nav-results-root', root.as_posix(), *extra],
         monkeypatch,
         tmp_path,
     )
@@ -451,9 +457,10 @@ def test_a_fan_out_from_the_command_line_says_it_did_not_prune(
         monkeypatch,
         url,
         root,
-        '--output-cloud-tasks-file',
+        '--tasks-file',
         str(tmp_path / 'tasks.json'),
         '--no-prune',
+        command='divide',
     )
     assert any('left in place' in line for line in written)
 
@@ -471,9 +478,10 @@ def test_a_fan_out_from_the_command_line_leaves_the_row_of_a_deleted_document(
         monkeypatch,
         url,
         root,
-        '--output-cloud-tasks-file',
+        '--tasks-file',
         str(tmp_path / 'tasks.json'),
         '--no-prune',
+        command='divide',
     )
     assert _stubs(url, IMAGES) == [KEPT, LEFT]
 
@@ -524,25 +532,22 @@ def _complete(
         monkeypatch,
         url,
         tmp_path / 'results',
-        '--complete-cloud-tasks-file',
+        '--events-log',
         str(tmp_path / 'events.log'),
         *extra,
+        command='complete',
     )
 
 
-def test_a_completion_that_would_otherwise_finish_refuses_the_flag(
+def test_a_completion_of_a_covered_root_finishes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A completion removes no row, so an operator who typed it meant something else."""
-    url = _a_completed_fan_out(tmp_path, monkeypatch)
-    status, _written = _complete(tmp_path, monkeypatch, url, '--no-prune')
-    assert status == 1
+    """A completion whose tasks account for the root exits 0.
 
-
-def test_the_same_completion_without_the_flag_finishes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The control that makes the refusal above a refusal rather than a coincidence."""
+    The control for the subcommand surface's refusal of --no-prune here: over a
+    root nobody fanned out, or an index that is not there, this exits nonzero of
+    its own accord and a refusal could not be told from it.
+    """
     url = _a_completed_fan_out(tmp_path, monkeypatch)
     status, _written = _complete(tmp_path, monkeypatch, url)
     assert status == 0
@@ -568,55 +573,19 @@ def test_a_completion_does_not_say_a_document_left_the_tree(
     assert claims == []
 
 
-def test_a_completion_that_refuses_the_flag_says_where_it_belongs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A refusal nobody can act on is only half a refusal."""
-    url = _a_completed_fan_out(tmp_path, monkeypatch)
-    _status, written = _complete(tmp_path, monkeypatch, url, '--no-prune')
-    refusals = [line for line in written if '--no-prune has no meaning' in line]
-    assert '--output-cloud-tasks-file' in refusals[0]
-
-
-def test_a_drop_that_would_otherwise_run_refuses_the_flag(
+def test_a_drop_of_a_real_index_runs(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A drop removes the index and stops, so it has no tree to have pruned from.
+    """A drop of an index that is really there exits 0.
 
-    The index is a real one, because a drop pointed at a database that is not
-    there exits 1 of its own accord and could not tell a refusal from that.
+    The control for the subcommand surface's refusal of --no-prune here: a drop
+    pointed at a database that is not there exits 1 of its own accord, and a
+    refusal could not be told from it.
     """
     root, _leaving = _tree_of_two(tmp_path)
     url = index_url(tmp_path / 'index.sqlite3')
     _ingest(url, root, logger=quiet_logger)
     status, _written = run_driver(
-        ['--results-index-db', url, '--drop-index', '--yes', '--no-prune'], monkeypatch, tmp_path
-    )
-    assert status == 1
-
-
-def test_the_same_drop_without_the_flag_runs(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The control that makes the refusal above a refusal rather than a coincidence."""
-    root, _leaving = _tree_of_two(tmp_path)
-    url = index_url(tmp_path / 'index.sqlite3')
-    _ingest(url, root, logger=quiet_logger)
-    status, _written = run_driver(
-        ['--results-index-db', url, '--drop-index', '--yes'], monkeypatch, tmp_path
+        ['drop', '--results-index-db', url, '--yes'], monkeypatch, tmp_path
     )
     assert status == 0
-
-
-def test_a_drop_that_refuses_the_flag_names_it(
-    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The refusal names the option it will not combine with, as it does for the others."""
-    root, _leaving = _tree_of_two(tmp_path)
-    url = index_url(tmp_path / 'index.sqlite3')
-    _ingest(url, root, logger=quiet_logger)
-    _status, written = run_driver(
-        ['--results-index-db', url, '--drop-index', '--yes', '--no-prune'], monkeypatch, tmp_path
-    )
-    refusals = [line for line in written if 'nothing to do with' in line]
-    assert '--no-prune' in refusals[0]

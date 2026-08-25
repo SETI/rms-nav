@@ -255,7 +255,7 @@ def _answering(
     root = _write_roots(tmp_path)
     url = _ingested(tmp_path, root) if from_an_index else None
     results_filter = ResultsFilter(
-        volumes, str(root), logger=null_logger(), results_db_url=url, **flags
+        volumes, str(root), logger=null_logger(), results_index_db_url=url, **flags
     )
     return select_from(results_filter, _candidate_files(root))
 
@@ -480,7 +480,7 @@ def test_a_relative_results_root_names_the_root_the_ingest_recorded(
     url = _ingested(tmp_path, root)
     monkeypatch.chdir(tmp_path)
     results_filter = ResultsFilter(
-        VOLUMES, root.name, logger=null_logger(), results_db_url=url, has_offset_file=True
+        VOLUMES, root.name, logger=null_logger(), results_index_db_url=url, has_offset_file=True
     )
     assert select_from(results_filter, _candidate_files(root)) == [
         SELECTED,
@@ -508,7 +508,7 @@ def test_a_root_named_through_a_parent_segment_is_the_root_the_ingest_recorded(
         VOLUMES,
         f'{tmp_path.as_posix()}/other-results/../results',
         logger=null_logger(),
-        results_db_url=url,
+        results_index_db_url=url,
         has_offset_file=True,
     )
     assert select_from(results_filter, _candidate_files(root)) == [
@@ -703,7 +703,9 @@ def _subtrees_asked_about(
         return _RecordingSource(asked, [])
 
     monkeypatch.setattr(results_filter, 'open_record_source', recording)
-    ResultsFilter(iter(VOLUMES), str(tmp_path), logger=null_logger(), results_db_url=None, **flags)
+    ResultsFilter(
+        iter(VOLUMES), str(tmp_path), logger=null_logger(), results_index_db_url=None, **flags
+    )
     return asked
 
 
@@ -875,7 +877,9 @@ def _source_of(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **flags: bool) -
         return source
 
     monkeypatch.setattr(results_filter, 'open_record_source', recording)
-    with ResultsFilter(VOLUMES, str(tmp_path), logger=null_logger(), results_db_url=None, **flags):
+    with ResultsFilter(
+        VOLUMES, str(tmp_path), logger=null_logger(), results_index_db_url=None, **flags
+    ):
         pass
     return source
 
@@ -954,7 +958,7 @@ def test_only_a_filter_that_reads_documents_asks_the_enumeration_to_batch(
         batches: Whether this filter has anything left to ask per batch.
     """
     with ResultsFilter(
-        VOLUMES, str(tmp_path), logger=null_logger(), results_db_url=None, **flags
+        VOLUMES, str(tmp_path), logger=null_logger(), results_index_db_url=None, **flags
     ) as results_filter_under_test:
         assert results_filter_under_test.needs_batch_filtering is batches
 

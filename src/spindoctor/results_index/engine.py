@@ -718,7 +718,7 @@ def _verify_schema_version(stamped: int | None, url: str) -> None:
         raise _IndexOpenError(
             f'{url}: results index schema version {stamped} is not the '
             f'version {SCHEMA_VERSION} this code reads. There are no migrations: empty '
-            f'the database with sd_results_index --drop-index and re-run sd_results_index.'
+            f'the database with sd_results_index drop and re-run sd_results_index ingest.'
         )
 
 
