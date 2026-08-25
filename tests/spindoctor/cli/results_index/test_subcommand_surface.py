@@ -116,11 +116,7 @@ def test_the_refusal_of_an_unknown_subcommand_names_the_known_ones(
 def test_a_second_subcommand_is_refused(
     subcommand: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Two modes cannot be asked for at once, which is the point of the change.
-
-    Parameters:
-        subcommand: The mode named second, after an ingest.
-    """
+    """Two modes cannot be asked for at once, which is the point of the change."""
     assert subcommand in _refused([sd_results_index.INGEST, subcommand], capsys)
 
 
@@ -143,11 +139,7 @@ def test_dividing_and_completing_cannot_be_asked_for_at_once(
 
 @pytest.mark.parametrize('subcommand', _EVERY_SUBCOMMAND)
 def test_each_subcommand_parses_on_its_own(subcommand: str) -> None:
-    """The control for all of the above, which a parser refusing everything passes.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """The control for all of the above, which a parser refusing everything passes."""
     assert sd_results_index.parse_args(_line(subcommand)).command == subcommand
 
 
@@ -160,11 +152,7 @@ def test_each_subcommand_parses_on_its_own(subcommand: str) -> None:
 def test_the_confirmation_flag_is_refused_by_every_other_subcommand(
     subcommand: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``--yes`` answers a question only the drop asks, so elsewhere it means nothing.
-
-    Parameters:
-        subcommand: The mode that must not take it.
-    """
+    """``--yes`` answers a question only the drop asks, so elsewhere it means nothing."""
     assert '--yes' in _refused(_line(subcommand, '--yes'), capsys)
 
 
@@ -191,22 +179,14 @@ def test_the_drop_is_refused_a_results_root(capsys: pytest.CaptureFixture[str]) 
 
 @pytest.mark.parametrize('subcommand', _READ_A_TREE)
 def test_every_subcommand_that_reads_a_tree_takes_a_results_root(subcommand: str) -> None:
-    """The control: the three that walk one are told which one.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """The control: the three that walk one are told which one."""
     arguments = sd_results_index.parse_args(_line(subcommand, '--nav-results-root', '/data/nav'))
     assert arguments.nav_results_roots == ['/data/nav']
 
 
 @pytest.mark.parametrize('subcommand', _READ_A_TREE)
 def test_a_results_root_may_be_named_more_than_once(subcommand: str) -> None:
-    """One pass may cover several roots, which is what makes this program different.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """One pass may cover several roots, which is what makes this program different."""
     arguments = sd_results_index.parse_args(
         _line(subcommand, '--nav-results-root', '/data/one', '--nav-results-root', '/data/two')
     )
@@ -226,9 +206,6 @@ def test_a_completion_is_refused_the_reading_options(
 
     Whether the shares were read again, and whether the rows of documents that
     have left the tree went, were both settled by the divide that cut them.
-
-    Parameters:
-        option: The option a completion does not take.
     """
     assert option in _refused(_line(sd_results_index.COMPLETE, option), capsys)
 
@@ -237,41 +214,25 @@ def test_a_completion_is_refused_the_reading_options(
 def test_a_drop_is_refused_the_reading_options(
     option: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A drop removes the index and stops, so it has no documents and no rows to spare.
-
-    Parameters:
-        option: The option a drop does not take.
-    """
+    """A drop removes the index and stops, so it has no documents and no rows to spare."""
     assert option in _refused(_line(sd_results_index.DROP, option), capsys)
 
 
 @pytest.mark.parametrize('subcommand', _READ_DOCUMENTS)
 def test_the_two_reading_subcommands_take_force(subcommand: str) -> None:
-    """The control for the refusals above, on the option that says what is read.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """The control for the refusals above, on the option that says what is read."""
     assert sd_results_index.parse_args(_line(subcommand, '--force')).force is True
 
 
 @pytest.mark.parametrize('subcommand', _READ_DOCUMENTS)
 def test_the_two_reading_subcommands_take_no_prune(subcommand: str) -> None:
-    """The control for them on the option that says what is removed.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """The control for them on the option that says what is removed."""
     assert sd_results_index.parse_args(_line(subcommand, '--no-prune')).prune is False
 
 
 @pytest.mark.parametrize('subcommand', _READ_DOCUMENTS)
 def test_a_pass_prunes_unless_it_is_told_not_to(subcommand: str) -> None:
-    """Presence of a row meaning what absence means is the default, not an option.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """Presence of a row meaning what absence means is the default, not an option."""
     assert sd_results_index.parse_args(_line(subcommand)).prune is True
 
 
@@ -286,11 +247,7 @@ def test_a_pass_prunes_unless_it_is_told_not_to(subcommand: str) -> None:
 def test_the_tasks_file_belongs_to_the_divide_alone(
     subcommand: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Only the pass that cuts the shares writes them out.
-
-    Parameters:
-        subcommand: The mode that must not take it.
-    """
+    """Only the pass that cuts the shares writes them out."""
     assert '--tasks-file' in _refused(_line(subcommand, '--tasks-file', 'tasks.json'), capsys)
 
 
@@ -300,11 +257,7 @@ def test_the_tasks_file_belongs_to_the_divide_alone(
 def test_the_events_log_belongs_to_the_completion_alone(
     subcommand: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Only the pass that adds the shares up reads what the workers wrote.
-
-    Parameters:
-        subcommand: The mode that must not take it.
-    """
+    """Only the pass that adds the shares up reads what the workers wrote."""
     assert '--events-log' in _refused(_line(subcommand, '--events-log', 'events.log'), capsys)
 
 
@@ -341,32 +294,20 @@ def test_a_completion_without_an_events_log_is_refused(
 
 @pytest.mark.parametrize('subcommand', _EVERY_SUBCOMMAND)
 def test_every_subcommand_takes_the_index_url(subcommand: str) -> None:
-    """The index is the one thing all four are about.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """The index is the one thing all four are about."""
     assert sd_results_index.parse_args(_line(subcommand)).results_index_db == _URL
 
 
 @pytest.mark.parametrize('subcommand', _EVERY_SUBCOMMAND)
 def test_every_subcommand_takes_a_configuration_file(subcommand: str) -> None:
-    """A machine's settings reach every mode, including the one that reads no tree.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """A machine's settings reach every mode, including the one that reads no tree."""
     arguments = sd_results_index.parse_args(_line(subcommand, '--config-file', 'nav.yaml'))
     assert arguments.config_file == ['nav.yaml']
 
 
 @pytest.mark.parametrize('subcommand', _EVERY_SUBCOMMAND)
 def test_every_subcommand_takes_the_logging_options(subcommand: str) -> None:
-    """A run that fails partway has to appear in a log rather than only in a status.
-
-    Parameters:
-        subcommand: The mode under test.
-    """
+    """A run that fails partway has to appear in a log rather than only in a status."""
     arguments = sd_results_index.parse_args(_line(subcommand, '--log-root', '/var/log/nav'))
     assert arguments.log_root == '/var/log/nav'
 
@@ -412,13 +353,7 @@ def _table_names(url: str) -> list[str]:
 def test_a_refused_command_line_exits_two(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The status of a command line the program never ran is a usage error.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The status of a command line the program never ran is a usage error."""
     url = _index_of_one_document(tmp_path, quiet_logger)
     status, _written = run_driver(
         [sd_results_index.DROP, '--results-index-db', url, '--yes', '--force'],
@@ -428,16 +363,41 @@ def test_a_refused_command_line_exits_two(
     assert status == 2
 
 
+@pytest.mark.parametrize(
+    'command',
+    [sd_results_index.INGEST, sd_results_index.DIVIDE, sd_results_index.COMPLETE],
+)
+def test_the_run_header_names_the_subcommand_that_is_running(
+    command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A log that opens by naming a pass nobody asked for is worse than none."""
+    url = f'sqlite:///{tmp_path / "index.sqlite3"}'
+    argv = [command, '--results-index-db', url, '--nav-results-root', str(tmp_path / 'results')]
+    if command == sd_results_index.DIVIDE:
+        argv += ['--tasks-file', str(tmp_path / 'tasks.json')]
+    if command == sd_results_index.COMPLETE:
+        argv += ['--events-log', str(tmp_path / 'events.jsonl')]
+    _status, written = run_driver(argv, monkeypatch, tmp_path)
+    headers = [line for line in written if line.startswith('Starting results index ')]
+    assert headers[0] == f'Starting results index {command}'
+
+
+def test_a_drop_says_it_is_dropping(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fourth subcommand takes a different path to its own header."""
+    url = _index_of_one_document(tmp_path, quiet_logger)
+    _status, written = run_driver(
+        [sd_results_index.DROP, '--results-index-db', url, '--yes'], monkeypatch, tmp_path
+    )
+    headers = [line for line in written if line.startswith('Starting results index ')]
+    assert headers[0] == f'Starting results index {sd_results_index.DROP}'
+
+
 def test_a_refused_command_line_leaves_the_index_alone(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Refused before anything is opened, so the tables a real drop removes stay.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """Refused before anything is opened, so the tables a real drop removes stay."""
     url = _index_of_one_document(tmp_path, quiet_logger)
     run_driver(
         [sd_results_index.DROP, '--results-index-db', url, '--yes', '--force'],
@@ -450,13 +410,7 @@ def test_a_refused_command_line_leaves_the_index_alone(
 def test_the_same_command_line_without_the_refused_option_empties_the_index(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The control: without ``--force`` the drop runs and the tables really go.
-
-    Parameters:
-        tmp_path: Directory the tree and the index live under.
-        quiet_logger: Logger the ingest reports through.
-        monkeypatch: Fixture the driver is run through.
-    """
+    """The control: without ``--force`` the drop runs and the tables really go."""
     url = _index_of_one_document(tmp_path, quiet_logger)
     run_driver([sd_results_index.DROP, '--results-index-db', url, '--yes'], monkeypatch, tmp_path)
     assert _table_names(url) == []

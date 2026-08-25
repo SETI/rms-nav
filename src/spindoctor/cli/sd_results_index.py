@@ -659,7 +659,10 @@ def main() -> None:
     # sitting in the index the operator meant to name.
     completing = arguments.command == COMPLETE
 
-    MAIN_LOGGER.info('Starting results index ingest')
+    # The subcommand, not a fixed word: a run's log opens by saying which of the
+    # four it is, and a divide or a completion reported as an ingest is a log
+    # that names a pass nobody asked for.
+    MAIN_LOGGER.info('Starting results index %s', arguments.command)
     MAIN_LOGGER.info('Roots: %s', ', '.join(roots))
     if not completing:
         MAIN_LOGGER.info('Force: %s', arguments.force)
