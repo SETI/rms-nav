@@ -27,7 +27,7 @@ references against the dated filenames in this directory.
   `docs/dev_guide/dev_guide_simulator.rst` (including the capability
   envelope), the calibration in `util/calibration/CAMPAIGN_20260718.md`,
   and the independent assessment in
-  `critiques/SIM_REALISM_CRITIQUE_2026-07-18.md`; follow-up work moved to
+  `critiques/archive/SIM_REALISM_CRITIQUE_2026-07-18.md`; follow-up work moved to
   GitHub issues (#301, #309, #310, #311).
 - `TITAN_NAV_PLAN_2026-07-25.md` — the haze solar-symmetry navigation design
   (the French method), revision 12, fully executed 2026-07-25 to 2026-07-29:
@@ -39,9 +39,9 @@ references against the dated filenames in this directory.
   `docs/dev_guide/dev_guide_techniques_titan_haze.rst` and the two
   `dev_guide_navigation_models_titan*.rst` pages; the method analysis that
   selected the approach is frozen at
-  `critiques/TITAN_NAV_CONCEPT_2026-07-25.md` and the seven review rounds at
-  `critiques/TITAN_NAV_PLAN_CRITIQUE_2026-07-25*.md` and
-  `critiques/TITAN_NAV_COLLATERAL_SWEEP_2026-07-25.md`. Its Section 9
+  `critiques/archive/TITAN_NAV_CONCEPT_2026-07-25.md` and the seven review
+  rounds at `critiques/archive/TITAN_NAV_PLAN_CRITIQUE_2026-07-25*.md` and
+  `critiques/archive/TITAN_NAV_COLLATERAL_SWEEP_2026-07-25.md`. Its Section 9
   deferred work is filed as issues (#397, #398, #399, #400, #401, #402,
   #403, #404, #405), with the operator ratification bundle on #407.
 - `LOGGING_REDESIGN_PLAN_2026-08-04.md` — the two-logger design: one main
@@ -58,24 +58,73 @@ references against the dated filenames in this directory.
   `docs/dev_guide/dev_guide_logging.rst`. Its Section 7 follow-ups are filed
   as issues (#424, #427, #428, #429), with the defects the work surfaced on
   #418, #423 and #426.
+- `CK_KERNEL_PLAN_2026-08-04.md` — the corrected-pointing C-kernel design,
+  fully executed and merged 2026-08-09, closing #188. Its sections 1-3 remain
+  the design reference for what shipped: the navigator records `cmatrix` /
+  `cmatrix_original`, the frame identities and the exposure times in every
+  image's metadata, and `sd_create_ck` writes one type-3 segment per navigated
+  exposure into files mirroring the originals they correct, beside a
+  meta-kernel and a per-mission CSV report. The as-built system is documented
+  in `docs/user_guide/user_guide_ck_kernels.rst` and
+  `docs/dev_guide/dev_guide_ck_kernels.rst`, which is what a reader wanting
+  current behavior should read first. Its Section 7 follow-ups are filed as
+  issues (#433, #434, #435, #436, #437, #440, #443, #444, #446, #448, #455,
+  #468); its acceptance criterion 7 (90% suite coverage) did not hold at
+  merge and is now tracked as #548.
 - `CK_KERNEL_DESIGN_NOTE_2026-07-30.md` — the pre-decision design analysis
   for corrected-pointing C-kernels: six candidate designs ranked, the
   cross-cutting problems, and the decision record that adopted the overlay
-  type-3 design. Superseded by `plans/CK_KERNEL_PLAN.md`, which carries the
-  decided design forward as an implementation plan; this note remains the
+  type-3 design. Superseded by `CK_KERNEL_PLAN_2026-08-04.md`, which carries
+  the decided design forward as an implementation plan; this note remains the
   record of the alternatives considered and why they lost. One caution for
   a future reader: its offset-to-rotation sketch predates the discovery
   that the oops observation frames differ from the SPICE camera frames by
-  constant flips, which the live plan's frame handling addresses.
+  constant flips, which the executed plan's frame handling addresses.
+- `CMATRIX_READERS_PLAN_2026-08-09.md` — the reading half of #50, fully
+  executed in one pull request over four phases and merged 2026-08-09: the
+  backplane and reprojection stages apply the recorded C-matrix by frame
+  replacement (`apply_cmatrix_to_obs` in `spindoctor/support/cmatrix.py`),
+  with the pixel offset as the documented fallback for fitted-rotation,
+  offset-only and malformed records, and uncorrected pointing with the reason
+  recorded when neither is usable. Adversarially reviewed before
+  implementation (`critiques/archive/CMATRIX_READERS_PLAN_CRITIQUE_2026-08-07.md`);
+  its section 0 records where execution refined the letter of the plan. The
+  pointing selection and application code it left in the reprojection CLI
+  package is tracked for relocation as #520.
+- `RESULTS_INDEX_PLAN_2026-08-04.md` — the optional, rebuildable index over
+  the navigation results tree (authored as `RESULTS_DB_PLAN.md` and renamed
+  with the program it builds), fully executed 2026-08-09 to 2026-08-25 across
+  seven phases and twenty-one individually reviewed pull requests, merged to
+  `main` as PR #551 (commit `e63a0d51`, a merge commit so the reviewed PRs
+  survive in the history), closing #430, #487 and #507. What shipped: a
+  stub-keyed schema, a SQLAlchemy Core layer over SQLite and PostgreSQL,
+  incremental and cloud-task ingest, a `--results-index-db` opt-in on every
+  consuming program, and one record seam (`spindoctor/nav_records/`,
+  `spindoctor/results_index/`) that answers the same four questions over the
+  results tree and over the index. The as-built system is documented in
+  `docs/user_guide/user_guide_results_index.rst` and
+  `docs/dev_guide/dev_guide_results_index.rst`. Two of its acceptance
+  criteria openly do not hold and are tracked as #547 (no written product is
+  compared between the two storages, because the one integration frame that
+  would do it no longer navigates) and #548 (suite coverage is 79% against a
+  stated floor of 90%, and nothing enforces it); its Section 7 follow-ups are
+  filed as issues (#462, #464, #465, #466, #467, #472, #486, #493, #497,
+  #501, #512, #513, #514, #515, #516, #524, #528, #531, #533, #534, #536,
+  #538, #540, #542). One caution for an editor: this document is not inert.
+  `tests/spindoctor/results_index/test_enumeration_lists.py` reads its Phase 5
+  entry and its acceptance criterion 1 and compares both against the module
+  docstring of `spindoctor.dataset.results_filter` and the navigation guide,
+  so a member added to or removed from the index-versus-tree enumeration is
+  edited into all four statements or into none.
 - `RESULTS_DB_REUSE_NOTE_2026-07-31.md` — the pre-decision analysis for
   reusing the statistics database as a shared results index: the consumer
   survey, the gaps in the schema as it stood, four reuse designs, and the
   backend-selection options with the decision record. Superseded by
-  `plans/RESULTS_DB_PLAN.md`, which carries the decided design (rebuildable
-  index, JSON authoritative, SQLAlchemy Core with SQLite/PostgreSQL)
-  forward as an implementation plan; this note remains the record of the
-  alternatives and the operational trade-offs (ship-the-file vs server)
-  behind them.
+  `RESULTS_INDEX_PLAN_2026-08-04.md`, which carries the decided design
+  (rebuildable index, JSON authoritative, SQLAlchemy Core with
+  SQLite/PostgreSQL) forward as an implementation plan; this note remains the
+  record of the alternatives and the operational trade-offs (ship-the-file vs
+  server) behind them.
 - `ROADMAP_2026-07-12.md` — the issue-ordered, Cassini-first pipeline
   build-out that served as the plan of record until 2026-07-12; consolidated
   into `plans/PROGRAM_PLAN.md` together with the post-stack task inventory.

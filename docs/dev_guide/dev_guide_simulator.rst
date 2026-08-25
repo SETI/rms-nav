@@ -209,7 +209,7 @@ of every module under ``nav_model/``, ``nav_technique/``, and
 ``nav_orchestrator/`` and fails on any reference to a truth attribute name),
 and code review. The guarantee is mechanical for the channel and
 mechanical-plus-review for the consumers; the assessment behind this
-phrasing is recorded in ``critiques/SIM_REALISM_CRITIQUE_2026-07-18.md``.
+phrasing is recorded in ``critiques/archive/SIM_REALISM_CRITIQUE_2026-07-18.md``.
 
 Sharing code is fine; sharing information is not
 ------------------------------------------------
@@ -376,7 +376,7 @@ What it cannot do
   (:ref:`sim-information-boundary`); the full truth still rides the
   observation object. The assessment of what that enforcement level does and
   does not guarantee is recorded in
-  ``critiques/SIM_REALISM_CRITIQUE_2026-07-18.md``.
+  ``critiques/archive/SIM_REALISM_CRITIQUE_2026-07-18.md``.
 
 The realism figures behind the accuracy axis live in the simulator report's
 realism section (:doc:`/simulator_report/simulator_report`); the calibration

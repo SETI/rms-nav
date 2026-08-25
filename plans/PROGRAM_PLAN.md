@@ -3,7 +3,7 @@
 *The top-level plan of record for all remaining work. It is written to be
 readable without knowledge of the code internals or the statistical
 methodology; the detail lives in the three sub-plans it points to. Last
-reconciled 2026-08-07.*
+reconciled 2026-08-25.*
 
 **Document map** (what to read for what):
 
@@ -14,9 +14,8 @@ reconciled 2026-08-07.*
 | `plans/ENGINEERING_PLAN.md` | Full implementation detail for Tracks B-F: per-item context, file pointers, constraints, and acceptance criteria sufficient to hand any item to a developer (human or model) cold. |
 | `plans/COHORT_CURATION_PLAN.md` | The operational playbook for growing the curated image library: metadata-driven discovery, operator review votes, sidecar generation. |
 | `plans/OPERATOR_PLAYBOOK.md` | The operator's dispatch sheet: which decisions are pending, which sessions to launch, and in what order. |
-| `plans/CK_KERNEL_PLAN.md` | The design of record for recording each navigated image's corrected attitude as a C-matrix and generating SPICE C-kernels from it. Implemented; its section 0 carries the status and what remains. |
-| `plans/RESULTS_INDEX_PLAN.md` | Implementation plan for the optional, rebuildable index over the navigation results tree. Self-contained; executable without the plans above. |
-| `plans/archive/` | Superseded and fully-executed plans, kept as historical records with dates in their filenames. Nothing in there is current work, though the executed designs remain the reference for what shipped. |
+| `plans/archive/` | Superseded and fully-executed plans, kept as historical records with dates in their filenames. Nothing in there is current work, though the executed designs remain the reference for what shipped — the C-kernel writing and reading halves and the results index among them. Its `README.md` says what each one delivered and where the follow-ups went. |
+| `critiques/archive/` | Point-in-time reviews, frozen as written. `critiques/` itself is empty while no review is open. |
 
 ---
 
@@ -47,13 +46,26 @@ uncertainties is not finished, it is merely running.
 
 The engineering core is built and healthy: the full navigation architecture
 (nine autonomous techniques plus manual), reprojection, backplanes,
-simulation, rank-1 (single-axis) ring support, the statistics system
-(`sd_results_index` / `sd_stats_report`), and strict quality gates (typing,
-linting, the full unit suite) are in place. The de-circularized, realism-
-tuned simulator and the cross-technique agreement estimator both exist and
-are proven on known-truth sims. PDS4 bundle generation exists only as
-partially implemented machinery (see Track D): a spec-tested generator
-backend, but no final templates and no schema validation.
+simulation, rank-1 (single-axis) ring support, corrected-pointing SPICE
+C-kernels as a delivered product, the statistics system, and strict quality
+gates (typing, linting, the full unit suite) are in place. Every program that
+reads a navigation record reads it through one seam over two storages — the
+results tree of JSON documents, and an optional rebuildable index
+(`sd_results_index` / `sd_stats_report`) that no program requires. The
+de-circularized, realism-tuned simulator and the cross-technique agreement
+estimator both exist and are proven on known-truth sims. PDS4 bundle
+generation exists only as partially implemented machinery (see Track D): a
+spec-tested generator backend, but no final templates and no schema
+validation.
+
+Two facts about the evidence behind that health are worth stating plainly,
+because both are load-bearing and neither is comfortable. Suite coverage is
+79%, not the 90% two shipped plans' acceptance criteria claim, and nothing
+enforces any floor (#548). And 52 of 74 curated library frames disagree with
+their sidecars in the local integration environment (#288), so the regression
+instrument that is supposed to catch a navigation change is itself red; until
+it is reconciled, "no new failures against `main`" is the only gate a
+navigation-affecting branch can honestly clear.
 
 The single largest remaining block is Track A: **the validation program is
 designed and partly built, but not yet run on real frames.** The confidence
@@ -218,8 +230,29 @@ answer or fails on a navigable scene.
 navigator's output at scale) and are exactly what a user hits first.
 The known open defects:
 
+- **#503** — the only Critical issue open. The orchestrator's per-model and
+  per-technique sandboxes swallow exceptions, so an image whose model or
+  technique raised reports `success` on silently reduced evidence. Every
+  number downstream of it — the agreement study's inputs, the library
+  cross-check, the confidence calibration — is drawn from runs that cannot
+  distinguish "this technique had nothing to say" from "this technique
+  crashed". Fix before the study consumes navigator output at scale.
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature. Standing library reds.
+- **#504** — RingEdgeNav's pooled inlier-fraction veto discards correct ring
+  fits on real B-ring scenes: a veto that fires on good answers costs
+  coverage in exactly the scene class the Saturn cohorts are made of.
+- **#476** — RingEdgeNav is not shift-equivariant either: a planted shift
+  re-locks onto the wrong ring edge. Same family as #346 and #373 seen
+  from the round-trip side.
+- **#482** — BodyDiscCorrelateNav misses by up to ~1 px on a
+  weakly-constrained axis. The residual left after the shift-equivariance
+  fix (#447) closes the coarse-grid and boundary-pinning halves.
+- **#521** / **#522** — a conflicted result drops its fitted camera rotation
+  and is then given a C-matrix that ignores it, which writes a wrong attitude
+  into a delivered kernel; and rotation fitting should be off for Galileo SSI,
+  which is the instrument the fitted-rotation omission costs today. Both are
+  Essential and both are small.
 - **#350** — two resolved-body frames (N1484593951, N1686349893) miss the
   offset tolerance by ~2 px after the recalibration.
 - **#373** — the RingEdgeNav coarse seed is not robust against competing
@@ -267,6 +300,12 @@ The known open defects:
   1.02 px oblique ellipse whose orientation varies with the sun direction.
 - **#406** — two pre-existing library reds (N1487595731_1, N1633925572_1)
   that fail identically on main and were not in the pinned-red table.
+- **#447** — body techniques do not return the shift they are given, which is
+  the round-trip residual every corrected-pointing consumer inherits. This is
+  the one piece of open work in flight: PR #484 fixes both body-side causes
+  (a sub-pixel silhouette probe, and a per-axis NCC-quadratic fallback for
+  saturated refinement) and files the rest as #476, #482 and #483. It is
+  mergeable and green, and it is fifty commits behind `main`.
 
 **Parallelism:** fully parallel with Track A.
 
@@ -274,12 +313,15 @@ The known open defects:
 
 **Goal:** navigation quality is continuously measured, not assumed.
 
-The statistics system (`sd_results_index` / `sd_stats_report`) is built,
-tested, and documented in the user guide. Remaining: the library
-coverage-matrix invariant (#240), and the standing practice of re-running
-the library cross-check after every calibration-affecting change. Small
-track, mostly done, listed separately because it is the program's QA
-instrument.
+The statistics system is built, tested, and documented in the user guide, and
+it now reports over a stream of records rather than over a database, so it
+runs with or without an index. Remaining: the library coverage-matrix
+invariant (#240); two reporting defects the seam work surfaced — a file that
+could not be retrieved is counted by a tree-backed report and by no
+index-backed one (#533), and the report retains more than it prints under
+`--top-n` (#535); and the standing practice of re-running the library
+cross-check after every calibration-affecting change. Small track, mostly
+done, listed separately because it is the program's QA instrument.
 
 ### Track D — Capability completion (decision gates first)
 
@@ -311,22 +353,43 @@ lifted out of is still organized on no stated axis (#427), an upstream
 registry-eviction request to `rms-pdslogger` (#428), and extending the same
 surface to the `util/` tooling (#429).
 
-Some items start with an operator decision, because each is a scope
-commitment:
-
-The headline capability item is delivered in both halves:
-`plans/CK_KERNEL_PLAN.md` is implemented, so the navigator records each
-image's corrected attitude as a C-matrix and `sd_create_ck` ships
-updated-pointing SPICE C-kernels as a product, and
-`plans/CMATRIX_READERS_PLAN.md` is implemented, so the backplane and
+The headline capability item is delivered in both halves: the navigator
+records each image's corrected attitude as a C-matrix and `sd_create_ck`
+ships updated-pointing SPICE C-kernels as a product, and the backplane and
 reprojection consumers apply the recorded C-matrix whenever a usable one
-exists (with the pixel offset as the documented fallback for
-fitted-rotation, offset-only and malformed records, and uncorrected
-pointing with the reason recorded when neither is usable), closing #50. What that leaves is the
-follow-ups in the CK plan's section 7. The remaining decided item with a
-self-contained plan of its own is `plans/RESULTS_INDEX_PLAN.md` (an optional,
+exists — with the pixel offset as the documented fallback for
+fitted-rotation, offset-only and malformed records, and uncorrected pointing
+with the reason recorded when neither is usable — closing #50 and #188. The
+designs are archived at `plans/archive/CK_KERNEL_PLAN_2026-08-04.md` and
+`plans/archive/CMATRIX_READERS_PLAN_2026-08-09.md`; current behavior is
+`docs/user_guide/user_guide_ck_kernels.rst` and its dev-guide companion.
+What that leaves is the kernel follow-ups: the oops API replacing the
+hand-derived derivation (#433), fitted-twist support (#434) with the
+static-twist FK/IK pair behind it (#435, #436), SPICE database registration
+(#437), the interior-epoch fidelity bound through an adaptive record cadence
+(#440, #444) with its per-instrument characterization (#455), the
+kernel-input items (#446, #448, #468), and a memory bound on `sd_create_ck`
+(#513). Two of them are navigation defects rather than kernel work and are
+listed under Track B (#521, #522).
+
+The results index is delivered too (#430, #487, #507). It is an optional,
 rebuildable index over the results tree, so programs stop reading one JSON
-document per image on a cloud root; #430).
+document per image on a cloud root, and no program requires it: a run that
+names none reads the tree exactly as it always has. What it actually changed
+is broader than the index — every program that reads a navigation record now
+reads it through one seam over both storages, with one rebuild, one opener
+and one enumerated list of where the two storages answer differently. The
+design is archived at `plans/archive/RESULTS_INDEX_PLAN_2026-08-04.md`;
+current behavior is `docs/user_guide/user_guide_results_index.rst` and its
+dev-guide companion. Its follow-ups divide into three groups: capability
+extensions nobody is blocked on (a document column for bundle generation
+#464, a schema wide enough for the curation triage tool #465, a `--since`
+selector #467, `sd_offset` writing its own rows #486, a pruned-rows question
+#542), operational questions with a decision in them (a documented workflow
+for getting the index to cloud workers #466, the consumer open that takes a
+write lock it never needs #462), and correctness or hygiene items (#472,
+#493, #496, #497, #501, #512, #514, #515, #518, #519, #520, #528, #531,
+#534, #536, #538, #540, #541).
 
 Some items start with an operator decision, because each is a scope
 commitment:
@@ -373,10 +436,29 @@ cannot follow.
 - Untested star-conflict logic (#243); real-image baselines beyond one
   frame (#174).
 - Summary-PNG unit tests (#177).
-- The image-library regression reconciliation (#288), now reduced to the
-  deliberately-red pins owned by open navigation issues.
-- Docs: Sphinx nitpicky-clean CI (#129) and terminator-doc verification
-  (#122). The per-instrument chapters are written, one per instrument in
+- The image-library regression reconciliation (#288). In the local
+  integration environment it is not reduced to the deliberately-red pins:
+  52 of 74 frames disagree, which is the state Track A's evidence has to be
+  read against, and it is what blocks the only place a built product is
+  compared between the results tree and the index (#547).
+- Suite coverage is 79% and unenforced against a stated 90% (#548). The
+  shortfall is almost entirely PyQt6 widget code. This is an operator call
+  before it is an implementer's: raise the number, or ratify a lower floor
+  and gate on that one.
+- Tests that cannot fail, which this project has now hit repeatedly:
+  #516 asserts on the row a root-blind write would keep, and re-ratcheting
+  the library pins the shift-equivariance fix moves is #483.
+- Test-suite hygiene: seventeen test modules over the 1000-line cap (#525),
+  POSIX-only constructs behind a Windows-support claim (#473), fixture clock
+  seconds that do not follow from their epochs (#530), and consolidating
+  `test_record_source.py` onto the shared fixtures (#524).
+- Docs: Sphinx nitpicky-clean CI (#129, with the gate the rules already
+  require but nothing runs, #438) and terminator-doc verification (#122).
+  Smaller doc defects: the README names two of fourteen command-line
+  programs and links to no guide (#545), four technique guides name a
+  `dt_fitting.py` that is a package (#549), and config placeholder comments
+  still carry an internal codename (#470, #471). The per-instrument
+  chapters are written, one per instrument in
   each guide, as is the metadata-JSON format chapter
   (docs/user_guide/user_guide_metadata.rst, with a staleness-guard test),
   along with the filters / uncertainty / troubleshooting dev-guide pages,
@@ -409,7 +491,7 @@ enhancement backlog and code-quality tail are burned down.
   chaotic-rotator poses (#187), manual-nav dialog redesign (#186),
   gated-feature PNG styling (#185), stop-after-features flag (#182),
   body shape models (#23), sim polish (#84, #78, #151, #152, #157, #158).
-- **Hardening/cleanup** (any time, mostly small): #13, #15, #21, #38, #39, #43, #65, #92, #96-#105, #109, #110, #119, #135, #137, #140, #143, #144, #147, #155, #212, plus the GUI viewers printing library log records to stdout (#423) and the upstream `rms-pdslogger` registry-eviction request (#428).
+- **Hardening/cleanup** (any time, mostly small): #13, #15, #21, #38, #39, #43, #65, #92, #96-#105, #109, #110, #119, #135, #137, #140, #143, #144, #147, #155, #212, plus the GUI viewers printing library log records to stdout (#423), the upstream `rms-pdslogger` registry-eviction request (#428), Cassini BOTSIM pairs defined two different ways (#494), and stating the encoding wherever a document or text file is read or written (#518).
 
 **Parallelism:** hardening is permanent filler. Instrument work waits for
 Track A's Cassini verdict only in the sense that there is no point
@@ -418,9 +500,15 @@ star-navigation bug fixes (#19, #18) can start any time.
 
 ## 5. Suggested global order
 
-1. **Now:** Track A items 1-4 continue in parallel (library growth, sim
+0. **First, and small:** land PR #484 (#447, the round-trip residual), which
+   is green and fifty commits behind `main`, and fix #503, the swallowed
+   model and technique exceptions. Both sit upstream of every number Track A
+   is about to collect, and neither is a multi-day item. #521 and #522 belong
+   in the same sweep: they are Essential, small, and they put a wrong
+   attitude into a delivered kernel.
+1. **Then, in parallel:** Track A items 1-4 (library growth, sim
    realism campaign, agreement-estimator real-frame follow-ups, distortion
-   feed-in). The Track D decisions go to the operator as a batch — they
+   feed-in). The operator decisions in section 6 go across as a batch — they
    cost nothing to decide early and unblock scoping.
 2. **Next:** Track A item 5 (agreement study, bulk layer first), with
    Track E test-debt and Track B remainder as parallel fill.
@@ -463,29 +551,53 @@ library votes and the decision gates, not by any implementation.
 4. **Simulator realism verdict (#227)** — close #227 once the calibration is
    fitted on the realism-anchored renderer configuration (#309) and the
    realism evidence underwrites the shipped calibration; gated on #309.
-5. Recurring: library batch votes; agreement-study frame selection; tier
+5. **Coverage floor (#548)** — the suite measures 79% against a 90% floor two
+   shipped plans' acceptance criteria assert, and nothing enforces either
+   number. Raise coverage to the stated floor, or ratify a lower one and gate
+   CI on it. Leaving both the claim and the absence of a gate in place is the
+   one option that keeps saying something untrue.
+6. **Cassini predicted kernels (#459)** — whether Cassini navigation should
+   run from the predicted rather than the reconstructed kernels. A branch
+   (`origin/rf_ck_cassini_predicted`, nine commits, last touched 2026-08-07)
+   exists with no pull request; say whether it is live before it drifts
+   further from `main`.
+7. **New Horizons pointing family (#468)** — whether the merged family should
+   be declared reconstructed on its comment-area evidence rather than staying
+   `UNCLASSIFIED`.
+8. Recurring: library batch votes; agreement-study frame selection; tier
    re-blessing after #230.
 
 ## 7. Issue index (open work by track)
 
-Every open issue, listed once by the track that owns it.
+Every open issue, listed exactly once by the track that owns it. 238 issues
+as of 2026-08-25; the counts are given so a reader can tell a stale index
+from a current one at a glance.
 
-| Track | Issues |
-|---|---|
-| A — validation & calibration | #84, #150, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #340, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407, #409, #426 |
-| B — navigation correctness | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406, #447 |
-| C — statistics & QA | #240 (plus the standing cross-check and campaign-report practice) |
-| D — capability completion | #28, #30, #47, #53, #54, #55, #57, #63, #66, #67, #69, #71, #72, #73, #74, #75, #76, #77, #79, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #430, #433, #434, #435, #436, #437, #440, #444, #448, #455, #459, #468 |
-| E — test & docs debt | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446 |
-| F — instruments, features, hardening | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428 |
+| Track | Count | Issues |
+|---|---|---|
+| A — validation & calibration | 50 | #84, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407, #409, #426 |
+| B — navigation correctness | 25 | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406, #447, #476, #482, #503, #504, #521, #522 |
+| C — statistics & QA | 4 | #240, #340, #533, #535 (plus the standing cross-check and campaign-report practice) |
+| D — capability completion | 73 | #28, #30, #47, #53, #54, #55, #57, #63, #66, #67, #69, #71, #72, #73, #74, #75, #76, #77, #79, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #433, #434, #435, #436, #437, #440, #444, #448, #455, #459, #462, #464, #465, #466, #467, #468, #472, #486, #493, #495, #496, #497, #501, #512, #513, #514, #515, #519, #520, #528, #531, #534, #536, #538, #540, #541, #542 |
+| E — test & docs debt | 25 | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446, #470, #471, #473, #483, #516, #524, #525, #530, #545, #547, #548, #549 |
+| F — instruments, features, hardening | 61 | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428, #494, #518 |
 
-Cross-listed items (listed once above, noted here): #150/#128 serve both
-Track A's limb-bias workstream and Track B's redesign; the
-confident-wrong ring-lock family (#346) sits in Track B
-but gates the Track A study; #103/#134/#126 serve both Track D performance and
-Track F hardening; the per-instrument guide chapters exist and each Track F
-instrument workstream extends its own pair in the same change; #174 baselines
-are Track A infrastructure delivered as Track E test work.
+Priority census across all six tracks: 1 Critical (#503), 21 Essential, 63
+Important, 107 Useful, 34 Minor, 8 Defer, and 5 with no priority assigned
+yet.
+
+Cross-listed items (listed once above, noted here): #150/#128 sit in Track B
+and also serve Track A's limb-bias workstream (WS-10); the confident-wrong
+ring-lock family (#346, #476, #504) sits in Track B but gates the Track A
+study, as does #503, whose swallowed exceptions reach every number the study
+reads; #103/#134/#126 serve both Track D performance and Track F hardening;
+#513 and #520 are results-index work in Track D that lands in the kernel
+writer and the reprojection package respectively; #521/#522 are kernel-facing
+defects owned by Track B because the fix is in the navigator; the
+per-instrument guide chapters exist and each Track F instrument workstream
+extends its own pair in the same change; #174 baselines are Track A
+infrastructure delivered as Track E test work; #288 and #547 are one
+dependency seen from two tracks.
 
 ---
 

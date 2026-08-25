@@ -21,12 +21,23 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-Ordering within the track: the confidently-wrong defects first
-(#346, #350), because the agreement study consumes ensemble output
-at scale and several curated library frames pin these as standing red
-regressions. Then the coarse-lock calibration (#373), then the
+Ordering within the track: **#503 first**, because it is the only Critical
+issue open and it is upstream of every other measurement here -- the
+orchestrator's per-model and per-technique sandboxes swallow exceptions, so
+an image whose model or technique raised reports `success` on silently
+reduced evidence, and nothing downstream can tell that apart from a
+technique that legitimately had nothing to say. Then the confidently-wrong
+defects (#346, #504, #476, #350), because the agreement study consumes
+ensemble output at scale and several curated library frames pin these as
+standing red regressions. Then the coarse-lock calibration (#373), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
 (#130, #239, #338) as fill.
+
+Two Essential items sit outside that ordering because they are small and
+they corrupt a delivered product rather than a measurement: a conflicted
+result drops its fitted camera rotation and is then given a C-matrix that
+ignores it (#521), and rotation fitting should be off for Galileo SSI
+(#522). Do them whenever; do them before publishing a kernel set.
 
 The ensemble-independence family (#222 seeded single-star refine, #317 two
 ring techniques on one catalog, #339 scattered-light disc/limb) is closed by
@@ -76,6 +87,120 @@ geometric consensus offset the blob disputes, so an albedo-dichotomy-biased
 centroid no longer vetoes a star-confirmed limb fit. The residual that a wrong
 trusted star fix could itself corroborate a wrong geometry -- downgrading a safe
 `conflicted` to a confident-wrong `success` in that corner -- is tracked in #394.
+
+### #503 — the orchestrator swallows model and technique exceptions
+
+The only Critical issue open, and the one to do first. `NavOrchestrator`
+wraps every `NavModel` and `NavTechnique` call in a broad `except Exception`
+that logs a traceback and continues. Anything that is not a
+`NavContractError` is absorbed: the model or technique is dropped, navigation
+proceeds on whatever survived, and the image can still report
+`status=success` with an offset built from a silently reduced set of
+evidence. **Nothing about the failure reaches the metadata JSON**, so the
+results index, the PDS4 stage and the backplane stage — all of which read the
+document, not the log — cannot tell a fully-navigated image from a degraded
+one.
+
+Four sites, all in `src/spindoctor/nav_orchestrator/orchestrator.py`:
+`model.create_model()` (model dropped), `model.to_annotations(context)`
+(annotations skipped), `model.to_features(context)` (treated as zero
+features), and `technique.navigate(subset, context)` (treated as no result).
+
+It surfaced during a dependency benchmark: an `oops` regression cost
+`NavModelRings` an attribute, and across 22 images 5 lost their ring model
+while 4 of those 5 still reported `success` with plausible offsets. The
+current behavior is deliberate and documented — one misbehaving plugin should
+not take down a batch — but the implementation cannot separate the two cases
+it straddles. "This model legitimately finds nothing here" is a normal
+outcome the feature and gating path already models properly; "this model is
+broken, or its dependencies are" is a defect, and giving both the same
+`except Exception` converts a detectable failure into a quiet loss of
+accuracy.
+
+Fix direction: treat an unexpected exception as fatal to the image, with a
+status reason that names the failure, so a degraded navigation is
+distinguishable in every machine-readable artifact the pipeline writes.
+Acceptance: an image whose model or technique raised does not report
+`success`, and the document says which one raised.
+
+Sequencing: before Track A collects anything at scale. Every number the
+agreement study, the library cross-check and the confidence calibration read
+is drawn from runs that currently cannot make this distinction.
+
+### #521 / #522 — the fitted rotation, and Galileo
+
+Two small Essential items that corrupt a delivered product rather than a
+measurement.
+
+**#521.** `NavResult.conflicted` declares no `rotation_rad`, so a conflicted
+result on a rotation-fitting instrument drops the twist its own ensemble
+measured. Everything downstream then reads it as 2-DoF and each step is
+locally correct: `rotation_fitted` computes `False`, a corrected `cmatrix` is
+built from the translation alone, and the image is eligible for a C-kernel
+segment. The outcomes end up inverted with respect to trust — a *success*
+result on that instrument is refused a segment as `rotation_unsupported`,
+while a *conflicted* result from the same ensemble with the same unrecorded
+pivot is written into the kernel with an offset-only attitude that is wrong
+by exactly the twist thrown away. The document is internally inconsistent
+too: a 3x3 `covariance_px2` with no `rotation_deg`, where the metadata
+chapter documents matrix shape as the signal for degrees of freedom. Narrow
+fix: give `conflicted` the same rotation parameters `success` has and pass
+the combined rotation from both `ensemble.py` call sites. Worth deciding at
+the same time whether covariance shape and the presence of `rotation_deg`
+should be checked against each other anywhere, since nothing holds the two
+encodings of one fact in step. The missing test is the conflicted
+counterpart of `test_a_fitted_rotation_of_zero_is_still_a_fitted_rotation`.
+
+**#522.** Set `fit_camera_rotation: false` for Galileo SSI. It is the only
+instrument shipping with fitting on, and nothing in the system can use what
+it fits: no consumer applies a fitted rotation to an observation, and a
+fitted rotation suppresses the corrected C-matrix, so every otherwise
+eligible Galileo image is omitted as `rotation_unsupported` and the mission
+gets no corrected kernels at all. There is a second reason that makes fitting
+actively wrong rather than merely useless: techniques rotate about different
+pivots, and a rigid rotation by theta about pivot P versus Q differs by the
+pure translation `(I - R(theta))(P - Q)`, so two techniques describing the
+same physical motion report different translations and the ensemble fuses
+them as comparable. At a fraction of a degree and a couple of hundred pixels
+between pivots that is of order a pixel. No code changes; the rotation
+machinery stays exactly as it is, and fitting returns when a rotation can be
+expressed as an attitude (#434). The documentation pass is the bulk of the
+work — every sentence asserting that this is Galileo's situation today goes,
+while the general statements stay. The archived C-kernel plans name the
+Galileo cost ("costs only Galileo today"); they are frozen records and are
+not edited for this.
+
+### #447 — the round-trip residual (PR #484 open)
+
+A technique re-measuring a frame whose pointing was corrected by its own
+previous answer should measure zero, and the body techniques do not:
+`BodyLimbNav` fell 0.14 px short on `W1637520502_1_CALIB` and
+`BodyDiscCorrelateNav` 0.50 px short on `C3446143_GEOMED`. PR #484 measures
+the non-equivariance across the whole library with a sweep harness
+(`util/calibration/shift_equivariance.py`, baseline committed), then fixes
+both body-side causes: a sub-pixel silhouette probe
+(`src/spindoctor/nav_model/silhouette_probe.py`) that stops the discrete
+polyline extraction from re-rasterizing a ridge instead of translating it,
+and a per-axis NCC-quadratic fallback in `evaluate_candidate` for the case
+where the upsampled-DFT refinement argmax lands on the window boundary and
+the old code reported a pinned +-0.5 px.
+
+The PR is green, mergeable, and fifty commits behind `main`. What it filed
+rather than fixed: RingEdgeNav is not shift-equivariant either and a planted
+shift re-locks it onto the wrong ring edge (#476, same family as #346 and
+#373 seen from the round-trip side); `BodyDiscCorrelateNav` still misses by
+up to ~1 px on a weakly-constrained axis (#482); and the library pins the fix
+moves need re-ratcheting (#483, which cannot be done honestly until #288 is
+reconciled).
+
+### #504 — RingEdgeNav's pooled inlier-fraction veto
+
+The veto discards correct ring fits on real B-ring scenes. A veto that fires
+on good answers costs coverage in exactly the scene class the Saturn cohorts
+are made of, and it does so silently, so the cost does not appear as a
+failure anywhere -- it appears as a smaller cohort. Essential, and it
+interacts with #346/#373/#476: the same coarse-lock weakness that produces
+wrong locks is what the veto is compensating for.
 
 ### #346 — the remaining confident-wrong ring-lock
 
@@ -160,11 +285,24 @@ and starts with a design document, not code.
   (`tests/integration/test_image_library.py`); runs in the deliberate
   tier, marked expected-incomplete until #235 fills `faint_stars` and
   `ring_only_flat`.
+- **#533** — a file that could not be retrieved is counted by a tree-backed
+  report and by no index-backed one. The ingest deliberately records no
+  refusal for a retrieval that failed, because a retrieval that failed once
+  is worth trying again; that is right for the ingest and it makes the two
+  storages disagree about one of the six refusal kinds. Close it by deciding
+  which count is the honest one, not by making the ingest lie.
+- **#535** — the statistics report retains more than it prints under
+  `--top-n`. Small; the fix is to bound what the accumulator keeps.
+- **#340** — `library_crosscheck` records only a yes/no primary-technique
+  flag, not the winning technique, so a cross-check delta cannot say which
+  technique took over. Cheap, and it makes the standing practice below
+  actually diagnostic.
 - **Standing practice** — after any calibration- or technique-affecting
   merge: `util/calibration/library_crosscheck.py` over the full library,
-  every per-image delta accounted for; `sd_results_index` /
-  `sd_stats_report` over campaign outputs as the accuracy checkpoint
-  (both from the statistics system).
+  every per-image delta accounted for; `sd_stats_report` over campaign
+  outputs as the accuracy checkpoint. Note that the practice is currently
+  degraded: with 52 of 74 library frames red locally (#288), a cross-check
+  can only be read as "no *new* deltas against `main`".
 
 ## Track D — Capability completion
 
@@ -200,7 +338,14 @@ Work items, in dependency order:
    `src/spindoctor/cli/pds4/collections.py` and the surrounding writer
    path. Fix the write path to fail loudly on a dropped label and
    reconcile the layout documentation.
-2. **Template finalization acceptance list** — the items recorded
+2. **#519 — labels carry empty `START_DATE_TIME`, `STOP_DATE_TIME` and
+   `IMAGE_MID_TIME`.** An archive-quality label with empty time fields is
+   not archive-quality, and it is exactly the class of defect #265's
+   swallowed write errors let through, so fix #265 first and this becomes
+   visible rather than silent. Also worth knowing when picking this up:
+   `sd_create_bundle` crashes inelegantly on a missing metadata file, which
+   is the same area.
+3. **Template finalization acceptance list** — the items recorded
    on #53: schema validation, the unreferenced `cassini:*` variables and
    hardcoded placeholders, TITLE/DESCRIPTION wording, collection date
    ranges, unrendered bundle-level products, variable-less global-index
@@ -208,17 +353,17 @@ Work items, in dependency order:
    non-navigated-image handling, and the `.tab`/`.csv` + directory-layout
    decision. These are the acceptance criteria for "final templates" in
    the paragraph above.
-3. **#69, #30** — backplane FITS description in data labels; backplane
+4. **#69, #30** — backplane FITS description in data labels; backplane
    label design (couples to the #55 backplane-set decision).
-4. **#79** — scrape PDS4 context products for targets (feeds #73).
-5. **#71-#76, #47** — label/collection completeness items, each small:
+5. **#79** — scrape PDS4 context products for targets (feeds #73).
+6. **#71-#76, #47** — label/collection completeness items, each small:
    parameterized bundle name/version, target handling, ring geometry
    class fields, global-index labels, collection CSVs, ring incidence
    angle.
-6. **#66** — integrity-checking pass over a generated bundle.
-7. **#67** — cloud-aware bundle generation (with the Track D cloud
+7. **#66** — integrity-checking pass over a generated bundle.
+8. **#67** — cloud-aware bundle generation (with the Track D cloud
    audit).
-8. Schema-validate generated `.lblx` against the PDS4 schemas in CI for
+9. Schema-validate generated `.lblx` against the PDS4 schemas in CI for
    all four instruments (acceptance for the whole family).
 
 ### Backplane family (decision: #28 scope)
@@ -244,6 +389,19 @@ by a strict xfail in `tests/spindoctor/cli/backplanes/`:
   bounding boxes, an observation metadata block); couples to the
   #55/#57 decisions.
 
+Two further items in this family, neither found by that suite:
+
+- **#496** — `sd_backplanes_cloud_tasks` lets a per-image failure escape the
+  task handler, so the worker's failure mode is the handler's rather than
+  the pipeline's. Same family as #418: decide what a task's status owes a
+  retrying queue.
+- **#520** — move the pointing selection and application code
+  (`src/spindoctor/cli/reproj/offsets.py`: metadata pointing selection and
+  the C-matrix/offset application ladder) out of the reprojection CLI
+  package. It already has two consumers, the reprojection and backplane
+  stages, which is the condition the code's own comment names for promoting
+  it into the library package proper.
+
 ### CK kernels: what remains after the deliverable (follow-ups)
 
 The "updated pointing" deliverable is built, both halves. The navigator
@@ -256,8 +414,8 @@ correct -- an exposure whose baseline no candidate reproduces, or that
 yields to its simultaneous partner, is reported omitted rather than
 written --
 with a meta-kernel and a per-mission CSV report beside them. The designs of
-record are `plans/CK_KERNEL_PLAN.md` (the writing half) and
-`plans/CMATRIX_READERS_PLAN.md` (the reading half: the backplane and
+record are `plans/archive/CK_KERNEL_PLAN_2026-08-04.md` (the writing half) and
+`plans/archive/CMATRIX_READERS_PLAN_2026-08-09.md` (the reading half: the backplane and
 reprojection readers apply the recorded C-matrix by frame replacement, with
 the offset as the documented fallback); the consumer-facing and
 developer-facing documentation is `docs/user_guide/user_guide_ck_kernels.rst`
@@ -272,23 +430,96 @@ The round trip also measured something that belongs to Track B rather than
 here: a technique re-measuring a corrected frame does not return exactly
 the negative of the shift it was given, which costs up to 0.49 px on frames
 carried by the correlation and distance-transform body techniques (#447).
+PR #484 fixes both body-side causes and is open.
 
-The plan's own follow-ups are filed: the oops API replacing the hand-derived
-derivation (#433), fitted-twist support (#434) with the static-twist FK/IK
-question behind it (#435, #436), SPICE database registration (#437), the
-interior-epoch fidelity bound through an adaptive record cadence
-(#440, #444) with its per-instrument characterization (#455), and the
-kernel-input handling items (#446, #448, #468).
+Two of the plan's follow-ups turned out to be navigator defects rather than
+kernel work, and both are Essential: a conflicted result drops its fitted
+camera rotation and is then given a C-matrix that ignores it (#521), and
+rotation fitting should be turned off for Galileo SSI (#522), which is the
+instrument the fitted-rotation omission costs today. Fix these before
+generating any kernel set that will be published, because a wrong attitude
+in a delivered kernel is worse than an omitted one.
 
-### The results index (#430)
+The rest of the plan's follow-ups are filed and none blocks use of the
+kernels: the oops API replacing the hand-derived derivation (#433),
+fitted-twist support (#434) with the static-twist FK/IK question behind it
+(#435, #436), SPICE database registration (#437), the interior-epoch
+fidelity bound through an adaptive record cadence (#440, #444) with its
+per-instrument characterization (#455), the kernel-input handling items
+(#446, #448, #468), and a memory bound: `sd_create_ck` holds a whole mission
+in memory where a time-ordered stream would not (#513, which is also the
+consumer that would use a `Selection` order parameter).
 
-An optional, rebuildable database index over the results tree, so that
-programs needing a few fields per image stop reading one JSON document
-each -- one paid cloud round trip per image per program today, at order
-400,000 images for a Cassini-scale run. Design is settled and detailed in
-`plans/RESULTS_INDEX_PLAN.md`, which is self-contained. The JSON documents
-stay authoritative, no program ever requires the index, and the
-file-reading paths remain the default.
+Operationally, the program is still hard to run: locating the kernels it
+needs takes several `--kernel-dir` flags and still misses some. That is the
+practical face of #448 (locate C-kernel inputs through `spyceman` instead of
+a kernel directory tree) and should be weighed when #448 is scheduled.
+
+### The results index: delivered, and what it left open
+
+Delivered and merged to `main` on 2026-08-25 (#430, #487, #507). An optional,
+rebuildable database index over the results tree, so that programs needing a
+few fields per image stop reading one JSON document each -- one paid cloud
+round trip per image per program otherwise, at order 400,000 images for a
+Cassini-scale run. The JSON documents stay authoritative, **no program
+requires the index**, and the file-reading paths remain the default: a run
+that names no index reads the tree exactly as it always has.
+
+What it changed beyond the index itself is the more important half. Every
+program that reads a navigation record now reads it through one seam,
+`spindoctor/nav_records/`, over both storages, with one row-to-record
+rebuild, one opener, and one enumerated statement of where the two storages
+answer differently. A program becomes index-backed by *declaring*
+`--results-index-db`, never by inheriting an exported environment variable.
+The design is archived at `plans/archive/RESULTS_INDEX_PLAN_2026-08-04.md`;
+current behavior is `docs/user_guide/user_guide_results_index.rst` and
+`docs/dev_guide/dev_guide_results_index.rst`.
+
+Two of its acceptance criteria openly do not hold, which is stated rather
+than papered over: no written product is compared between the two storages,
+because the one integration frame that would do it no longer navigates
+(#547, blocked behind the image-library regression #288), and suite coverage
+is 79% against a stated floor of 90% with nothing enforcing it (#548, an
+operator decision -- raise the number or ratify a lower floor).
+
+Its follow-ups, none blocking:
+
+- **Capability extensions:** a document column so bundle generation stops
+  reading one file per image (#464, likely a separate optional database
+  since it roughly doubles the index size); a schema wide enough to serve
+  the curation triage tool (#465, wanted only if triage's ten rglobs per
+  frame remain a practical pain); a `--since` selector so a re-scan stops
+  paying for the whole listing (#467); `sd_offset` writing each result into
+  the index as it navigates (#486); and an index that can say whether a
+  root's rows were pruned (#542).
+- **Operational questions with a decision in them:** a documented workflow
+  for getting the index to cloud workers (#466 -- publish the SQLite file to
+  the results bucket, or run PostgreSQL); and the lockability probe that
+  takes a SQLite write lock a consumer never needs (#462), which cloud-task
+  ingest makes routine rather than occasional.
+- **Correctness and hygiene:** a cloud-share ingest that can write another
+  root's document into this root's rows (#515) with the test that cannot
+  catch it (#516) -- the same threat model, to be answered together; queries
+  bound to the search path rather than the resolved schema (#501); the
+  document-to-column placement still written twice (#512); the ingest's own
+  retrieve-and-parse loop beside the seam's (#514); the seam overstating what
+  a missing row means (#536); documents recording where the image was cached
+  rather than where it came from (#531); no format version on the metadata
+  documents (#528); a mistyped `--nav-results-root` reading as a tree in
+  which nothing was navigated (#538); a narrow selection still listing a
+  whole volume (#540); signed zero not surviving SQLite (#534); roots taken
+  as `str` rather than the `FCPath` union (#472); and the FileCache/FCPath
+  construction audit (#541).
+- **Reported through other programs:** `sd_mosaic` reports a lost index as N
+  failed images rather than one run-level condition (#493), and there is no
+  integration-tier case for a document the ingest refused (#497).
+
+One dependency rather than a follow-up: `FileCacheSourceS3.iterdir_metadata`
+issues one `list_objects_v2` and reads that single response, so an S3 prefix
+holding more than a thousand objects lists short and says nothing
+(SETI/rms-filecache#65). The seam's completeness guarantee assumes a listing
+is complete or raises, and there is deliberately no workaround here. GS
+auto-paginates and is unaffected.
 
 ### Capability matrix (#231)
 
@@ -343,6 +574,25 @@ asserts the generated half matches the registries.
 - **#141 / #142** — dedup the CLI driver preamble and cloud-task loop;
   fix the dropped `extra_params` and the ImageFiles cardinality
   disagreement.
+- **#493** — `sd_mosaic` reports a lost results index as N failed images
+  rather than as one run-level condition. Same shape of defect as #418 and
+  #496 and worth fixing with them: a run-level fault reported per image
+  reads to an operator as N unrelated failures.
+- **#515 / #516** — a cloud-share ingest can write another root's document
+  into this root's rows, because `_share_from_task` reads the stub straight
+  out of the task JSON and never builds one; the fix is to call
+  `stub_refusal` in its existing per-entry loop. The test that should catch
+  it asserts on the row a root-blind write would keep, so it cannot fail.
+  Same threat model as a hand-written task file naming a stub outside its
+  root; answer them together.
+- **#466** — a documented workflow for getting the index to cloud workers:
+  publish the SQLite file to the results bucket and have each worker
+  download it once, or run PostgreSQL. This is a decision before it is
+  work, and it is the item that decides whether #464's document column
+  (which roughly doubles the index size) is affordable.
+- **#495** — add raw-product dataset names for Cassini ISS (`coiss_raw` and
+  family), so a run can name the raw products the way it names the
+  calibrated ones.
 - **#236** — profiling + supported batch-parallel path (issue has the
   breakdown; respects #103/#134 thread-safety constraints — per-thread
   `Backplane` objects, no shared `obs`).
@@ -362,9 +612,20 @@ asserts the generated half matches the registries.
   `sd_create_bundle.py` driver arg-parsing layer, which should fold into
   the broader sd_*-driver test effort. The backplane suite carries strict
   xfails for #251, #252, #253, ready to flip when each fix lands.
-- **#288** — image-library regression reconciliation: the standing red set
-  is now reduced to the deliberately-pinned frames, each owned by an open
-  navigation issue (#338, #346, #350). N1530185128 (#351) and W1444747627
+- **#288** — image-library regression reconciliation, and the piece of test
+  debt with the widest blast radius. In the local integration environment 52
+  of 74 sidecars disagree, which is far more than the deliberately-pinned
+  set below and means the regression instrument cannot currently distinguish
+  a navigation regression from the standing state. Two consequences to hold
+  onto: a navigation-affecting branch can only be gated on *no new failures
+  against `main`*, and #547 (the one place a built product is compared
+  between the results tree and the results index) is blocked because the
+  frame it needs no longer navigates. Reconciling this is prerequisite to
+  #483's re-ratchet and to reading the Track A cohorts with confidence.
+
+  The intended steady state, and what the pins mean when it is reached: the
+  standing red set reduced to the deliberately-pinned frames, each owned by
+  an open navigation issue (#338, #346, #350). N1530185128 (#351) and W1444747627
   (#352) are now re-ratcheted to success/medium and green: the ensemble
   blob-outlier drop lets the multi-star fix commit on the former, and the
   star-navigation hardening already locks the latter. N1806609736 (#392) is
@@ -403,6 +664,52 @@ asserts the generated half matches the registries.
   release cannot turn `main` red without a deliberate code change. A ruff
   0.16 release promoting RUF036 did exactly that mid-batch; the offending
   lines were fixed, but the unpinned-linter exposure remains.
+- **#548** — suite coverage measures 79%, two shipped plans' acceptance
+  criteria assert 90%, and nothing enforces either figure. The shortfall is
+  almost entirely PyQt6 widget code. This is an operator decision before it
+  is an implementer's: raise coverage to the stated floor, or ratify a lower
+  one and gate CI on that. Leaving the claim and the absent gate both in
+  place is the one option that keeps asserting something untrue. Related
+  cautionary note: `pytest --cov` was recorded as broken here for months and
+  runs fine, which is how the figure went unmeasured for so long.
+- **#547** — acceptance criterion 1 of the results-index work compares a
+  written product between the two storages, and the one integration frame
+  that would do it no longer navigates, so that half of the criterion runs
+  against no frame. Either pick a frame that still navigates, or close it
+  behind #288.
+- **Tests that cannot fail.** This project has now hit the same failure
+  three times, and it deserves a named place in the plan rather than a line
+  in a PR body: a test whose docstring promises more than its body checks
+  passes against the very defect it exists to catch. Open instances: #516
+  (`test_a_share_only_writes_its_own_root` asserts on the row a root-blind
+  write would keep). When writing a guard, verify it by breaking the source
+  and confirming the test fails; a test that stays green against a
+  deliberately broken implementation is a defect in the test and is reported
+  as one.
+- **#483** — re-ratchet the library pins the shift-equivariance fix (#447 /
+  PR #484) moves. Gated on #288: pins cannot be re-ratcheted honestly
+  against a baseline that is itself 52/74 red.
+- **#524** — consolidate `test_record_source.py` onto the shared
+  results-index fixtures, which already exist and are built by the writer
+  that makes real results trees.
+- **#525** — seventeen test modules exceed the 1000-line module cap the
+  rulebook sets for source.
+- **#473** — the test suite claims Windows support while using POSIX-only
+  constructs. Decide which is true and make the suite match it.
+- **#530** — Cassini fixture clock seconds do not follow from their epochs,
+  so a fixture that looks self-consistent is not.
+- **#438** — the Sphinx nitpicky gate is required by the project rules and
+  is not run; pairs with #129, which is the work of getting to zero.
+- **#545** — the README names two of fourteen command-line programs and
+  links to no guide. Cheap, and it is the first page anyone reads.
+- **#549** — four technique guides name a `dt_fitting.py` that is a package.
+- **#470 / #471** — config placeholder comments and config placeholders
+  themselves still carry an internal phase codename; documentation and
+  configuration should be self-contained.
+- **#443** — decide whether `spindoctor.cli` subpackages belong in the API
+  reference at all. It is what decides whether the C-kernel writer package
+  gets an autodoc page rather than the nitpick-ignore every other
+  `spindoctor.cli` subpackage has, so it sequences before #129/#438.
 
 ## Track F — Instruments, features, hardening
 
@@ -466,4 +773,6 @@ does not overlap, avoiding the O(bodies^2) grid pass in busy frames),
 nothing gates on hardware), #428 the upstream `rms-pdslogger`
 registry-eviction request (nothing in this repo depends on it; the
 constraint is worth recording where the next person to reach for a
-logger-per-image design will find it).
+logger-per-image design will find it), #494 Cassini BOTSIM pairs defined two
+different ways (one definition, before #27 builds on either), and #518 state
+the encoding wherever a document or text file is read or written.

@@ -62,6 +62,27 @@ binding.
 pending the real-anchored pass (#230). The remaining workstreams below build
 on that baseline; each has a tracking issue (cross-map below).
 
+**Two prerequisites for measuring anything at scale.** Both are Track B/E
+work rather than methodology, and both silently corrupt what every workstream
+below reads:
+
+- **#503** — the orchestrator's per-model and per-technique sandboxes swallow
+  exceptions, so an image whose model or technique raised still reports
+  `success` with an offset built on reduced evidence, and the metadata
+  document records nothing about it. A cohort collected before this is fixed
+  cannot distinguish "this technique had nothing to say" from "this technique
+  crashed", which is precisely the distinction an agreement statistic depends
+  on.
+- **#288** — 52 of 74 curated library sidecars disagree in the local
+  integration environment, so the regression instrument that is supposed to
+  detect a navigation change cannot currently do so. Until it is reconciled,
+  a navigation-affecting change can only be gated on *no new failures against
+  `main`*, and the library's own tiers cannot be read as verified
+  expectations.
+
+Neither blocks writing methodology or building tooling. Both block collecting
+the numbers.
+
 **Two shared decisions, declared once:**
 
 - **Confidence-calibration methodology (binding for #230).** Confidence is
@@ -89,8 +110,8 @@ carry the methodology and acceptance criteria):
 | WS-1b | #226 | Reprojection consistency. |
 | WS-2 | #227 (+ #223, #309, #341, #377, #409) | De-circularization done; #227 open only for the realism residual (realism-anchored calibration #309, terminator verdict #223, sim-fidelity gaps, and the scene-coordinate convention split #409 where stars are the outlier). |
 | WS-17 | #355 | Distortion measured from star fields; residual is the per-camera Voyager sim split. |
-| WS-3 | #172, #174, #235 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
-| WS-4 | #229, #426 | CI integration tiers. |
+| WS-3 | #172, #174, #235, #288 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. #288 is the standing regression: 52 of 74 sidecars disagree locally, so the library's tiers are not currently verified expectations. |
+| WS-4 | #229, #426, #324, #336, #335, #340 | CI integration tiers, plus what does not run in Actions today: the agreement-estimator tests (#324), the data-independent simulator suites (#336), the committed sim baselines that have no canonical environment (#335), and the cross-check's yes/no primary-technique flag (#340). |
 | WS-5 | #230, #176 | Real-anchored recalibration once WS-1 anchors exist. |
 | WS-6 | #231 | Capability matrix. |
 | WS-7 | #397, #398, #399, #400, #401, #402, #403, #404, #405, #407 | Titan haze navigation delivered and validated; open items are the deferred refinements and the operator ratification bundle (#407). |

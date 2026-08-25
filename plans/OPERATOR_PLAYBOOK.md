@@ -2,10 +2,12 @@
 
 *Explicit operator instructions — commands to run, files to modify, and
 prompts to hand to agent sessions — for every next step in
-`plans/PROGRAM_PLAN.md` as of 2026-08-04. Work through Section 0 first;
+`plans/PROGRAM_PLAN.md` as of 2026-08-25. Work through Section 0 first;
 everything after it can be dispatched in parallel as agent sessions.
 Environment for every command below: `source /seti/newnav/setup.sh` from
-`/seti/newnav/rms-nav` (the venv is `venv/`).*
+`/seti/newnav/rms-nav` (the venv is `venv/`). A venv installed before
+2026-08-25 needs `venv/bin/pip install -e ".[dev]"` once, because
+`sqlalchemy>=2.0` became a runtime dependency.*
 
 ## 0. Right now (operator-only, minutes)
 
@@ -32,12 +34,53 @@ Each is a scope commitment the downstream work waits on:
 - **#338 highly-irregular terminator fit (N1853392805)**: accept the
   2-px-class ground truth, keep TERMINATOR_ARC for SPICE-known synchronous
   rotators, or wait for shape models (#23).
+- **#548 the coverage floor**: the suite measures 79%; two shipped plans'
+  acceptance criteria assert 90%; nothing enforces either. Raise coverage to
+  the stated floor, or ratify a lower one and gate CI on that. The shortfall
+  is almost entirely PyQt6 widget code. Leaving both the claim and the
+  absent gate in place is the one option that keeps asserting something
+  untrue.
+- **#547 the uncompared written product**: acceptance criterion 1 of the
+  results-index work compares a built product between the two storages, and
+  the one integration frame that would do it no longer navigates. Pick a
+  frame that still navigates, or close it behind the image-library
+  regression (#288).
+- **#459 Cassini predicted kernels**: whether Cassini navigation should run
+  from the predicted rather than the reconstructed kernels. There is a
+  branch, `origin/rf_ck_cassini_predicted`, nine commits, last touched
+  2026-08-07, with no pull request ever opened. Say whether it is live
+  before it drifts further from `main`.
+- **#468 New Horizons pointing family**: declare the merged family
+  reconstructed on its comment-area evidence, or leave it `UNCLASSIFIED`.
+- **#466 getting the index to cloud workers**: publish the SQLite file to
+  the results bucket and have each worker download it once, or run a
+  PostgreSQL instance. This one also decides whether #464's document column
+  is affordable, since it roughly doubles the index size.
 
 ```bash
 gh issue comment 316 --body "Decision: <ship default | ratchet fraction | wander decomposition>"
 gh issue comment 407 --body "Decisions: <per the enumerated list>"
 gh issue comment 338 --body "Decision: <accept 2px GT | keep TERMINATOR_ARC | shape models>"
+gh issue comment 548 --body "Decision: <raise to 90% | ratify <N>% and gate CI on it>"
+gh issue comment 547 --body "Decision: <pick frame <name> | close behind #288>"
+gh issue comment 459 --body "Decision: <rf_ck_cassini_predicted is live | abandon the branch>"
+gh issue comment 468 --body "Decision: <declare reconstructed | leave UNCLASSIFIED>"
+gh issue comment 466 --body "Decision: <ship the SQLite file | run PostgreSQL>"
 ```
+
+### 0.1b Merge or close the one open pull request
+
+PR #484 (#447, the round-trip residual) has been open since 2026-08-09,
+is green and mergeable, and is fifty commits behind `main`. Rebase and
+merge it, or say what it is waiting on. Nothing else is in flight.
+
+### 0.1c Label gaps (two minutes)
+
+Every issue is supposed to carry A-type, B-location, Priority and Effort
+labels with assignee `rfrenchseti`. Nine do not. Five have no priority --
+#23, #28, #34, #53, #78, all of them big parent issues, which is probably why
+-- and four have no effort: #150, #152, #153, #239. A parent issue with no
+priority sorts as if it did not matter.
 
 ### 0.2 Adopt the calibration's falsification criterion (#334)
 
@@ -48,13 +91,25 @@ real-frame regression gate is suspended. Edit
 thresholds if you disagree with the proposal. That gives the calibration a
 criterion that can fail. Tracked by #334.
 
-## 1. The deliberately-red library set
+## 1. The library regression, and the deliberately-red set
 
-The full library suite
-(`pytest tests/integration/test_autonomous_nav.py -m '' -n auto
---dist=loadfile`) leaves a small red set, each frame owned by an open
-navigation issue. These are pins, not regressions; do not re-ratchet them
-until the owning issue closes.
+**Read this before trusting a library run.** In the local integration
+environment 52 of 74 sidecars disagree on `main` (#288). That is not the
+pinned set below; it is a broken regression instrument, and until it is
+reconciled the only gate a navigation-affecting branch can honestly clear is
+**no new failures against `main`** — run the suite on `main` first, then on
+the branch, and account for the difference. Do not re-ratchet a sidecar to
+match current behavior, and do not read a green-looking subset as a pass.
+
+Reconciling #288 is prerequisite to two other things: #483 (re-ratcheting the
+pins the shift-equivariance fix moves) and #547 (the one place a built
+product is compared between the results tree and the results index, whose
+frame no longer navigates).
+
+The set below is the *intended* steady state — the frames that should stay
+red once #288 is reconciled, each owned by an open navigation issue. These
+are pins, not regressions; do not re-ratchet them until the owning issue
+closes.
 
 | frame(s) | owner |
 |---|---|
@@ -64,13 +119,21 @@ until the owning issue closes.
 | N1487595731_1 (multi_body: expects BodyDiscCorrelateNav primary, gets BodyLimbNav) | #406 |
 | N1633925572_1 (ring_plus_body: expects the medium tier, gets low) | #406 |
 
-**Verify the pin set is exactly this after any navigation-affecting merge:**
+**After any navigation-affecting merge, compare against `main` rather than
+against the table:**
 
 ```bash
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 pytest tests/integration/test_autonomous_nav.py -m '' -n auto --dist=loadfile
-# Expect: red set = only the frames above; any other delta must be
-# attributed in the merging PR.
+# Expect, while #288 is open: the same red set as main. Any delta either way
+# must be attributed in the merging PR.
+# Once #288 is reconciled: red set = only the frames above.
 ```
+
+The thread pins are not optional and are set nowhere in the repository —
+not in `setup.sh`, not in `conftest.py`, not in CI, not in
+`scripts/run-all-checks.sh` — so every script and every session exports them
+itself. Without them a parallel run saturates the machine.
 
 ## 2. Track A critical path (dispatch as agent sessions, in this order)
 
@@ -207,14 +270,32 @@ Independent review before done; all CI gates; one PR."
   where the star fix is itself wrong-locked — a safe `conflicted` becomes a
   confident-wrong `success`. Sequence with #230/WS-5.
 - **CK kernel follow-ups**: the kernel-side follow-ups (#433, #434, #437,
-  #440/#444/#455, #446, #448, #468) are independent of each other;
-  #435/#436 are a pair and #436 waits on #435. Whether Cassini navigation
-  should run from the predicted rather than the reconstructed kernels
-  (#459) is a pending operator decision, not dispatchable work.
-- **#430 (results index)**: implement `plans/RESULTS_INDEX_PLAN.md` -- the
-  plan is the specification and its section 8 is the session protocol
-  (per-phase implementer + adversarial reviewer, both Opus-class). Ready to
-  dispatch as written.
+  #440/#444/#455, #446, #513) are independent of each other; #435/#436 are a
+  pair and #436 waits on #435. #448 (locate C-kernel inputs through
+  `spyceman` instead of a kernel directory tree) has a practical face worth
+  weighing when scheduling it: running `sd_create_ck` today takes several
+  `--kernel-dir` flags and still misses kernels. #459 (predicted vs
+  reconstructed Cassini kernels, with an orphan branch behind it) and #468
+  (the New Horizons pointing family) are operator decisions, not
+  dispatchable work — Section 0.1.
+- **Navigation correctness, in order**: #503 first (the orchestrator swallows
+  model and technique exceptions, so an image reports `success` on silently
+  reduced evidence -- the only Critical issue open, and upstream of every
+  number Track A collects). Then #504 (RingEdgeNav's pooled inlier-fraction
+  veto discards correct ring fits on real B-ring scenes) and #476 (RingEdgeNav
+  re-locks onto the wrong ring edge under a planted shift), which belong with
+  #346 and #373 as one coarse-lock family. #521 and #522 are small, Essential,
+  and independent of all of that: a conflicted result drops its fitted camera
+  rotation and gets a C-matrix that ignores it, and rotation fitting should
+  be off for Galileo SSI. Do #521/#522 before publishing any kernel set.
+- **Results-index follow-ups** (the index shipped 2026-08-25; none of these
+  blocks anything): #515 and #516 together (a cloud-share ingest can write
+  another root's document into this root's rows, and the test that should
+  catch it cannot fail); #501, #512, #514, #536 as a cleanup batch over the
+  seam; #493 and #496 with #418 as one "what does a task's status owe a
+  retrying queue" batch; #531 and #528 as a metadata-provenance pair. #466
+  and #462 are decisions first (Section 0.1). #464, #465, #467, #486, #542
+  are capability extensions to schedule when someone wants them.
 - **Logging follow-ups** (small, independent, no sequencing): #424 (remove
   `sd_create_bundle_cloud_tasks` — it is unwired and leaks to the worker
   terminal); #418 (decide whether a mosaic cloud task's `status` should
@@ -266,10 +347,55 @@ Open issues grouped by theme so none is lost to a PR body; the sequencing
 hooks reference the sections above. All carry A/B/Priority/Effort labels
 with assignee rfrenchseti.
 
+**Evidence integrity (do first; everything else reads what these produce):**
+
+- **#503** the orchestrator's sandboxes swallow model and technique
+  exceptions, so an image reports `success` on silently reduced evidence and
+  the metadata records nothing — the only Critical issue open
+- **#288** 52 of 74 library sidecars disagree on `main` locally, so the
+  regression instrument cannot tell a regression from the standing state;
+  blocks #483 and #547
+- **#548** suite coverage is 79% against a stated 90% floor with nothing
+  enforcing either (Section 0.1 decision)
+- **#547** the one place a built product is compared between the results tree
+  and the results index runs against a frame that no longer navigates
+
+**Kernel-facing navigation defects (small, Essential, before publishing a
+kernel set):**
+
+- **#521** a conflicted result drops its fitted camera rotation and is given
+  a C-matrix that ignores it, so the less trustworthy outcome is the one
+  that produces a corrected kernel
+- **#522** turn off rotation fitting for Galileo SSI — configuration and
+  documentation only, no code change
+
+**Results index (shipped 2026-08-25; none blocking):**
+
+- **#515 / #516** a cloud-share ingest can write another root's document into
+  this root's rows, and the test that should catch it asserts on the row a
+  root-blind write would keep
+- **#501, #512, #514, #536** seam cleanup: bind queries to the resolved
+  schema, one document-to-column placement, fold the ingest's parse loop into
+  the seam, stop overstating what a missing row means
+- **#493, #496** run-level conditions reported per image (batch with #418)
+- **#528, #531** metadata provenance: no format version, and documents record
+  where the image was cached rather than where it came from
+- **#462, #466** decisions (Section 0.1)
+- **#464, #465, #467, #486, #542** capability extensions, schedule on demand
+- **#472, #497, #524, #533, #534, #535, #538, #540, #541** the small tail
+
 **Confident-wrong / ensemble honesty (sequence with #230/WS-5):**
 
 - **#346** three library frames lock confidently onto the wrong ring feature
   (owns the N1492091163 / N1867601758 / N1867602424 red pins)
+- **#476** RingEdgeNav is not shift-equivariant: a planted shift re-locks it
+  onto the wrong ring edge — the same coarse-lock family as #346 and #373,
+  seen from the round-trip side
+- **#504** RingEdgeNav's pooled inlier-fraction veto discards *correct* ring
+  fits on real B-ring scenes, so the cost appears as a smaller cohort rather
+  than as a failure
+- **#482** BodyDiscCorrelateNav misses by up to ~1 px on a weakly-constrained
+  axis, the residual left after PR #484 closes #447
 - **#394** shape-lock veto suppression trusts a star fix that could itself be
   wrong-locked, turning a safe `conflicted` into a confident-wrong `success`
 - **#380** correlated-witness fusion collapses to a representative at rho=1;
@@ -392,7 +518,14 @@ with assignee rfrenchseti.
 ## 5. Sequencing summary
 
 ```text
-0.1 decisions (#316, #407, #338) -> 0.2 adopt transfer watch (#334)  (operator, minutes)
+0.1 decisions (#316, #407, #338, #548, #547, #459, #468, #466)  (operator, minutes)
+0.1b merge or close PR #484                                     (operator, minutes)
+0.2 adopt transfer watch (#334)                                 (operator, minutes)
+--- then, before Track A collects anything at scale ---
+#503 fatal orchestrator exceptions   (agent session; upstream of every number)
+#288 library regression reconcile    (agent session; unblocks #483 and #547)
+#521 / #522 kernel-facing rotation   (agent session; small, Essential)
+--- then ---
 2.1 library growth (batch-006 + continued)   (agent session; your votes gate it)
 2.2 agreement study bulk   (after 2.1 cohorts; you approve frames)
 2.3 CI tier, re-anchor confidence, accuracy tail (after 2.2)
