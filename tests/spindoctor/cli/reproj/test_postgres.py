@@ -37,7 +37,7 @@ from tests.spindoctor.cli.reproj.conftest import (
 
 from spindoctor.cli.reproj.offsets import PointingMechanism
 from spindoctor.cli.reproj.pointing_source import IndexPointingSource
-from spindoctor.cli.stats.ingest import ingest_metadata_files
+from spindoctor.cli.results_index import ingest_metadata_files
 from spindoctor.results_index import normalize_root_url, open_index
 
 pytestmark = pytest.mark.postgres

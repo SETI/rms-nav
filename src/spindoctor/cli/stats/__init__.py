@@ -4,7 +4,7 @@ Two programs, one of which builds the results index that
 :mod:`spindoctor.results_index` defines and one of which reads navigation
 records from wherever they are kept:
 
-- ``sd_stats_ingest`` (:mod:`spindoctor.cli.stats.ingest`, with the column
+- ``sd_results_index`` (:mod:`spindoctor.cli.results_index`, with the column
   mapping in :mod:`spindoctor.nav_records.facts`) walks one or more
   navigation-results roots -- local paths or any URL accepted by ``FCPath`` --
   reads every ``*_metadata.json`` written by ``navigate_image_files``, and
@@ -33,7 +33,7 @@ reads the documents themselves, one file read per image in place of one query
 per run.
 """
 
-from spindoctor.cli.stats.ingest import ingest_metadata_files
+from spindoctor.cli.results_index import ingest_metadata_files
 from spindoctor.cli.stats.report import main_report
 
 __all__ = ['ingest_metadata_files', 'main_report']

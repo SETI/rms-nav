@@ -125,18 +125,17 @@ Environment options
   will be written, overriding both the ``NAV_RESULTS_ROOT`` environment variable
   and any corresponding configuration setting.
 
-* ``--results-db URL``: connection URL of a results index (a ``sqlite:`` URL
-  naming a local path, or a ``postgresql+psycopg:`` URL naming a server),
-  overriding both the ``NAV_RESULTS_DB`` environment variable and any
+* ``--results-index-db URL``: connection URL of a results index (a ``sqlite:``
+  URL naming a local path, or a ``postgresql+psycopg:`` URL naming a server),
+  overriding both the ``NAV_RESULTS_INDEX_DB`` environment variable and any
   corresponding configuration setting. The results-file selection filters below
   are then answered from the index's rows, and the results tree is not read.
-  Pass ``--results-db none`` to read the tree even when a URL is
-  set in the environment or a configuration file; the opt-out is that word
-  exactly, in lower case, with any surrounding spaces ignored, since any other
-  non-empty value is read as the URL of an index.
-  A value that is empty, or nothing but spaces, is refused: it is neither a
-  connection URL nor the way to name no index, so the run stops and names the
-  setting that carries it.
+  Pass ``--results-index-db none`` to read the tree even when a URL is set in
+  the environment or a configuration file; the opt-out is that word exactly, in
+  lower case, with any surrounding spaces ignored, since any other non-empty
+  value is read as the URL of an index. A value that is empty, or nothing but
+  spaces, is refused: it is neither a connection URL nor the way to name no
+  index, so the run stops and names the setting that carries it.
 
 Navigation options
 ^^^^^^^^^^^^^^^^^^
@@ -265,9 +264,9 @@ that will not read --- are not reported for an image whose record was carried,
 because a record is carried only for a document that was read whole. Such an
 image is reported under what its record records, or under nothing at all.
 
-Given ``--results-db`` nothing is carried, and this saves nothing: the filter
-narrows on columns and the per-image stage reads the columns it needs, which are
-a different set, so the two stay separate reads of the index.
+Given ``--results-index-db`` nothing is carried, and this saves nothing: the
+filter narrows on columns and the per-image stage reads the columns it needs,
+which are a different set, so the two stay separate reads of the index.
 
 The listing taken when the enumeration starts covers the volumes the enumeration
 selected and no others, and they are asked about one at a time. Reading the
@@ -287,8 +286,8 @@ those volumes as well would narrow nothing, and a volume the results root has no
 directory for still costs nothing and ends nothing: the images under it are
 images the root holds no document for.
 
-Given ``--results-db``, whichever of the two questions the flags call for is
-answered from the index's rows, and the results tree is not read at all. A
+Given ``--results-index-db``, whichever of the two questions the flags call for
+is answered from the index's rows, and the results tree is not read at all. A
 results root for which the index has no completed ingest is refused rather than
 answered, because absence of a row would otherwise read as "this image was never
 navigated". The paragraphs below are the answers an index is known to give
@@ -315,7 +314,7 @@ recently the last pass finished. A tree restored by a copy that preserves times,
 a document patched and stamped back from a sibling, and a backend reporting one
 modification time for two writes all produce it; an ordinary re-navigation
 writes a different length at a later time and does not. Running
-``sd_stats_ingest --force`` over the root re-reads every document and is what
+``sd_results_index --force`` over the root re-reads every document and is what
 puts such a row right.
 
 An index is also a snapshot of the tree as of the last ingest over that root,
@@ -324,10 +323,10 @@ hold, so ``--has-no-offset-file`` selects it again, and a result file deleted
 since is one the index still holds, so ``--has-offset-file`` selects an image
 whose metadata file is gone. The run log says when the pass that filled the
 index finished and how long ago that was, which is what says whether either
-applies to this run. Run ``sd_stats_ingest`` to bring the index up to date, or
-pass ``--results-db none`` for a run that must read the tree. That age is what
-decides the answer outside the paragraphs above; inside them it decides nothing,
-since each of them survives a pass that finished a second ago.
+applies to this run. Run ``sd_results_index`` to bring the index up to date, or
+pass ``--results-index-db none`` for a run that must read the tree. That age is
+what decides the answer outside the paragraphs above; inside them it decides
+nothing, since each of them survives a pass that finished a second ago.
 
 An ingest that meets a directory it cannot list stops there, reports it as an
 error, and completes no root from that point on, so no index a consumer reads
@@ -335,7 +334,7 @@ holds a root that was only partly walked. A results root that cannot be listed
 at all is the other case and does not stop the pass: that root alone is left
 unfinished, which every consumer already refuses, and the ingest goes on to the
 next root. Fix what stopped the walk -- a directory permission, a share that was
-not answering -- and run ``sd_stats_ingest`` again.
+not answering -- and run ``sd_results_index`` again.
 
 Miscellaneous
 ^^^^^^^^^^^^^
@@ -714,7 +713,7 @@ policy, and one annotated example per document shape -- is the
    guide).
 
 These files are also the input to the run-statistics tooling
-(``sd_stats_ingest`` / ``sd_stats_report``), which aggregates them into
+(``sd_results_index`` / ``sd_stats_report``), which aggregates them into
 success/failure, technique-usage, offset, and cross-technique-agreement
 reports; see :doc:`user_guide_statistics`.
 

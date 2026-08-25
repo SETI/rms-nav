@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Ingest one share of a navigation results root, driven by a cloud-tasks queue.
 
-Dispatch script for the ``sd_stats_ingest_cloud_tasks`` console entry point.
-Its interactive sibling ``sd_stats_ingest`` divides a root into shares with
+Dispatch script for the ``sd_results_index_cloud_tasks`` console entry point.
+Its interactive sibling ``sd_results_index`` divides a root into shares with
 ``--output-cloud-tasks-file`` and adds up what the workers did with
 ``--complete-cloud-tasks-file``; this is what reads one of those shares.
 
@@ -33,18 +33,18 @@ from cloud_tasks.worker import Worker, WorkerData
 package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, package_source_path)
 
-from spindoctor.cli.stats.ingest import ingest_task_share
+from spindoctor.cli.results_index import ingest_task_share
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
     build_cloud_task_logging,
-    get_results_db_url,
+    get_results_index_db_url,
     load_default_and_user_config,
 )
-from spindoctor.config.program_names import SD_STATS_INGEST
+from spindoctor.config.program_names import SD_RESULTS_INDEX
 from spindoctor.results_index import open_index
 
-PROGRAM_NAME = SD_STATS_INGEST
+PROGRAM_NAME = SD_RESULTS_INDEX
 """Program identity: names the ``logging.programs`` configuration block this
 worker shares with its interactive sibling."""
 
@@ -78,7 +78,7 @@ def process_task(
     build_cloud_task_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
 
     try:
-        url = get_results_db_url(arguments, DEFAULT_CONFIG)
+        url = get_results_index_db_url(arguments, DEFAULT_CONFIG)
     except ValueError as exc:
         # A level that names the index with an empty value fails the share
         # naming that level, which is a different thing from naming no index at
@@ -135,13 +135,13 @@ async def async_main() -> None:
         ./nav_default_config.yaml if present.""",
     )
     environment_group.add_argument(
-        '--results-db',
+        '--results-index-db',
         default=None,
         metavar='URL',
         help="""Connection URL of the results index to write (a sqlite: URL
         naming a local path, or a postgresql+psycopg: URL naming a server);
-        overrides the environment.results_db configuration variable and
-        NAV_RESULTS_DB. The index must already exist.""",
+        overrides the environment.results_index_db configuration variable and
+        NAV_RESULTS_INDEX_DB. The index must already exist.""",
     )
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)

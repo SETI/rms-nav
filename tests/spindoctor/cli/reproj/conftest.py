@@ -38,7 +38,7 @@ from spindoctor.cli.reproj.pointing_source import (
     IndexPointingSource,
     PointingSource,
 )
-from spindoctor.cli.stats.ingest import ingest_metadata_files
+from spindoctor.cli.results_index import ingest_metadata_files
 from spindoctor.dataset.dataset import ImageFile
 from spindoctor.results_index import normalize_root_url, open_index
 

@@ -19,31 +19,7 @@ import pdslogger
 import pytest
 import sqlalchemy
 from filecache import FCPath
-from tests.spindoctor.conftest import (
-    index_url,
-    metadata_document,
-    technique,
-    write_metadata,
-    write_summary_png,
-)
-
-from spindoctor.cli.stats.ingest import (
-    TaskResult,
-    fan_out_ingest_tasks,
-    ingest_metadata_files,
-    ingest_task_share,
-)
-from spindoctor.cli.stats.ingest.store import _RECORDED_LOOKUP_BATCH_SIZE, _recorded_files
-from spindoctor.nav_records import UnlistableDirectoryError
-from spindoctor.results_index import (
-    FEATURE_SOURCES,
-    IMAGES,
-    TECHNIQUES,
-    normalize_root_url,
-    open_index,
-)
-
-from .conftest import (
+from tests.spindoctor.cli.results_index.conftest import (
     FIRST_STUB,
     build_tree,
     complete,
@@ -54,6 +30,29 @@ from .conftest import (
     run_shares,
     write_metadata_in_each,
     write_refusal_matching,
+)
+from tests.spindoctor.conftest import (
+    index_url,
+    metadata_document,
+    technique,
+    write_metadata,
+    write_summary_png,
+)
+
+from spindoctor.cli.results_index import (
+    TaskResult,
+    fan_out_ingest_tasks,
+    ingest_metadata_files,
+    ingest_task_share,
+)
+from spindoctor.cli.results_index.store import _RECORDED_LOOKUP_BATCH_SIZE, _recorded_files
+from spindoctor.nav_records import UnlistableDirectoryError
+from spindoctor.results_index import (
+    FEATURE_SOURCES,
+    IMAGES,
+    TECHNIQUES,
+    normalize_root_url,
+    open_index,
 )
 
 # ---------------------------------------------------------------------------

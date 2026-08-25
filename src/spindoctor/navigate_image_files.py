@@ -119,7 +119,7 @@ def build_timing_section(start: datetime, end: datetime) -> dict[str, Any]:
     """Build the ``timing`` metadata section from run start and end moments.
 
     Every metadata document carries this section so downstream statistics
-    (``sd_stats_ingest`` / ``sd_stats_report``) can aggregate per-image run
+    (``sd_results_index`` / ``sd_stats_report``) can aggregate per-image run
     times.
 
     Parameters:

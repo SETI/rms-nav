@@ -146,7 +146,7 @@ round trip the index exists to remove.  A refusal is an answer the index cannot
 give, which is a different fact from "no such image was navigated", and the two
 are reported differently.  The image is refused rather than quietly read from
 its document:
-a source that fell back to files for some images would make ``--results-db``
+a source that fell back to files for some images would make ``--results-index-db``
 mean a different thing per image, and one round trip per image is the cost the
 index exists to remove.  Failing one image does not fail the run -- both
 consumers contain a per-image failure -- so a root whose ingest refused some of
@@ -516,7 +516,7 @@ def build_pointing_source(
         raise ValueError(
             f'the results index {masked_url(results_db_url)} was named with no navigation '
             f'results root; the index is keyed by root, so there is no root to read rows '
-            f'under. Name one, or pass --results-db none to read navigation documents.'
+            f'under. Name one, or pass --results-index-db none to read navigation documents.'
         )
     root_url = normalize_root_url(nav_results_root)
     return IndexPointingSource(open_index_for_roots(results_db_url, [root_url]), root_url)

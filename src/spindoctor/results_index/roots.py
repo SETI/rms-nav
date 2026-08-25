@@ -228,7 +228,7 @@ def require_ingested_roots(
     held = ', '.join(available) if available else '(none)'
     raise RootNotIngestedError(
         f'{masked_url(url)}: the results index has no completed ingest of {", ".join(missing)}. '
-        f'It holds: {held}. Run sd_stats_ingest over that root first; until then the '
+        f'It holds: {held}. Run sd_results_index over that root first; until then the '
         f'index cannot say whether an image under it was navigated.'
     )
 

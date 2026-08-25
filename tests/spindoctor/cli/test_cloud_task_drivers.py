@@ -21,11 +21,11 @@ from spindoctor.cli import (
     sd_backplanes_cloud_tasks,
     sd_mosaic_cloud_tasks,
     sd_offset_cloud_tasks,
-    sd_stats_ingest_cloud_tasks,
+    sd_results_index_cloud_tasks,
 )
 from spindoctor.config.config import Config
 from spindoctor.config.logging_config import RunLogging, build_cloud_task_logging
-from spindoctor.config.program_names import SD_BACKPLANES, SD_MOSAIC, SD_STATS_INGEST
+from spindoctor.config.program_names import SD_BACKPLANES, SD_MOSAIC, SD_RESULTS_INDEX
 
 _DATASET = 'COISS_saturn'
 
@@ -191,16 +191,16 @@ def test_the_mosaic_driver_isolates_its_logging(
 def test_the_ingest_driver_isolates_its_logging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """sd_stats_ingest_cloud_tasks resolves logging through the cloud-task builder.
+    """sd_results_index_cloud_tasks resolves logging through the cloud-task builder.
 
     An ingest worker has no per-image log at all, so isolation is the whole of
     what the builder does for it -- and the whole of what keeps a pass that logs
     a line per unreadable file off the worker's terminal.
     """
     recorder = _Recorder(FCPath(tmp_path))
-    monkeypatch.setattr(sd_stats_ingest_cloud_tasks, 'build_cloud_task_logging', recorder)
-    sd_stats_ingest_cloud_tasks.process_task('task-1', {}, _worker_data(results_db=None))
-    assert recorder.program_name == SD_STATS_INGEST
+    monkeypatch.setattr(sd_results_index_cloud_tasks, 'build_cloud_task_logging', recorder)
+    sd_results_index_cloud_tasks.process_task('task-1', {}, _worker_data(results_index_db=None))
+    assert recorder.program_name == SD_RESULTS_INDEX
 
 
 def test_the_backplanes_driver_falls_back_to_its_own_root(
@@ -316,7 +316,7 @@ def _reproject_task_result(
     if nav_root is None:
         monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
     worker = _worker_data(
-        nav_results_root=None if nav_root is None else nav_root.as_posix(), results_db=None
+        nav_results_root=None if nav_root is None else nav_root.as_posix(), results_index_db=None
     )
     _, result = sd_mosaic_cloud_tasks.process_task(
         'task-1',
@@ -459,7 +459,7 @@ def _backplane_result(
         _worker_data(
             nav_results_root=(FCPath(tmp_path) / 'nav').as_posix(),
             backplane_results_root=(FCPath(tmp_path) / 'bp').as_posix(),
-            results_db=None,
+            results_index_db=None,
         ),
     )
 

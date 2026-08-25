@@ -183,7 +183,7 @@ def spawned_results(tmp_path_factory: pytest.TempPathFactory) -> list[Any]:
         [
             '--nav-results-root',
             root.as_posix(),
-            '--results-db',
+            '--results-index-db',
             url,
             '--task-file',
             task_file.as_posix(),
@@ -196,7 +196,7 @@ def spawned_results(tmp_path_factory: pytest.TempPathFactory) -> list[Any]:
             root.as_posix(),
             '--backplane-results-root',
             (tmp_path / 'backplanes').as_posix(),
-            '--results-db',
+            '--results-index-db',
             url,
             '--task-file',
             task_file.as_posix(),

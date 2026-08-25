@@ -58,12 +58,12 @@ def _arguments(url: str | None) -> argparse.Namespace:
     """Build the parsed command line a worker resolves its index from.
 
     Parameters:
-        url: The value of ``--results-db``, or None for no index.
+        url: The value of ``--results-index-db``, or None for no index.
 
     Returns:
         The namespace.
     """
-    return argparse.Namespace(results_db=url)
+    return argparse.Namespace(results_index_db=url)
 
 
 def _absent_index(tmp_path: Path) -> str:
@@ -173,7 +173,7 @@ def test_a_task_with_no_index_reads_documents(tmp_path: Path) -> None:
 def test_a_task_builds_its_source_from_the_workers_own_command_line(tmp_path: Path) -> None:
     """Which is the one thing that crosses into the process a task runs in."""
     url = _absent_index(tmp_path)
-    with pytest.raises(ValueError, match='sd_stats_ingest'):
+    with pytest.raises(ValueError, match='sd_results_index'):
         sd_backplanes_cloud_tasks._task_pointing_source(_arguments(url), FCPath(tmp_path))
 
 
@@ -209,7 +209,7 @@ def _refused_index_result(
     worker = _worker_data(
         nav_results_root=FCPath(tmp_path).as_posix(),
         backplane_results_root=FCPath(tmp_path).as_posix(),
-        results_db=_absent_index(tmp_path),
+        results_index_db=_absent_index(tmp_path),
     )
     return _runner(driver)(tmp_path, worker)
 
@@ -231,7 +231,7 @@ def _empty_index_result(
     worker = _worker_data(
         nav_results_root=FCPath(tmp_path).as_posix(),
         backplane_results_root=FCPath(tmp_path).as_posix(),
-        results_db='',
+        results_index_db='',
     )
     return _runner(driver)(tmp_path, worker)
 
@@ -278,7 +278,7 @@ def test_the_refusal_names_what_would_have_written_the_index(
         driver: Which of the two drivers is under test.
     """
     _, result = _refused_index_result(tmp_path, monkeypatch, driver)
-    assert 'sd_stats_ingest' in result['status_exception']
+    assert 'sd_results_index' in result['status_exception']
 
 
 @pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
@@ -311,7 +311,7 @@ def test_such_a_task_says_which_level_named_the_empty_value(
         driver: Which of the two drivers is under test.
     """
     _, result = _empty_index_result(tmp_path, monkeypatch, driver)
-    assert '--results-db' in result['status_exception']
+    assert '--results-index-db' in result['status_exception']
 
 
 @pytest.mark.parametrize('driver', ['backplanes', 'mosaic'])
@@ -334,7 +334,7 @@ def test_the_task_closes_the_source_it_opened(
     worker = _worker_data(
         nav_results_root=FCPath(tmp_path).as_posix(),
         backplane_results_root=FCPath(tmp_path).as_posix(),
-        results_db=None,
+        results_index_db=None,
     )
     _runner(driver)(tmp_path, worker)
     assert source.closed

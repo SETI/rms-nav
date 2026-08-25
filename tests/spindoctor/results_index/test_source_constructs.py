@@ -9,12 +9,12 @@ so that the answer does not depend on which backend a test happened to run
 against.
 
 The scan covers every package that holds index queries: the Core layer itself,
-and the statistics programs, whose report issues most of the SQL in the system.
-A scan aimed at one package while the queries live in another reports green
-without reading them.
+the programs that write and empty an index, and the statistics programs, whose
+report issues most of the SQL in the system. A scan aimed at one package while
+the queries live in another reports green without reading them.
 
-It reads the source rather than importing it, so a module added to either
-package tomorrow is covered without being named here.
+It reads the source rather than importing it, so a module added to any of those
+packages tomorrow is covered without being named here.
 """
 
 import ast
@@ -32,7 +32,7 @@ _SRC = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor'
 _INDEX_ROOT = _SRC / 'results_index'
 """The Core layer: the schema, the opener, and the root bookkeeping."""
 
-_SOURCE_ROOTS = (_INDEX_ROOT, _SRC / 'cli' / 'stats')
+_SOURCE_ROOTS = (_INDEX_ROOT, _SRC / 'cli' / 'results_index', _SRC / 'cli' / 'stats')
 """Every package holding index queries."""
 
 # The connect-time events a PRAGMA may legitimately live inside.  A pragma in a
@@ -59,15 +59,17 @@ _KNOWN_MODULES = frozenset(
         'engine.py',
         'roots.py',
         'schema.py',
-        # The statistics programs, where the report's queries live.
+        # The programs that write and empty an index.
         'chunks.py',
         'counts.py',
         'driver.py',
+        'drop.py',
+        'runs.py',
+        'store.py',
+        # The statistics programs, where the report's queries live.
         'report.py',
         'report_common.py',
         'report_sections.py',
-        'runs.py',
-        'store.py',
     }
 )
 """The modules the scan must reach, whatever else either package grows."""

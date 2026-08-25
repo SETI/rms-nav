@@ -60,7 +60,7 @@ from spindoctor.cli.reproj.pointing_source import (  # noqa: E402  (guarded impo
     IndexPointingSource,
     PointingSource,
 )
-from spindoctor.cli.stats.ingest import ingest_metadata_files  # noqa: E402  (guarded import)
+from spindoctor.cli.results_index import ingest_metadata_files  # noqa: E402  (guarded import)
 from spindoctor.dataset.dataset import ImageFile, ImageFiles  # noqa: E402  (guarded import)
 from spindoctor.navigate_image_files import (  # noqa: E402  (guarded import)
     navigate_image_files,

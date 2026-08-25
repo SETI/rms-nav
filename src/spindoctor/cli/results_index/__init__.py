@@ -26,29 +26,34 @@ Public API:
     complete_ingest_tasks      -- add them up and stamp the runs
 
 The implementation is split by stage, and this module re-exports the whole
-surface so a consumer imports from ``spindoctor.cli.stats.ingest`` whichever
+surface so a consumer imports from ``spindoctor.cli.results_index`` whichever
 stage a name lives in:
 
-* :mod:`~spindoctor.cli.stats.ingest.counts` -- the tally a pass keeps and the
+* :mod:`~spindoctor.cli.results_index.counts` -- the tally a pass keeps and the
   summary it is read from.
-* :mod:`~spindoctor.cli.stats.ingest.store` -- what the index already holds
+* :mod:`~spindoctor.cli.results_index.store` -- what the index already holds
   about a root, and how rows go back into it.
-* :mod:`~spindoctor.cli.stats.ingest.chunks` -- batched retrieval, reading a
+* :mod:`~spindoctor.cli.results_index.chunks` -- batched retrieval, reading a
   document into rows, and the per-chunk write.
-* :mod:`~spindoctor.cli.stats.ingest.runs` -- the record of one pass over one
+* :mod:`~spindoctor.cli.results_index.runs` -- the record of one pass over one
   root, which is what makes absence of a row readable.
-* :mod:`~spindoctor.cli.stats.ingest.driver` -- the pass itself: list, select,
+* :mod:`~spindoctor.cli.results_index.driver` -- the pass itself: list, select,
   ingest, prune, complete.  The listing is
   :class:`~spindoctor.nav_records.TreeRecordSource`'s, collected whole here
   because the prune is licensed by holding all of it.
-* :mod:`~spindoctor.cli.stats.ingest.tasks` -- the same pass divided into cloud
+* :mod:`~spindoctor.cli.results_index.tasks` -- the same pass divided into cloud
   tasks: fan out, ingest a share, add the shares up.
+
+Emptying an index is the package's other command and is no part of that
+surface: :mod:`~spindoctor.cli.results_index.drop` removes the index's own
+tables from the database a URL names and walks no tree, so the program's
+dispatch module reaches it directly.
 """
 
-from spindoctor.cli.stats.ingest.counts import IngestCounts
-from spindoctor.cli.stats.ingest.driver import INGEST_COMMIT_CHUNK_SIZE, ingest_metadata_files
-from spindoctor.cli.stats.ingest.store import UnwritableRowError
-from spindoctor.cli.stats.ingest.tasks import (
+from spindoctor.cli.results_index.counts import IngestCounts
+from spindoctor.cli.results_index.driver import INGEST_COMMIT_CHUNK_SIZE, ingest_metadata_files
+from spindoctor.cli.results_index.store import UnwritableRowError
+from spindoctor.cli.results_index.tasks import (
     INGEST_TASK_SHARE_SIZE,
     FanOut,
     TaskCompletion,

@@ -48,7 +48,7 @@ uncertainties is not finished, it is merely running.
 The engineering core is built and healthy: the full navigation architecture
 (nine autonomous techniques plus manual), reprojection, backplanes,
 simulation, rank-1 (single-axis) ring support, the statistics system
-(`sd_stats_ingest` / `sd_stats_report`), and strict quality gates (typing,
+(`sd_results_index` / `sd_stats_report`), and strict quality gates (typing,
 linting, the full unit suite) are in place. The de-circularized, realism-
 tuned simulator and the cross-technique agreement estimator both exist and
 are proven on known-truth sims. PDS4 bundle generation exists only as
@@ -274,7 +274,7 @@ The known open defects:
 
 **Goal:** navigation quality is continuously measured, not assumed.
 
-The statistics system (`sd_stats_ingest` / `sd_stats_report`) is built,
+The statistics system (`sd_results_index` / `sd_stats_report`) is built,
 tested, and documented in the user guide. Remaining: the library
 coverage-matrix invariant (#240), and the standing practice of re-running
 the library cross-check after every calibration-affecting change. Small

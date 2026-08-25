@@ -216,7 +216,7 @@ def test_the_version_message_says_to_delete_and_re_ingest(postgres_url: str) -> 
     """
     with opened(postgres_url, create=True) as engine, engine.begin() as connection:
         connection.execute(SCHEMA_META.update().values(schema_version=SCHEMA_VERSION + 1))
-    with pytest.raises(ValueError, match='empty the database with sd_stats_ingest --drop-index'):
+    with pytest.raises(ValueError, match='empty the database with sd_results_index --drop-index'):
         open_index(postgres_url)
 
 

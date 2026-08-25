@@ -175,8 +175,8 @@ logging.basicConfig(level=logging.DEBUG)
 
 from filecache import FCPath
 
-from spindoctor.cli import sd_stats_ingest_cloud_tasks
-from spindoctor.cli.stats.ingest import fan_out_ingest_tasks
+from spindoctor.cli import sd_results_index_cloud_tasks
+from spindoctor.cli.results_index import fan_out_ingest_tasks
 from spindoctor.results_index import open_index
 import argparse
 
@@ -211,16 +211,16 @@ engine.dispose()
 
 class _WorkerData:
     def __init__(self):
-        self.args = argparse.Namespace(config_file=None, results_db=url)
+        self.args = argparse.Namespace(config_file=None, results_index_db=url)
 
 
 results = [
-    sd_stats_ingest_cloud_tasks.process_task(task['task_id'], task['data'], _WorkerData())[1]
+    sd_results_index_cloud_tasks.process_task(task['task_id'], task['data'], _WorkerData())[1]
     for task in tasks
 ]
 # The same share again, so the skip path logs too.
 results += [
-    sd_stats_ingest_cloud_tasks.process_task(task['task_id'], task['data'], _WorkerData())[1]
+    sd_results_index_cloud_tasks.process_task(task['task_id'], task['data'], _WorkerData())[1]
     for task in tasks
 ]
 with FCPath(sys.argv[2]).open('w') as file:

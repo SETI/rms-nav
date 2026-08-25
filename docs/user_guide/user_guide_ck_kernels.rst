@@ -390,16 +390,16 @@ Environment options
   takes precedence over the ``NAV_RESULTS_ROOT`` environment variable. One of
   the three is required.
 
-* ``--results-db URL``: connection URL of a results index built by
-  ``sd_stats_ingest`` (see :doc:`user_guide_results_index`). The run then reads
+* ``--results-index-db URL``: connection URL of a results index built by
+  ``sd_results_index`` (see :doc:`user_guide_results_index`). The run then reads
   the whole mission's records in bulk instead of walking the tree and reading
   one file per image, which is what makes a cloud results root affordable: an
   archive-scale root costs one paid round trip per image otherwise, and a
-  Cassini-scale root holds several hundred thousand. Takes precedence over the ``environment.results_db``
-  configuration variable and ``NAV_RESULTS_DB``. ``--results-db none``
-  names no index, which is how a machine that has one configured is told to
-  read the tree for this run. Without an index the tree is read, which is the
-  default.
+  Cassini-scale root holds several hundred thousand. Takes precedence over the
+  ``environment.results_index_db`` configuration variable and
+  ``NAV_RESULTS_INDEX_DB``. ``--results-index-db none`` names no index, which is
+  how a machine that has one configured is told to read the tree for this run.
+  Without an index the tree is read, which is the default.
 
   The index must hold a completed ingest of the same results root, and the run
   is refused if it does not: a root nobody has ingested cannot say what it

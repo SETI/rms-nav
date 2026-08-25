@@ -33,7 +33,7 @@ then on. That pass is the index this plan builds.
 **In scope:** a stub-keyed schema over the results tree; a SQLAlchemy Core
 data-access layer with a connection-URL backend selection (SQLite and
 PostgreSQL); incremental ingest with per-root bookkeeping; a cloud-task
-ingest driver; a `--results-db` opt-in on consuming programs; and the
+ingest driver; a `--results-index-db` opt-in on consuming programs; and the
 conversion of the statistics programs, the backplane driver, reprojection
 offset lookup, and the `ResultsFilter` selection filters to read through the
 index when it is given.
@@ -48,7 +48,7 @@ index when it is given.
   default.
 - Writing the index from the navigation pipeline. Navigation writes JSON;
   ingest reads it. No navigation run opens a database at all unless it was
-  given a `--results-db` URL to answer its selection from.
+  given a `--results-index-db` URL to answer its selection from.
 - Automatic ingest. No batch driver invokes ingest as a side effect; an
   operator runs it.
 - Bundle generation (`spindoctor.cli.pds4.bundle_data`), which serializes the
@@ -74,7 +74,7 @@ index when it is given.
 ### 2.1 What the index is
 
 A database whose rows are derived from the results tree by a separate ingest
-step. A consumer given `--results-db` answers its questions with SQL instead
+step. A consumer given `--results-index-db` answers its questions with SQL instead
 of file reads. A consumer given no such option behaves exactly as it does
 today, reading files. `sd_stats_report` is answered by whichever storage it
 is pointed at: one pass of accumulators over the per-image facts the record
@@ -107,7 +107,7 @@ construction, because that is precisely how the navigator chose the path it
 wrote to.
 
 **The ingest root is the `nav_results_root`, not a free-form path.**
-`sd_stats_ingest` resolves its roots the way every consumer does (the
+`sd_results_index` resolves its roots the way every consumer does (the
 command line, then `config.environment.nav_results_root`, then
 `NAV_RESULTS_ROOT`); an operator who ingests a subdirectory of a results
 root would produce stubs no consumer's lookup can match, so the root
@@ -365,7 +365,7 @@ one of those words can be a connection URL. Which words those are is decided by
 connection-URL options in one place and applies the rule to each of their
 values. `log_run_environment` masks every command line it records through it, so
 `sd_offset`, `sd_consolidate_metadata`, `sd_mosaic`, `sd_create_ck` and the
-per-image log of `navigate_image_files` are covered by it; `sd_stats_ingest`,
+per-image log of `navigate_image_files` are covered by it; `sd_results_index`,
 which logs its arguments itself, calls the same function. Every spelling
 argparse accepts is masked: the value as a separate word, the value joined to
 the option by `=`, and either of those under a distinguishing abbreviation of
@@ -383,17 +383,17 @@ The engine factory is the only opener:
 open_index(url: str, *, create: bool = False) -> Engine
 ```
 
-- `create=True` -- used only by `sd_stats_ingest`'s interactive path and the
+- `create=True` -- used only by `sd_results_index`'s interactive path and the
   cloud-task enqueuer -- creates the tables and the `schema_meta` row when
   they are absent, and otherwise validates the version.
 - `create=False` -- every consumer -- raises when the database or its
   `schema_meta` row does not exist, with a message saying to run
-  `sd_stats_ingest` first. A consumer pointed at a nonexistent SQLite path
+  `sd_results_index` first. A consumer pointed at a nonexistent SQLite path
   fails; it does not create an empty database, which is a deliberate change
   from the current opener's silent-create behavior.
 - Either way, a `schema_version` that does not match the version the code
   was built for raises, naming both versions and instructing the reader to
-  empty the database with `sd_stats_ingest --drop-index` and re-ingest
+  empty the database with `sd_results_index --drop-index` and re-ingest
   (section 2.11). The stamped version is read and checked
   before anything is written, so a refused `create=True` open creates no table
   and writes no row; creating this version's tables inside a database
@@ -530,18 +530,18 @@ Constructs that are SQLite-only and must not survive into the Core layer:
 
 ### 2.6 Configuration and the command-line surface
 
-A new `environment.results_db` configuration key holds the connection URL.
+A new `environment.results_index_db` configuration key holds the connection URL.
 Resolution follows the pattern the other roots use, in
 `spindoctor/config/config_helper.py`: the command-line value, then
-`config.environment.results_db`, then the `NAV_RESULTS_DB` environment
+`config.environment.results_index_db`, then the `NAV_RESULTS_INDEX_DB` environment
 variable. Absence is not an error -- it means "no index", the default mode
-of every program. Add `get_results_db_url(arguments, config) -> str | None`
+of every program. Add `get_results_index_db_url(arguments, config) -> str | None`
 beside the existing getters.
 
-Every consuming program accepts `--results-db URL`, and also
-`--results-db none`: the literal sentinel `none` resolves to no index,
+Every consuming program accepts `--results-index-db URL`, and also
+`--results-index-db none`: the literal sentinel `none` resolves to no index,
 overriding the configuration key and the environment variable. Without an
-explicit opt-out, an exported `NAV_RESULTS_DB` would make file-mode runs
+explicit opt-out, an exported `NAV_RESULTS_INDEX_DB` would make file-mode runs
 impossible on that machine. The sentinel is recognized at whichever level
 supplied the value, so a configuration file or an exported variable can opt out
 the same way; the spaces around it are not part of it, and it is otherwise
@@ -559,17 +559,17 @@ different source than the operator believes for as long as it lasts, which on a
 cloud root is hours. Failing every run on a machine configured that way is the
 desired outcome, not a hazard: one `unset` fixes it, and it is found on the first
 run rather than after a long batch has quietly read the tree. The refusal names
-the level that carries the value -- `--results-db`, the `environment.results_db`
-configuration variable, or `NAV_RESULTS_DB` -- and says to write `none` for no
+the level that carries the value -- `--results-index-db`, the `environment.results_index_db`
+configuration variable, or `NAV_RESULTS_INDEX_DB` -- and says to write `none` for no
 index or a connection URL for one, which is what makes it a one-line fix.
 
 What the refusal does *not* say is what this run would otherwise have done,
 because one resolver serves the programs that read the tree -- `sd_offset` and
-the report among them -- and `sd_stats_ingest`, which writes an index and has
+the report among them -- and `sd_results_index`, which writes an index and has
 nowhere to put its rows without one. Each caller reports the refusal the way it
 reports every other misconfiguration: the dataset layer re-raises it as
 `SelectionError` so `sd_offset` prints it and exits 1; `sd_stats_report` prints
-it on the stream its other refusals print to and returns 1; `sd_stats_ingest`
+it on the stream its other refusals print to and returns 1; `sd_results_index`
 logs it fatal and exits 1; the three cloud-task workers return it as
 `unusable_results_db` with the message attached; and `sd_backplanes`, `sd_mosaic`
 and `sd_create_ck` let it out of `main` exactly as they let out an index that
@@ -584,9 +584,9 @@ the only grouping.
 is.** This is the rule that lets section 1 and this section both hold. Section 1
 puts bundle generation and `sd_consolidate_metadata` out of scope and says both
 keep reading files; this section says every consuming program accepts
-`--results-db`. A program that inherited a resolved URL from the configuration
+`--results-index-db`. A program that inherited a resolved URL from the configuration
 or the environment would satisfy neither: the out-of-scope programs would stop
-reading files on a machine that exports `NAV_RESULTS_DB`, and they would have no
+reading files on a machine that exports `NAV_RESULTS_INDEX_DB`, and they would have no
 command line to say no on. So resolution is gated on the declaration. A program
 that declares the option resolves a URL through the three levels above, in that
 order; a program that does not declare it resolves nothing, whatever the machine
@@ -609,7 +609,7 @@ PR body.
 
 ### 2.7 Ingest
 
-`sd_stats_ingest` walks each root for `*_metadata.json`, reads each
+`sd_results_index` walks each root for `*_metadata.json`, reads each
 document, and upserts its rows.
 
 **One walk feeds everything.** The recursive listing collects the
@@ -791,7 +791,7 @@ no consumer reads absence under them as an answer.
 
 ### 2.8 Cloud-task ingest
 
-`sd_stats_ingest_cloud_tasks` mirrors the structure of the existing
+`sd_results_index_cloud_tasks` mirrors the structure of the existing
 cloud-task drivers (`spindoctor/cli/sd_backplanes_cloud_tasks.py` is the
 reference): a `process_task(task_id, task_data, worker_data)` returning
 `(retry, result)`, a `Worker` started from `async_main`, and cloud-task
@@ -859,7 +859,7 @@ counts return in task results and are aggregated and written to
 `ingest_runs` by the enqueuer at completion; workers never touch
 `ingest_runs`.
 
-**The enqueuer is `sd_stats_ingest` in two further modes**, since the fan-out
+**The enqueuer is `sd_results_index` in two further modes**, since the fan-out
 resolves the same roots and the same index URL as the pass it replaces:
 `--output-cloud-tasks-file` lists, prunes, records what the walk found on each
 run row, and writes the shares out; `--complete-cloud-tasks-file` reads the
@@ -899,7 +899,7 @@ from a repeat of another and so counts toward no run.
 the worker returns the root beside the run identifier and completion compares
 both. The identifier is a surrogate that starts again at 1 in a fresh index --
 which is exactly what the remedy for a schema-version mismatch produces, and
-what a mistyped `--results-db` names -- so a task file that outlived the index it
+what a mistyped `--results-index-db` names -- so a task file that outlived the index it
 was cut from carries the run number of whatever was built next. Its shares then
 add up to that run's listing while their rows sit under a different root, and a
 run stamped on them is a root with nothing under it: every consumer reads absence
@@ -928,7 +928,7 @@ that read the previously merged reason column move to
 export's `images.csv` columns become the section 2.3 set in schema order,
 `root_url` through `size_bytes` included, and the user-guide column list is
 updated to match. `--db` is **removed** from both statistics programs and
-replaced by `--results-db` (a URL, not a bare path); the four documented
+replaced by `--results-index-db` (a URL, not a bare path); the four documented
 invocations in `docs/user_guide/user_guide_statistics.rst` change with it,
 and that page's "plain SQLite" framing is rewritten around the URL scheme
 with each direct-SQL example shown in both dialect spellings where they
@@ -1050,7 +1050,7 @@ The reason vocabulary maps as follows, and the mapping table belongs in the
 | `unreadable_metadata`, `invalid_json`, `metadata_not_an_object` | unreachable: ingest already refused such a file, so it has no record row and a refusal row instead, and the lookup fails the image rather than classifying it |
 | `missing_offset_key`, `invalid_offset_type`, `non_finite_offset`, `malformed_offset` | reported as `null_offset`: one column pair holds all five ways an offset can supply no pair, and none of them supplies a pointing |
 
-**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `facts_from_document` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is the first member of the Phase 5 enumeration, and it is the same fact here.
+**A document the ingest refused is not a record the index can classify at all**, and it must not be read as an image nothing navigated. Ingest writes such a file to `failed_files` and not to `images`, for every reason `facts_from_document` refuses one: no `observation.instrument`, no `image_name`, a declared container of another shape, a duplicated `technique_name`, a file that is not JSON or not an object, and anything else the converter cannot read whole. The document itself is often a perfectly readable navigation record with a status, an offset and a corrected attitude, so a lookup that saw no `images` row and reported `no_metadata` would reproject that image corrected through the tree and uncorrected through the index, and would skip it in `sd_backplanes` while the tree built its product. So the lookup asks `failed_files` whenever it finds no `images` row, and a stub recorded there **fails that image**, naming the stub, the index and the recorded reason. Reading the document instead was considered and rejected: it would make `--results-index-db` mean a different thing per image, and one round trip per image is the cost the index exists to remove. Failing one image does not fail the run -- both consumers contain a per-image failure -- and the remedy the message names is to fix the document and re-ingest, or to run without an index. The one refusal ingest deliberately records nowhere is a file it could not retrieve, and an image whose document failed that way still reads as one nothing navigated; that is the first member of the Phase 5 enumeration, and it is the same fact here.
 
 **The rule the seam is held to: a record the two storages *classify* differently may differ in the reason and in nothing else.** The reason is a name a run-level tally counts under; the mechanism, the matrices, the midtime and the offset are what a product is built from. A difference in any of those is a defect in the reader or in what ingest stores, not an entry for the list. The list itself is derived by measurement rather than by argument: both sources are driven over every shape a record's fields can take -- absent, null, wrong type, over-long, non-finite, boolean, nested, ragged, and an integer too large for a float -- and what survives defines it.
 
@@ -1062,7 +1062,7 @@ Nothing survives. The navigator's own types settle it: a `success` record carrie
 
 **An error filter reading the tree hands each kept image the record its own document was read out of, so the enumeration's read and the per-image read are one.** `ImageFacts` carries `record`, filled by `TreeRecordSource`, which holds one by the time it has any facts at all, and left None by `IndexRecordSource`, where a record is rebuilt from the column set its consumer declares rather than from the columns the facts hold. `ResultsFilter.filter_batch` puts it on `ImageFile.nav_record`, and `FilePointingSource`, the backplane stage and `cli/pds4/bundle_data.py` answer from it. Against an index the two reads want different columns and stay separate, which is the settled decision rather than an omission. A second read of the same document would not be a `filecache` cache hit either: the dispatch programs build their results root through `FileCache(None).new_path`, an anonymous cache deleted when the process ends, while the seam reads through the persistent `_filecache_global`, so on a cloud results root a second read is a second download. What travels is bounded by what holds the image: an enumeration yielding one image at a time holds at most one filter batch of records (64), and `--choose-random-images` holds at most the requested sample count plus the remainder of the last batch, at about 40 to 50 KB a record. A run given no error filter reads no document at enumeration time and carries nothing, so nothing here changes what it costs.
 
-**What the index answers differently is what one ingest pass could read and record, never a property of the query.** It is enumerated in section 4's Phase 5 entry, restated as acceptance criterion 1, repeated in the `results_filter` module docstring and stated for an operator in the navigation guide's account of `--results-db`; each member has a test of its own, and a member found later is added in all four of those places in one commit. The enumeration-list guard reads the four and compares them; it is not itself one of them. The enumeration is maintained rather than audited closed: it names what is known to differ, and a divergence nobody has found yet is not evidence that none exists. The guide is one of the four because the person a silently short selection is served to reads the guide and not the module: a divergence enumerated only where a maintainer meets it leaves a user with a selection that looks like the one they asked for.
+**What the index answers differently is what one ingest pass could read and record, never a property of the query.** It is enumerated in section 4's Phase 5 entry, restated as acceptance criterion 1, repeated in the `results_filter` module docstring and stated for an operator in the navigation guide's account of `--results-index-db`; each member has a test of its own, and a member found later is added in all four of those places in one commit. The enumeration-list guard reads the four and compares them; it is not itself one of them. The enumeration is maintained rather than audited closed: it names what is known to differ, and a divergence nobody has found yet is not evidence that none exists. The guide is one of the four because the person a silently short selection is served to reads the guide and not the module: a divergence enumerated only where a maintainer meets it leaves a user with a selection that looks like the one they asked for.
 
 **The filter vocabulary is six flags, and they conjoin.** `--has-offset-file`
 and `--has-no-offset-file` ask whether the document exists;
@@ -1089,13 +1089,13 @@ language over the tree.
 
 ### 2.10 Logging
 
-`sd_stats_ingest` gains a program identity and a logger. It becomes
+`sd_results_index` gains a program identity and a logger. It becomes
 infrastructure other programs depend on, and a partial or failed ingest must
 appear in a run log rather than only in an exit code.
 
 Concretely:
 
-- Add `SD_STATS_INGEST = 'sd_stats_ingest'` to
+- Add `SD_RESULTS_INDEX = 'sd_results_index'` to
   `spindoctor/config/program_names.py` and `PROGRAM_NAMES`; both drivers
   declare `PROGRAM_NAME`.
 - The interactive driver adds
@@ -1107,7 +1107,7 @@ Concretely:
   cloud-task driver adds no logging arguments (section 2.8).
 - `print()` calls in ingest become `MAIN_LOGGER` calls.
 - Collateral that asserts the old exclusion, all updated in the same
-  commit: `sd_stats_ingest` moves from `_WITHOUT_LOGGER` to
+  commit: `sd_results_index` moves from `_WITHOUT_LOGGER` to
   `_WITH_ANY_LOGGER` in
   `tests/spindoctor/cli/test_logging_argument_surface.py`; the program
   table in `docs/user_guide/user_guide_logging.rst`; the `program_names.py`
@@ -1132,7 +1132,7 @@ SQLite and, on PostgreSQL, `psql` with the right connection string and a
 knowledge of which tables SpinDoctor owns in a database that may hold somebody
 else's; `--drop-index` is one flag for it on either backend.
 
-`sd_stats_ingest --drop-index` removes the index's tables from whatever backend
+`sd_results_index --drop-index` removes the index's tables from whatever backend
 the URL names and **stops** -- it reads no results root and ingests no
 document. Dropping is a deliberate act rather than the first step of a long
 pass, and a command that did both would make a mistyped URL expensive twice
@@ -1153,7 +1153,7 @@ through `masked_url`.
 The Core layer holds the operation, in `spindoctor/results_index/drop.py`:
 `index_contents(engine)` reads what of the index a database holds and where, and
 `drop_index_tables(engine, contents)` removes exactly that. The confirmation,
-the messages and the exit status are the CLI's, in `spindoctor/cli/stats/drop.py`.
+the messages and the exit status are the CLI's, in `spindoctor/cli/results_index/drop.py`.
 
 - **A name is not evidence.** The six names are `images`, `techniques`,
   `feature_sources`, `failed_files`, `schema_meta` and `ingest_runs`, which are
@@ -1236,10 +1236,10 @@ the messages and the exit status are the CLI's, in `spindoctor/cli/stats/drop.py
   not of the order.
 - **A dropped index and one that never existed are the same thing to every
   consumer.** Both are "not ingested". There are five opener call sites:
-  `cli/stats/report.py`, `sd_stats_ingest.py`, `sd_stats_ingest_cloud_tasks.py`
+  `cli/stats/report.py`, `sd_results_index.py`, `sd_results_index_cloud_tasks.py`
   and `results_index/record_source.py` through `open_index`, and
-  `cli/stats/drop.py` through `open_database`. `open_index` refuses both naming
-  `sd_stats_ingest`, so the report exits 1 on both, the cloud-task worker
+  `cli/results_index/drop.py` through `open_database`. `open_index` refuses both naming
+  `sd_results_index`, so the report exits 1 on both, the cloud-task worker
   returns `index_unopenable` on both, a completion exits 1 on both, and an
   enumeration -- which reaches the opener through `open_record_source` --
   refuses both; a creating ingest builds one over either. On PostgreSQL they are
@@ -1347,7 +1347,7 @@ nonexistent path, which section 2.4 deliberately changes for consumers.
 `upsert_image` issues DELETE + INSERT with transaction management left to
 the caller.
 
-**`spindoctor/cli/stats/ingest.py`** flattens a document in
+**`spindoctor/cli/results_index.py`** flattens a document in
 `rows_from_metadata`. It reads the rounded `navigation_result.offset_px`
 rather than the top-level `offset`; merges `status_reason` and
 `status_error` into one column; and drops `rotation_deg`,
@@ -1398,7 +1398,7 @@ record types, the document rules, root identity, `Selection`, the
 **`spindoctor/results_index/record_source.py`** holds `IndexRecordSource` and
 `open_record_source`. There is one walk of a results tree, one spelling of the
 `_metadata.json` suffix and one rule about what makes a stub a key.
-`spindoctor/support/nav_document.py` and `spindoctor/cli/stats/ingest/walk.py`
+`spindoctor/support/nav_document.py` and `spindoctor/cli/results_index/walk.py`
 are gone. The enumeration is on the seam too: `spindoctor/dataset/results_filter.py`
 carries no walk, no parser, no `exists()` probe and no copy of the suffix, and
 answers all six of its flags from `listing()` and `facts()`, whichever storage
@@ -1430,7 +1430,7 @@ storage answered; `spindoctor/cli/stats/ingest_rows.py` and
 
 Each phase is one pull request against `rf_results_index`, and each must
 leave `main`-equivalent behavior intact for every program not given a
-results-db URL.
+results-index-db URL.
 
 ### Phase 1 — Core layer, schema, and version gate
 
@@ -1496,8 +1496,8 @@ Ingest: rewrite the document flattening to the section 2.3 column set and
 and file list; batched retrieval replacing `get_local_path()`; incremental
 skip; chunked transactions; per-image atomicity; `ingest_runs`). Root
 resolution and normalization per section 2.2. The driver gains the
-configuration surface (`--results-db`, `environment.results_db`,
-`NAV_RESULTS_DB`, the `none` sentinel), the logging surface, and the program
+configuration surface (`--results-index-db`, `environment.results_index_db`,
+`NAV_RESULTS_INDEX_DB`, the `none` sentinel), the logging surface, and the program
 identity, with every collateral edit of section 2.10.
 
 Reporting: move `sd_stats_report` onto the Core layer per sections 2.5 and
@@ -1548,7 +1548,7 @@ Details settled during execution, none of them a change of intent:
   is the merge the split columns exist to undo, and `status_error` is beside
   it now. The regression test asserts that the pair reproduces what the one
   column held.
-- **`sd_stats_ingest` and the statistics package leave the print-only list**
+- **`sd_results_index` and the statistics package leave the print-only list**
   in `tests/spindoctor/config/test_logging_static_invariants.py`, which
   section 2.10's collateral list does not name. The list is narrowed to the
   report modules, which keep `print()`.
@@ -1630,7 +1630,7 @@ Details settled during execution, none of them a change of intent:
   the change that made the first of them stop the pass, which left it always
   zero.)
 - **Ingest is a package, on the treatment section 3 names for the report.**
-  Everything section 2.7 asks of one pass carries `spindoctor/cli/stats/ingest`
+  Everything section 2.7 asks of one pass carries `spindoctor/cli/results_index`
   past the 1000-line cap, so it is `ingest/` split along the stages a pass runs
   through: `counts` (the tally the summary is read from), `walk` (the single
   listing of a root), `store` (what the index already holds, and how rows go
@@ -1638,14 +1638,14 @@ Details settled during execution, none of them a change of intent:
   write), `runs` (the record that makes absence of a row readable), and
   `driver` (the pass itself). The package re-exports the whole surface, so
   every consumer imports the names it always did from
-  `spindoctor.cli.stats.ingest`. `report.py` stays inside the cap and stays one
+  `spindoctor.cli.results_index`. `report.py` stays inside the cap and stays one
   module. The source scan of criterion 10 finds the split modules for itself,
   and the floor it asserts its own reach against names them.
 
 ### Phase 3 — Cloud-task ingest
 
-`sd_stats_ingest_cloud_tasks` per section 2.8, entry point in
-`pyproject.toml`, with the enqueuer's two modes on `sd_stats_ingest`.
+`sd_results_index_cloud_tasks` per section 2.8, entry point in
+`pyproject.toml`, with the enqueuer's two modes on `sd_results_index`.
 
 Tests: enqueuer creates the schema and workers refuse to; concurrent local
 SQLite workers produce the same rows as a serial ingest; per-task counts
@@ -1726,11 +1726,11 @@ Details settled during execution, none of them a change of intent:
   and a root nothing can render absolute ends the whole completion in an
   exception nobody enumerated. The sum's bound is pinned on the `postgres` tier, since it
   is the backend whose columns the bound comes from.
-- **The seam lives in `spindoctor/cli/stats/ingest/tasks.py`**, beside the pass
+- **The seam lives in `spindoctor/cli/results_index/tasks.py`**, beside the pass
   it divides: fan-out, one share, and the completion that adds them up are the
   same three stages `driver.py` runs in one process, and both read the same
   driver, store and chunk modules. The package re-exports them, so the drivers
-  import from `spindoctor.cli.stats.ingest` as they do everything else.
+  import from `spindoctor.cli.results_index` as they do everything else.
 - **Two Phase 2 helpers were widened rather than copied.** `_files_to_read`
   takes the files, what the index records about them and the metrics flag
   instead of a whole `_RootListing`, so a share selects by exactly the rule a
@@ -1754,7 +1754,7 @@ Details settled during execution, none of them a change of intent:
   `files_seen` and `files_removed` are written at fan-out with the finish time
   left NULL, because nothing later in the pass can find them out again and the
   completion step must not have to list the root to learn them.
-- **`sd_stats_ingest` and `sd_stats_ingest_cloud_tasks` joined the program
+- **`sd_results_index` and `sd_results_index_cloud_tasks` joined the program
   identity tests** in `tests/spindoctor/config/test_logging_keys.py`, which named
   neither. The interactive driver has declared `PROGRAM_NAME` since Phase 2 and
   section 2.10's collateral list did not reach that file.
@@ -1771,8 +1771,8 @@ Details settled during execution, none of them a change of intent:
   image made invisible under another root, a refusal cleared so its file is
   downloaded again on every pass -- and the tests are named for it.
 - **The suite resolves no results index it did not name.** A URL comes from an
-  argument, the `environment.results_db` configuration variable, or
-  `NAV_RESULTS_DB`, and a test of the no-index path names none of them. Both
+  argument, the `environment.results_index_db` configuration variable, or
+  `NAV_RESULTS_INDEX_DB`, and a test of the no-index path names none of them. Both
   ambient levels are closed in `tests/conftest.py` rather than by a line each
   test author has to remember: the variable is unset and the working directory
   is one holding no `nav_default_config.yaml`, for the whole session and again
@@ -1789,7 +1789,7 @@ Details settled during execution, none of them a change of intent:
 
 ### Phase 4 — Backplanes and reprojection consume the index
 
-The `PointingSource` protocol and both implementations; `--results-db` (and
+The `PointingSource` protocol and both implementations; `--results-index-db` (and
 the `none` sentinel) on `sd_backplanes`, `sd_mosaic`, and their cloud-task
 variants; the backplane single-row read with the missing-stub raise; the
 root-url comparison failure of section 2.2.
@@ -1979,7 +1979,7 @@ Details settled during execution:
 - **The modes that read no navigation record open no index.** `sd_backplanes
   --dry-run` and `sd_mosaic --skip-reproject` and `--dry-run` looked nothing
   up and yet failed on an index that would not open, which on a machine
-  exporting `NAV_RESULTS_DB` breaks invocations that worked before the variable
+  exporting `NAV_RESULTS_INDEX_DB` breaks invocations that worked before the variable
   was set. Fail-early stays for every mode that does read a record.
 - **One lookup asks both tables** (section 2.9). Reading absence from `images` alone reported every document
   the ingest refused as an image nothing navigated, which on a real results root
@@ -2075,7 +2075,7 @@ Details settled during execution:
 
 `ResultsFilter` answers all six flags through the record seam, per section 2.9.
 
-Tests: for every filter flag, the answer over the documents against the answer over the index, over a fixture tree whose malformed-metadata images are files the walk finds and the ingest refuses, so that the equivalence covers the refusal table; every contradictory-pair rejection, including the four `--has-no-offset-error` adds; the command-line surface of every program that declares `--results-db` and of every program section 1 keeps reading files; an exported URL answering an enumeration for the first and not for the second; a selected subtree the results root holds no directory for, which contributes nothing, against one that is there and will not be listed, which ends the run; and the enumeration-list guard that binds the four statements of what the index answers differently to each other.
+Tests: for every filter flag, the answer over the documents against the answer over the index, over a fixture tree whose malformed-metadata images are files the walk finds and the ingest refuses, so that the equivalence covers the refusal table; every contradictory-pair rejection, including the four `--has-no-offset-error` adds; the command-line surface of every program that declares `--results-index-db` and of every program section 1 keeps reading files; an exported URL answering an enumeration for the first and not for the second; a selected subtree the results root holds no directory for, which contributes nothing, against one that is there and will not be listed, which ends the run; and the enumeration-list guard that binds the four statements of what the index answers differently to each other.
 
 Details settled during execution, none of them a change of intent:
 
@@ -2108,7 +2108,7 @@ Details settled during execution, none of them a change of intent:
   reads as an image nobody navigated.
 - **What the index answers differently, as far as it is known.** Each member is
   stated in the module docstring and in the navigation guide's account of
-  `--results-db`, each has a test of its own, and a member found later is added
+  `--results-index-db`, each has a test of its own, and a member found later is added
   here, in the docstring, in the guide, and in a test, in the same commit. Each
   member carries a phrase that identifies it, and a test binds that phrase to
   the entry carrying it and to that entry's place in the list, then compares the
@@ -2161,9 +2161,9 @@ Details settled during execution, none of them a change of intent:
 - **The URL reaches the filter through the dataset layer, and only from a
   program that declares the option.** `_yield_image_files_index` takes a
   `results_db_url` keyword; when its caller passes none it resolves one through
-  `get_results_db_url` and its `none` sentinel, but only when the arguments it
-  was handed carry a `results_db` attribute, which is what declaring
-  `--results-db` supplies. That is section 2.6's rule, and it is what keeps
+  `get_results_index_db_url` and its `none` sentinel, but only when the arguments it
+  was handed carry a `results_index_db` attribute, which is what declaring
+  `--results-index-db` supplies. That is section 2.6's rule, and it is what keeps
   section 1's out-of-scope programs reading files: `sd_create_bundle`,
   `sd_consolidate_metadata` and `sd_backplane_viewer` all enumerate with the
   selection flags, and none of them declares the option or resolves a URL.
@@ -2182,7 +2182,7 @@ Details settled during execution, none of them a change of intent:
   around a whole enumeration would report a bad volume name,
   a value a label would not yield, or a caller error as advice about what to
   change, and would swallow the traceback that says where it is.
-- **Nothing from the database layer escapes the seam into an enumeration.** `open_index` makes every way of failing to open the index a `ValueError`; the queries after it are outside that guarantee, and a table the account may not read, a partially restored database, or a connection lost between the open and the query would otherwise reach an enumeration as `sqlalchemy.exc`'s own types, which no caller should have to name in an `except` clause to report a bad `--results-db`. The seam translates them, masked URL and driver message included, and `ResultsFilter` turns the result into `SelectionError` at its own boundary, so that a program reporting a refused selection catches those and not every other `ValueError` an enumeration can raise.
+- **Nothing from the database layer escapes the seam into an enumeration.** `open_index` makes every way of failing to open the index a `ValueError`; the queries after it are outside that guarantee, and a table the account may not read, a partially restored database, or a connection lost between the open and the query would otherwise reach an enumeration as `sqlalchemy.exc`'s own types, which no caller should have to name in an `except` clause to report a bad `--results-index-db`. The seam translates them, masked URL and driver message included, and `ResultsFilter` turns the result into `SelectionError` at its own boundary, so that a program reporting a refused selection catches those and not every other `ValueError` an enumeration can raise.
 
 ### Phase 6 — Documentation
 
@@ -2197,7 +2197,7 @@ it. `docs/api_reference/api_results_index.rst` -- created with the package in
 Phase 1, so the branch never carries an undocumented public package -- gains
 the modules the later phases add. Updates: `user_guide_statistics.rst` (per section 2.9),
 `user_guide_logging.rst` (program table), `introduction_configuration.rst`
-(`environment.results_db`), and a dev-guide section covering the Core
+(`environment.results_index_db`), and a dev-guide section covering the Core
 layer, the concurrency model, the database line the seam is split along, and
 how to add a column (raise the schema version, rebuild every index). No issue
 numbers in any of it.
@@ -2215,7 +2215,7 @@ Details settled during execution, none of them a change of intent:
   it with the package, and each later phase added its module to it in the commit
   that added the module, which is what the phase asked for; the check here found
   all eight names already present. Nothing was added for
-  `spindoctor.cli.stats.ingest`: whether the `spindoctor.cli` subpackages belong
+  `spindoctor.cli.results_index`: whether the `spindoctor.cli` subpackages belong
   in the API reference at all is an open question (#443), and answering it for
   one package in a documentation phase would settle it by accident.
 - **`user_guide_logging.rst` needed nothing either.** The program table gained
@@ -2299,7 +2299,7 @@ parameter arrives with the consumer that can use it (#513).
 `spindoctor/support/nav_document.py` goes entirely: its `read_documents` walked
 with `rglob`, which skips a directory it cannot list and reports a clean run --
 measured at 1 record of 2, silently, against the ingest's hard refusal over the
-same tree. `spindoctor/cli/stats/ingest/walk.py` goes too, its strict walk
+same tree. `spindoctor/cli/results_index/walk.py` goes too, its strict walk
 having moved into `nav_records/tree.py` where every reader of a tree inherits
 it; the ingest's `_listing_of_root` is what is left, and it is the accounting a
 pass keeps around a listing rather than a listing of its own.
@@ -2335,7 +2335,7 @@ against both, finding every refusal identical down to the log message.
 Details settled during execution, none of them a change of intent:
 
 - **The ingest keeps its own retrieve-and-parse loop.** Only its *discovery*
-  moves onto the seam. `cli/stats/ingest/chunks.py` owns the refusal vocabulary
+  moves onto the seam. `cli/results_index/chunks.py` owns the refusal vocabulary
   stored in `failed_files.reason` and the "could not be retrieved" / "read but
   refused" split, which is bookkeeping this index makes and the seam does not;
   folding the rest in is #514.
@@ -2460,7 +2460,7 @@ Behavior changes review must see:
    download call is reverted to `get_local_path()`.
 8. Concurrent local SQLite ingest workers produce the same rows as one
    serial ingest over the same input.
-9. `sd_stats_ingest_cloud_tasks` writes zero bytes to stdout and stderr
+9. `sd_results_index_cloud_tasks` writes zero bytes to stdout and stderr
    from SpinDoctor code under a worker subprocess, and its counts arrive in
    the task result.
 10. No SQLite-only construct remains in any query: no UDF registration, no
@@ -2546,7 +2546,7 @@ File as tracking issues alongside the implementation issue:
   one image by its stub, one mission in bulk -- over either storage, and
   `spindoctor/results_index/rebuild.py` holds the one column-to-field
   correspondence both shapes rebuild through. The program declares
-  `--results-db` like every other index-backed one. Three of the fields it reads
+  `--results-index-db` like every other index-backed one. Three of the fields it reads
   were not columns and were added with it -- `observation.shutter_mode`, which is
   what detects a simultaneous exposure;
   `navigation_result.provenance.spice_kernels`, which assigns a correction to the
@@ -2614,7 +2614,7 @@ File as tracking issues alongside the implementation issue:
   by retrieving every document on every pass, which is the cost the skip exists
   to avoid.
 - **The ingest still has its own retrieve-and-parse loop beside the seam's**
-  (#514). Only discovery moved onto the seam. `cli/stats/ingest/chunks.py` reads
+  (#514). Only discovery moved onto the seam. `cli/results_index/chunks.py` reads
   and parses what the listing found, because it owns the `failed_files.reason`
   vocabulary and the "could not be retrieved" / "read but refused" split, which
   is bookkeeping the index makes and no other consumer wants. Folding it in

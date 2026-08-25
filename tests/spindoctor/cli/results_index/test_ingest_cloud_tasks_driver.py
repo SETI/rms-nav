@@ -1,6 +1,6 @@
 """Tests for the two command lines that divide an ingest up and put it together.
 
-``sd_stats_ingest`` gains two modes: one lists each root, removes the rows whose
+``sd_results_index`` gains two modes: one lists each root, removes the rows whose
 documents have left it, and writes the shares out; the other reads the workers'
 event log, adds their tallies up, and stamps the runs those tallies account for.
 What is pinned here is what each mode does to the index and what its exit status
@@ -18,16 +18,7 @@ from typing import Any
 
 import pytest
 import sqlalchemy
-from tests.spindoctor.conftest import (
-    index_url,
-    metadata_document,
-    write_metadata,
-)
-
-from spindoctor.cli import sd_stats_ingest
-from spindoctor.results_index import IMAGES, INGEST_RUNS, normalize_root_url, open_index
-
-from .ingest_driver_helpers import (
+from tests.spindoctor.cli.results_index.ingest_driver_helpers import (
     STUB,
     fanned_out,
     fanned_out_with_a_refusal,
@@ -35,6 +26,14 @@ from .ingest_driver_helpers import (
     run_driver,
     tasks_of,
 )
+from tests.spindoctor.conftest import (
+    index_url,
+    metadata_document,
+    write_metadata,
+)
+
+from spindoctor.cli import sd_results_index
+from spindoctor.results_index import IMAGES, INGEST_RUNS, normalize_root_url, open_index
 
 # ---------------------------------------------------------------------------
 # The command line that divides the work up
@@ -84,7 +83,7 @@ def dividing_a_root_that_is_not_there(
     """
     return run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             str(tmp_path / 'absent'),
@@ -129,7 +128,7 @@ def test_two_spellings_of_one_root_are_logged_once(
     write_metadata(root, STUB, metadata_document())
     _status, written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             root.as_posix(),
@@ -159,7 +158,7 @@ def naming_a_root_that_is_not_a_location(
     """
     return run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(tmp_path / 'index.sqlite3'),
             '--nav-results-root',
             spelling,
@@ -221,9 +220,9 @@ def refusing_both_cloud_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     Returns:
         The exit the parser raised.
     """
-    monkeypatch.setattr(sys, 'argv', ['sd_stats_ingest'])
+    monkeypatch.setattr(sys, 'argv', ['sd_results_index'])
     with pytest.raises(SystemExit) as caught:
-        sd_stats_ingest.parse_args(
+        sd_results_index.parse_args(
             [
                 '--output-cloud-tasks-file',
                 str(tmp_path / 'tasks.json'),
@@ -299,7 +298,7 @@ def test_the_driver_completes_the_run_from_an_event_log(
     write_event_log_of_results(tmp_path / 'events.log', results)
     status, _written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -320,7 +319,7 @@ def test_completing_a_run_the_tasks_did_not_cover_exits_one(
     write_event_log_of_results(tmp_path / 'events.log', [])
     status, _written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -341,7 +340,7 @@ def test_completing_a_run_the_tasks_did_not_cover_says_so(
     write_event_log_of_results(tmp_path / 'events.log', [])
     _status, written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -370,7 +369,7 @@ def test_the_completion_summary_says_why_a_file_was_refused(
     write_event_log_of_results(tmp_path / 'events.log', results)
     _status, written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -410,7 +409,7 @@ def test_a_result_written_under_another_root_is_named_in_the_summary(
     )
     _status, written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -440,7 +439,7 @@ def completing_a_mistyped_root(
     url = index_url(tmp_path / 'index.sqlite3')
     run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             str(mistyped),
@@ -453,7 +452,7 @@ def completing_a_mistyped_root(
     write_event_log_of_results(tmp_path / 'events.log', [])
     return run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             str(mistyped),
@@ -530,7 +529,7 @@ def missing_event_log_run(
     url = fanned_out(tmp_path, monkeypatch)
     return run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -591,7 +590,7 @@ def binary_event_log_run(
     (tmp_path / 'events.log.gz').write_bytes(b'\x1f\x8b\x08\x00\xff\xfe\x00\x00')
     return run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -642,7 +641,7 @@ def test_forcing_a_completion_is_refused(tmp_path: Path, monkeypatch: pytest.Mon
     write_event_log_of_results(tmp_path / 'events.log', [])
     status, _written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -664,7 +663,7 @@ def test_forcing_a_completion_says_what_to_do_instead(
     write_event_log_of_results(tmp_path / 'events.log', [])
     _status, written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             (tmp_path / 'results').as_posix(),
@@ -696,7 +695,7 @@ def completing_a_root_nobody_divided_up(
     write_event_log_of_results(tmp_path / 'events.log', [])
     return run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             url,
             '--nav-results-root',
             str(tmp_path / 'other-results'),
@@ -740,7 +739,7 @@ def test_completing_against_an_index_that_is_not_there_is_refused(
     database = tmp_path / 'index.sqlite3'
     status, _written = run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(database),
             '--nav-results-root',
             str(tmp_path / 'results'),
@@ -761,7 +760,7 @@ def test_completing_against_an_index_that_is_not_there_creates_none(
     database = tmp_path / 'index.sqlite3'
     run_driver(
         [
-            '--results-db',
+            '--results-index-db',
             index_url(database),
             '--nav-results-root',
             str(tmp_path / 'results'),

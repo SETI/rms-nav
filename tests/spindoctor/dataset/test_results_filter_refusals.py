@@ -273,7 +273,7 @@ def test_an_index_that_cannot_be_opened_is_not_a_reason_to_read_files(
 ) -> None:
     """A misconfigured run fails; it does not become a slow, silently different one."""
     absent = index_url(tmp_path / 'not-an-index.sqlite3')
-    with pytest.raises(ValueError, match='sd_stats_ingest') as excinfo:
+    with pytest.raises(ValueError, match='sd_results_index') as excinfo:
         ResultsFilter(
             VOLUMES, str(tree), logger=null_logger(), results_db_url=absent, has_offset_file=True
         )
@@ -310,7 +310,7 @@ def test_an_index_that_cannot_be_opened_refuses_the_selection(tmp_path: Path) ->
     """The three refusals are one type, so a program catches one and reports all three."""
     root, _images = one_image_tree(tmp_path)
     absent = index_url(tmp_path / 'not-an-index.sqlite3')
-    with pytest.raises(SelectionError, match='sd_stats_ingest'):
+    with pytest.raises(SelectionError, match='sd_results_index'):
         ResultsFilter(
             VOLUMES, str(root), logger=null_logger(), results_db_url=absent, has_offset_file=True
         )

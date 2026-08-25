@@ -73,9 +73,9 @@ crashes PyQt6 workers when tests from one file split across processes. Multi-tes
 integration runs should always use ``-n auto --dist=loadfile``.
 
 **The suite opens no results index it was not handed.** An index URL resolves
-from an argument, then from the ``environment.results_db`` configuration
-variable, then from ``NAV_RESULTS_DB``; a test of what a program does with no
-index names none of the three. Both ambient levels are closed by fixtures in
+from an argument, then from the ``environment.results_index_db`` configuration
+variable, then from ``NAV_RESULTS_INDEX_DB``; a test of what a program does with
+no index names none of the three. Both ambient levels are closed by fixtures in
 ``tests/conftest.py``, which unset the environment variable and run from a
 directory holding no ``nav_default_config.yaml``: once for the whole session, so
 that a fixture of any scope is built with both closed, and again around each

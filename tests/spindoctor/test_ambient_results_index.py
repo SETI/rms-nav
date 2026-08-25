@@ -1,14 +1,14 @@
 """Tests for the closure that keeps an operator's results index out of the suite.
 
 A results index URL resolves from an argument, then from the
-``environment.results_db`` configuration variable, then from ``NAV_RESULTS_DB``,
-so a suite run on a machine that sets either ambient one opens a real index in
-every test that names none -- which for SQLite means a write-lock probe against
-a file an ingest may be holding.  Both are closed in ``tests/conftest.py``, and
-what is pinned here is the half that is easy to lose: the closure has to be in
-place before a fixture of a broader scope is built, not only before a test body
-runs, since a module-scoped fixture that ingests a tree or builds a report is
-exactly the kind that would open one.
+``environment.results_index_db`` configuration variable, then from
+``NAV_RESULTS_INDEX_DB``, so a suite run on a machine that sets either ambient
+one opens a real index in every test that names none -- which for SQLite means a
+write-lock probe against a file an ingest may be holding.  Both are closed in
+``tests/conftest.py``, and what is pinned here is the half that is easy to lose:
+the closure has to be in place before a fixture of a broader scope is built, not
+only before a test body runs, since a module-scoped fixture that ingests a tree
+or builds a report is exactly the kind that would open one.
 """
 
 import os
@@ -30,7 +30,7 @@ def ambient_levels_at_module_scope() -> dict[str, Any]:
         The working directory and the environment variable, as they were when
         this fixture was built.
     """
-    return {'directory': Path.cwd(), 'variable': os.environ.get('NAV_RESULTS_DB')}
+    return {'directory': Path.cwd(), 'variable': os.environ.get('NAV_RESULTS_INDEX_DB')}
 
 
 def test_a_module_scoped_fixture_runs_where_no_configuration_names_an_index(

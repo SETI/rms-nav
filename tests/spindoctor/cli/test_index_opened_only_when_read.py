@@ -5,7 +5,7 @@ instead, because a run that silently changed storage would be a slow and
 differently-classified run wearing the same command line.  That refusal belongs
 to the modes that read a navigation record.  A mode that reads none -- a dry
 run, or a mosaic pass over reprojections already on disk -- must not acquire a
-new way to fail, since a machine exporting ``NAV_RESULTS_DB`` would otherwise
+new way to fail, since a machine exporting ``NAV_RESULTS_INDEX_DB`` would otherwise
 break invocations that worked before the variable was set.
 
 Each program is driven through its own ``main``, with only the dataset
@@ -106,7 +106,7 @@ def test_a_backplane_run_that_does_read_records_still_fails_on_that_index(
     tmp_path: Path, datasetless: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The control: without the dry run the same index refuses the same run."""
-    with pytest.raises(ValueError, match='sd_stats_ingest'):
+    with pytest.raises(ValueError, match='sd_results_index'):
         run_program(sd_backplanes, _backplane_argv(tmp_path), monkeypatch)
 
 
@@ -119,7 +119,7 @@ def test_a_backplane_run_that_does_read_records_is_given_that_index(
     for the wrong reason.
     """
     urls = _urls_asked_for(sd_backplanes, monkeypatch)
-    with pytest.raises(ValueError, match='sd_stats_ingest'):
+    with pytest.raises(ValueError, match='sd_results_index'):
         run_program(sd_backplanes, _backplane_argv(tmp_path), monkeypatch)
     assert urls == [_absent_index(tmp_path)]
 
@@ -150,7 +150,7 @@ def test_a_mosaic_run_that_does_reproject_still_fails_on_that_index(
     tmp_path: Path, datasetless: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The control: the reprojection pass is the reader, so it refuses the index."""
-    with pytest.raises(ValueError, match='sd_stats_ingest'):
+    with pytest.raises(ValueError, match='sd_results_index'):
         run_program(sd_mosaic, _mosaic_argv(tmp_path, '--skip-mosaic'), monkeypatch)
 
 
@@ -163,6 +163,6 @@ def test_a_mosaic_run_that_does_reproject_is_given_that_index(
     at all; only a reading pass that is handed it separates the two.
     """
     urls = _urls_asked_for(sd_mosaic, monkeypatch)
-    with pytest.raises(ValueError, match='sd_stats_ingest'):
+    with pytest.raises(ValueError, match='sd_results_index'):
         run_program(sd_mosaic, _mosaic_argv(tmp_path, '--skip-mosaic'), monkeypatch)
     assert urls == [_absent_index(tmp_path)]

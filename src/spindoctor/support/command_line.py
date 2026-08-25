@@ -18,7 +18,7 @@ from collections.abc import Sequence
 
 __all__ = ['URL_OPTIONS', 'masked_command_line']
 
-URL_OPTIONS = ('--results-db',)
+URL_OPTIONS = ('--results-index-db',)
 """Options whose value is a connection URL and can therefore carry a password.
 
 Only these are masked in a logged command line.  A results root is not a
@@ -32,10 +32,10 @@ def _names_a_url_option(word: str) -> bool:
     """Whether a command-line word names an option whose value is a URL.
 
     Any distinguishing prefix of a long option is the option: argparse accepts
-    ``--results-d`` for ``--results-db`` and consumes the URL after it just the
-    same, so matching the full spelling alone would leave the abbreviated
-    command line unmasked.  A prefix that argparse would have rejected never
-    reaches here, since parsing runs first and exits on one.
+    ``--results-index`` for ``--results-index-db`` and consumes the URL after it
+    just the same, so matching the full spelling alone would leave the
+    abbreviated command line unmasked.  A prefix that argparse would have
+    rejected never reaches here, since parsing runs first and exits on one.
 
     Parameters:
         word: One word of the command line, without any ``=value`` part.

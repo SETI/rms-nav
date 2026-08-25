@@ -12,7 +12,8 @@ being a single non-interactive invocation:
 
     sd_stats_report --nav-results-root /data/nav-offset-results \
         --output-dir stats_report
-    sd_stats_report --results-db sqlite:////data/nav-offset-results/index.sqlite3 \
+    sd_stats_report \
+        --results-index-db sqlite:////data/nav-offset-results/index.sqlite3 \
         --instrument coiss --start-date 2005-03-01 --end-date 2005-03-01 \
         --output-dir day_report
 
@@ -32,61 +33,59 @@ An index built by an ingest run with ``--no-prune`` is the other way the two can
 differ, and it is a choice somebody made rather than a property of the storages:
 that ingest leaves in place the rows of documents that have left the tree, so
 the report from it counts images the tree no longer holds and the report over
-the tree does not. Running ``sd_stats_ingest`` again without the flag removes
+the tree does not. Running ``sd_results_index`` again without the flag removes
 them. :doc:`user_guide_results_index` says what the flag gives up and what it
 saves.
 
 An index is optional here exactly as it is everywhere else, and
-``--results-db`` is resolved the same way: from the command line, then the
-``environment.results_db`` configuration variable, then the ``NAV_RESULTS_DB``
-environment variable, with the literal ``none`` at any level meaning no index.
-The index is a database built from the navigation results tree by a separate
-pass, ``sd_stats_ingest``, and :doc:`user_guide_results_index` is where it is
-documented: how it is named and resolved, how to build and rebuild one, the
-tables it holds, and how to query it directly for the questions this report
-does not answer.
+``--results-index-db`` is resolved the same way: from the command line, then the
+``environment.results_index_db`` configuration variable, then the
+``NAV_RESULTS_INDEX_DB`` environment variable, with the literal ``none`` at any
+level meaning no index. The index is a database built from the navigation
+results tree by a separate pass, ``sd_results_index``, and
+:doc:`user_guide_results_index` is where it is documented: how it is named and
+resolved, how to build and rebuild one, the tables it holds, and how to query it
+directly for the questions this report does not answer.
 
 .. code-block:: bash
 
-    sd_stats_ingest --nav-results-root /data/nav-offset-results \
-        --results-db sqlite:////data/nav-offset-results/index.sqlite3
-    sd_stats_report --results-db sqlite:////data/nav-offset-results/index.sqlite3
+    sd_results_index --nav-results-root /data/nav-offset-results \
+        --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
+    sd_stats_report \
+        --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
 
 With no index the navigation results tree is read instead. The roots to read
 come from ``--nav-results-root`` (repeatable), then the ``nav_results_root``
 configuration variable, then ``NAV_RESULTS_ROOT``, as they do for the ingest.
-On a machine where an index is configured, ``--results-db none`` is how a
+On a machine where an index is configured, ``--results-index-db none`` is how a
 single run is made to read the tree anyway:
 
 .. code-block:: bash
 
     sd_stats_report --nav-results-root /data/nav-offset-results \
-        --results-db none
+        --results-index-db none
 
 **Reading a tree costs one full read of every document under every root, on
 every report run.** That is exactly the cost an index exists to remove -- a
 Cassini-scale root is several hundred thousand documents, and on a cloud root
 each one is a paid round trip. For a local tree and a single report that is
 the right trade; for a cloud root, or for a report you will run more than
-once, build an index with ``sd_stats_ingest`` first and name it.
+once, build an index with ``sd_results_index`` first and name it.
 
 A root, or a directory under one, that cannot be listed fails the run, and no
 report is written. A report that quietly covered less than the tree could not
 be told apart from one that covered all of it, so the pass stops instead.
 
-``sd_stats_report [--results-db URL] [--nav-results-root ROOT] [--root ROOT]
-[--output-dir DIR] [--instrument NAME] [--start-date YYYY-MM-DD]
-[--end-date YYYY-MM-DD] [--min-image NAME] [--max-image NAME] [--top-n N]
-[--filelists] [--suspect-fraction F] [--csv]`` writes ``report.md`` and its
-charts into the output directory. All filters combine and apply to every
-section; dates are inclusive UTC image dates, so a single day's run is
-``--start-date D --end-date D``. An image records its epoch as the midtime of
-the observation that was loaded for it, so an image whose load failed has no
-date and either bound passes it over. ``--min-image`` / ``--max-image`` bound
-the numeric portion of the image name (the first digit run in the basename, so
-``--min-image N1454725799`` and ``--min-image 1454725799`` are equivalent);
-both bounds are inclusive and either may be given alone. The same inputs
-always produce the same numbers and the same charts.
+``sd_stats_report [--results-index-db URL] [--nav-results-root ROOT] [--root ROOT] [--output-dir DIR] [--instrument NAME] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--min-image NAME] [--max-image NAME] [--top-n N] [--filelists] [--suspect-fraction F] [--csv]``
+writes ``report.md`` and its charts into the output directory. All filters
+combine and apply to every section; dates are inclusive UTC image dates, so a
+single day's run is ``--start-date D --end-date D``. An image records its epoch
+as the midtime of the observation that was loaded for it, so an image whose load
+failed has no date and either bound passes it over. ``--min-image`` /
+``--max-image`` bound the numeric portion of the image name (the first digit run
+in the basename, so ``--min-image N1454725799`` and ``--min-image 1454725799``
+are equivalent); both bounds are inclusive and either may be given alone. The
+same inputs always produce the same numbers and the same charts.
 
 ``--root`` restricts an index-backed report to one ingested navigation-results
 root and may be given more than once; with none given the report covers every

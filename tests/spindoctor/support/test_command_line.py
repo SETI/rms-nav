@@ -66,14 +66,14 @@ def _url(password: str, *, user: str = 'svc') -> str:
 @pytest.mark.parametrize('password', _PASSWORDS)
 def test_a_password_of_any_punctuation_does_not_reach_the_line(password: str) -> None:
     """A password is a password whatever URL syntax it happens to spell."""
-    line = ' '.join(masked_command_line(['--results-db', _url(password)]))
+    line = ' '.join(masked_command_line(['--results-index-db', _url(password)]))
     assert _LEFT not in line
 
 
 @pytest.mark.parametrize('password', _PASSWORDS)
 def test_no_tail_of_such_a_password_survives_either(password: str) -> None:
     """Masking that stops at the first delimiter leaves a working password."""
-    line = ' '.join(masked_command_line(['--results-db', _url(password)]))
+    line = ' '.join(masked_command_line(['--results-index-db', _url(password)]))
     assert _RIGHT not in line
 
 
@@ -86,7 +86,7 @@ def test_a_user_name_carrying_an_at_sign_does_not_shelter_the_password(password:
     that stopped at the one inside the password would leave its tail, so a test
     naming one half passes against a defect that exposes the other.
     """
-    line = ' '.join(masked_command_line(['--results-db', _url(password, user=_USER)]))
+    line = ' '.join(masked_command_line(['--results-index-db', _url(password, user=_USER)]))
     assert _LEFT not in line
     assert _RIGHT not in line
 
@@ -94,18 +94,18 @@ def test_a_user_name_carrying_an_at_sign_does_not_shelter_the_password(password:
 @pytest.mark.parametrize('password', _PASSWORDS)
 def test_the_value_joined_to_its_option_is_masked_too(password: str) -> None:
     """Both spellings argparse accepts put the same password on the same line."""
-    line = ' '.join(masked_command_line([f'--results-db={_url(password)}']))
+    line = ' '.join(masked_command_line([f'--results-index-db={_url(password)}']))
     assert _RIGHT not in line
 
 
-@pytest.mark.parametrize('option', ['--r', '--res', '--results-d', '--results-db'])
+@pytest.mark.parametrize('option', ['--r', '--res', '--results-index', '--results-index-db'])
 def test_every_abbreviation_argparse_accepts_is_masked(option: str) -> None:
     """A distinguishing prefix is the option, and consumes the URL after it."""
     line = ' '.join(masked_command_line([option, _url(_PASSWORDS[-1])]))
     assert _LEFT not in line
 
 
-@pytest.mark.parametrize('option', ['--r', '--res', '--results-d', '--results-db'])
+@pytest.mark.parametrize('option', ['--r', '--res', '--results-index', '--results-index-db'])
 def test_every_abbreviation_is_masked_when_joined_by_an_equals_sign(option: str) -> None:
     """The two spellings multiply: an abbreviation joined to its value is a third."""
     line = ' '.join(masked_command_line([f'{option}={_url(_PASSWORDS[-1])}']))
@@ -114,14 +114,14 @@ def test_every_abbreviation_is_masked_when_joined_by_an_equals_sign(option: str)
 
 def test_the_index_is_still_named_after_it_is_masked() -> None:
     """Which URL a failed run was given is what the logged line is read for."""
-    line = ' '.join(masked_command_line(['--results-db', _url(_PASSWORDS[0])]))
+    line = ' '.join(masked_command_line(['--results-index-db', _url(_PASSWORDS[0])]))
     assert 'db.example:5432/spindoctor' in line
 
 
 def test_the_option_is_still_named_after_its_value_is_masked() -> None:
     """Which of the resolution levels supplied the URL is the other half of it."""
-    line = ' '.join(masked_command_line(['--results-db', _url(_PASSWORDS[0])]))
-    assert line.startswith('--results-db ')
+    line = ' '.join(masked_command_line(['--results-index-db', _url(_PASSWORDS[0])]))
+    assert line.startswith('--results-index-db ')
 
 
 def test_a_command_line_naming_no_index_is_returned_word_for_word() -> None:
@@ -158,7 +158,10 @@ def test_a_slash_before_the_first_colon_ends_the_authority() -> None:
     recorded as it was written, and an operator reading the log sees the string
     that failed to connect.
     """
-    given = ['--results-db', f'postgresql+psycopg://svc/corp:{_LEFT}{_RIGHT}@db.example/spindoctor']
+    given = [
+        '--results-index-db',
+        f'postgresql+psycopg://svc/corp:{_LEFT}{_RIGHT}@db.example/spindoctor',
+    ]
     assert masked_command_line(given) == given
 
 
@@ -171,7 +174,7 @@ def test_a_second_index_url_on_the_same_line_is_masked_as_well() -> None:
     """
     line = ' '.join(
         masked_command_line(
-            ['--results-db', _url(_PASSWORDS[0]), '--results-db', _url(_PASSWORDS[3])]
+            ['--results-index-db', _url(_PASSWORDS[0]), '--results-index-db', _url(_PASSWORDS[3])]
         )
     )
     assert _LEFT not in line
@@ -229,20 +232,24 @@ def _persisted_banner(name: str, argv: list[str], log_path: FCPath) -> str:
 def test_the_run_banner_does_not_print_a_password() -> None:
     """The console sink of the main logger is on by default, so this reaches a terminal."""
     written = _console_banner(
-        'test_banner_console', ['coiss', '--results-db', _url(_PASSWORDS[-1])]
+        'test_banner_console', ['coiss', '--results-index-db', _url(_PASSWORDS[-1])]
     )
     assert _LEFT not in written
 
 
 def test_no_tail_of_that_password_is_printed_either() -> None:
     """Masking that stopped at the first URL delimiter would print a working password."""
-    written = _console_banner('test_banner_tail', ['coiss', '--results-db', _url(_PASSWORDS[-1])])
+    written = _console_banner(
+        'test_banner_tail', ['coiss', '--results-index-db', _url(_PASSWORDS[-1])]
+    )
     assert _RIGHT not in written
 
 
 def test_the_run_banner_still_records_the_command_line() -> None:
     """A banner that hid the whole line would cost what the banner is written for."""
-    written = _console_banner('test_banner_named', ['coiss', '--results-db', _url(_PASSWORDS[-1])])
+    written = _console_banner(
+        'test_banner_named', ['coiss', '--results-index-db', _url(_PASSWORDS[-1])]
+    )
     assert 'db.example:5432/spindoctor' in written
 
 
@@ -250,7 +257,7 @@ def test_a_persisted_run_log_does_not_carry_a_password(tmp_path: Path) -> None:
     """An unattended run writes its log to a file, which is where one would sit longest."""
     written = _persisted_banner(
         'test_banner_file',
-        ['coiss', '--results-db', _url(_PASSWORDS[-1])],
+        ['coiss', '--results-index-db', _url(_PASSWORDS[-1])],
         FCPath(tmp_path) / 'run.log',
     )
     assert _LEFT not in written
@@ -260,7 +267,7 @@ def test_no_tail_of_that_password_reaches_the_persisted_log_either(tmp_path: Pat
     """The other half of the password, which the same partial rule would leave behind."""
     written = _persisted_banner(
         'test_banner_file_tail',
-        ['coiss', '--results-db', _url(_PASSWORDS[-1])],
+        ['coiss', '--results-index-db', _url(_PASSWORDS[-1])],
         FCPath(tmp_path) / 'run.log',
     )
     assert _RIGHT not in written
@@ -270,7 +277,7 @@ def test_a_persisted_run_log_still_records_the_command_line(tmp_path: Path) -> N
     """The file sink is the copy a reader is handed, and it identifies the run."""
     written = _persisted_banner(
         'test_banner_file_named',
-        ['coiss', '--results-db', _url(_PASSWORDS[-1])],
+        ['coiss', '--results-index-db', _url(_PASSWORDS[-1])],
         FCPath(tmp_path) / 'run.log',
     )
     assert 'db.example:5432/spindoctor' in written
@@ -408,7 +415,7 @@ def test_such_a_programs_own_command_line_reaches_a_log_file_masked(
     positional included, so a rule that only held for a line beginning with the
     option would be caught here.
     """
-    argv = [*_PROGRAM_ARGV[program], '--results-db', _url(_PASSWORDS[-1], user=_USER)]
+    argv = [*_PROGRAM_ARGV[program], '--results-index-db', _url(_PASSWORDS[-1], user=_USER)]
     written = _persisted_banner(f'test_banner_{program}', argv, FCPath(tmp_path) / 'run.log')
     assert _LEFT not in written
 
@@ -421,7 +428,7 @@ def test_no_tail_of_that_password_reaches_the_file_either(program: str, tmp_path
         program: Which of the two programs is under test.
         tmp_path: pytest-provided temporary directory.
     """
-    argv = [*_PROGRAM_ARGV[program], '--results-db', _url(_PASSWORDS[-1], user=_USER)]
+    argv = [*_PROGRAM_ARGV[program], '--results-index-db', _url(_PASSWORDS[-1], user=_USER)]
     written = _persisted_banner(f'test_banner_tail_{program}', argv, FCPath(tmp_path) / 'run.log')
     assert _RIGHT not in written
 
@@ -434,7 +441,7 @@ def test_that_line_still_names_the_index(program: str, tmp_path: Path) -> None:
         program: Which of the two programs is under test.
         tmp_path: pytest-provided temporary directory.
     """
-    argv = [*_PROGRAM_ARGV[program], '--results-db', _url(_PASSWORDS[-1], user=_USER)]
+    argv = [*_PROGRAM_ARGV[program], '--results-index-db', _url(_PASSWORDS[-1], user=_USER)]
     written = _persisted_banner(f'test_banner_named_{program}', argv, FCPath(tmp_path) / 'run.log')
     assert 'db.example:5432/spindoctor' in written
 
@@ -450,7 +457,7 @@ def test_that_line_still_names_the_dataset(program: str, tmp_path: Path) -> None
         program: Which of the two programs is under test.
         tmp_path: pytest-provided temporary directory.
     """
-    argv = [*_PROGRAM_ARGV[program], '--results-db', _url(_PASSWORDS[-1], user=_USER)]
+    argv = [*_PROGRAM_ARGV[program], '--results-index-db', _url(_PASSWORDS[-1], user=_USER)]
     written = _persisted_banner(
         f'test_banner_dataset_{program}', argv, FCPath(tmp_path) / 'run.log'
     )

@@ -59,8 +59,8 @@ def test_a_logging_setting_does_not_change_the_digest(tmp_path: Path, body: str)
     [
         'environment:\n  nav_results_root: /somewhere/else\n',
         'environment:\n  pds3_holdings_root: /mnt/other/holdings\n',
-        'environment:\n  results_db: sqlite:////data/nav-results/index.sqlite3\n',
-        'environment:\n  results_db: postgresql+psycopg://user@host/spindoctor\n',
+        'environment:\n  results_index_db: sqlite:////data/nav-results/index.sqlite3\n',
+        'environment:\n  results_index_db: postgresql+psycopg://user@host/spindoctor\n',
     ],
 )
 def test_an_environment_setting_does_not_change_the_digest(tmp_path: Path, body: str) -> None:

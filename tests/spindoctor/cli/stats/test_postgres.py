@@ -38,14 +38,14 @@ from tests.spindoctor.conftest import (
     write_metadata,
 )
 
-from spindoctor.cli.stats.ingest import (
+from spindoctor.cli.results_index import (
     TaskResult,
     UnwritableRowError,
     complete_ingest_tasks,
     fan_out_ingest_tasks,
     ingest_task_share,
 )
-from spindoctor.cli.stats.ingest.tasks import _LARGEST_RUN_ROW_COUNT
+from spindoctor.cli.results_index.tasks import _LARGEST_RUN_ROW_COUNT
 from spindoctor.cli.stats.report import main_report
 from spindoctor.results_index import (
     IMAGES,
@@ -352,7 +352,7 @@ def test_the_report_cli_does_not_print_the_server_password(
     with pytest.raises(SystemExit):
         main_report(
             [
-                '--results-db',
+                '--results-index-db',
                 postgres_url,
                 '--root',
                 str(tmp_path / 'never-ingested'),

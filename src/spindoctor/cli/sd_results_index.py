@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Read one or more navigation results roots into the results index.
 
-Dispatch script for the ``sd_stats_ingest`` console entry point.  See
+Dispatch script for the ``sd_results_index`` console entry point.  See
+``spindoctor.cli.results_index`` for what one pass does and
 ``spindoctor.cli.stats`` for the statistics-system overview.
 
 The roots are resolved the way every consumer resolves a navigation results
@@ -38,7 +39,7 @@ schema are six tables SpinDoctor created.
 
 One pass may also be spread over a queue of workers.  ``--output-cloud-tasks-file``
 lists each root once, removes the rows whose documents have left the tree, and
-writes out the shares for ``sd_stats_ingest_cloud_tasks`` to read; when those
+writes out the shares for ``sd_results_index_cloud_tasks`` to read; when those
 have run, ``--complete-cloud-tasks-file`` adds their tallies up and stamps each
 root's ingest as finished.  Until that last step a consumer treats the roots as
 ones nobody has ingested, which is what keeps absence of a row from being read
@@ -58,8 +59,7 @@ package_source_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
 from spindoctor.cli.logging_args import add_logging_arguments, reporting_logging_errors
-from spindoctor.cli.stats.drop import drop_results_index
-from spindoctor.cli.stats.ingest import (
+from spindoctor.cli.results_index import (
     IngestCounts,
     TaskCompletion,
     UnwritableRowError,
@@ -68,21 +68,22 @@ from spindoctor.cli.stats.ingest import (
     ingest_metadata_files,
     task_results_from_event_log,
 )
+from spindoctor.cli.results_index.drop import drop_results_index
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
     build_run_logging,
     get_nav_results_root,
-    get_results_db_url,
+    get_results_index_db_url,
     load_default_and_user_config,
 )
-from spindoctor.config.program_names import SD_STATS_INGEST
+from spindoctor.config.program_names import SD_RESULTS_INDEX
 from spindoctor.nav_records import UnlistableDirectoryError, distinct_roots
 from spindoctor.results_index import open_index
 from spindoctor.support.command_line import masked_command_line
 from spindoctor.support.file import json_as_string
 
-PROGRAM_NAME = SD_STATS_INGEST
+PROGRAM_NAME = SD_RESULTS_INDEX
 """Program identity: names the main log directory and the
 ``logging.programs`` configuration block for this program."""
 
@@ -121,13 +122,13 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         configuration variable.""",
     )
     environment_group.add_argument(
-        '--results-db',
+        '--results-index-db',
         default=None,
         metavar='URL',
         help="""Connection URL of the results index to write (a sqlite: URL
         naming a local path, or a postgresql+psycopg: URL naming a server);
-        overrides the environment.results_db configuration variable and
-        NAV_RESULTS_DB. The tables are created if they are absent, in the schema this
+        overrides the environment.results_index_db configuration variable and
+        NAV_RESULTS_INDEX_DB. The tables are created if they are absent, in the schema this
         database's own schema_meta stamp was found in or, where there is no such
         stamp, the one a table created without a schema name lands in. That
         schema is refused, and nothing is created or stamped in it, when it
@@ -170,7 +171,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         action='store_true',
         default=False,
         help="""Remove the results index's own tables from the database
-        --results-db names, and stop: no results root is read and no document is
+        --results-index-db names, and stop: no results root is read and no document is
         ingested. The tables that go are the index's own six names, from the one
         schema this database's own schema_meta stamp was found in; no other
         table of that schema, and no other schema, is touched. What makes those
@@ -198,7 +199,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         default=None,
         metavar='PATH',
         help="""Write a JSON task descriptions file suitable for loading into a
-        cloud_tasks queue (consumed by sd_stats_ingest_cloud_tasks) and read no
+        cloud_tasks queue (consumed by sd_results_index_cloud_tasks) and read no
         document here. Each root is still listed once, and the rows whose
         documents have left it are still removed; its ingest stays unfinished
         until --complete-cloud-tasks-file adds up what the workers did.""",
@@ -511,7 +512,7 @@ def _mode_refusal(arguments: argparse.Namespace) -> str | None:
 
 
 def main() -> None:
-    """Console entry point for ``sd_stats_ingest``.
+    """Console entry point for ``sd_results_index``.
 
     Resolves the index URL and, unless the command line asks for a drop, the
     results roots as well; then, according to the mode named on the command
@@ -564,14 +565,14 @@ def main() -> None:
     # naming none at all, and its message names that level, so it is reported as
     # itself rather than as the "no index was named" refusal below.
     try:
-        url = get_results_db_url(arguments, DEFAULT_CONFIG)
+        url = get_results_index_db_url(arguments, DEFAULT_CONFIG)
     except ValueError as exc:
         MAIN_LOGGER.fatal('%s', exc)
         sys.exit(1)
     if url is None:
         MAIN_LOGGER.fatal(
-            'No results index was named. Give one with --results-db, the '
-            'environment.results_db configuration variable, or NAV_RESULTS_DB.'
+            'No results index was named. Give one with --results-index-db, the '
+            'environment.results_index_db configuration variable, or NAV_RESULTS_INDEX_DB.'
         )
         sys.exit(1)
 

@@ -72,7 +72,7 @@ Navigation Phase
   descending the per-volume path hierarchy (see
   :doc:`/user_guide/user_guide_navigation`).
 
-* ``sd_stats_ingest`` - Read per-image navigation metadata JSON files into the
+* ``sd_results_index`` - Read per-image navigation metadata JSON files into the
   results index (see :doc:`/user_guide/user_guide_results_index`).
 
 * ``sd_stats_report`` - Generate success/failure, technique-usage, offset, and
@@ -125,8 +125,8 @@ distributed processing:
   (Mosaic combination remains a single-node step; see
   :doc:`/user_guide/user_guide_reprojection`.)
 
-* ``sd_stats_ingest_cloud_tasks`` - Cloud tasks worker that reads one share of
-  a navigation-results root into the results index. ``sd_stats_ingest`` lists
+* ``sd_results_index_cloud_tasks`` - Cloud tasks worker that reads one share of
+  a navigation-results root into the results index. ``sd_results_index`` lists
   each root and divides it into shares, and adds the workers' tallies up again
   when they have run; see :doc:`/user_guide/user_guide_results_index`.
 

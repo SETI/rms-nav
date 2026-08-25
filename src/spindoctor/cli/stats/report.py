@@ -51,7 +51,7 @@ from spindoctor.cli.stats.report_sections import (
     add_runtime_section,
     add_suspect_offset_section,
 )
-from spindoctor.config import DEFAULT_CONFIG, get_nav_results_root, get_results_db_url
+from spindoctor.config import DEFAULT_CONFIG, get_nav_results_root, get_results_index_db_url
 from spindoctor.nav_records import (
     RecordSource,
     Selection,
@@ -688,14 +688,14 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
         parser: The parser to declare them on.
     """
     parser.add_argument(
-        '--results-db',
+        '--results-index-db',
         default=None,
         metavar='URL',
-        help='Connection URL of the results index written by sd_stats_ingest '
+        help='Connection URL of the results index written by sd_results_index '
         '(a sqlite: URL naming a local path, or a postgresql+psycopg: URL); '
-        'overrides the environment.results_db configuration variable and '
-        'NAV_RESULTS_DB. Without one the navigation results tree is read '
-        'instead, one document per image. Pass --results-db none to read the '
+        'overrides the environment.results_index_db configuration variable and '
+        'NAV_RESULTS_INDEX_DB. Without one the navigation results tree is read '
+        'instead, one document per image. Pass --results-index-db none to read the '
         'tree even where an index is configured',
     )
     parser.add_argument(
@@ -835,7 +835,7 @@ def main_report(cmdline: list[str] | None = None) -> int:
     # program's other refusals print, and returned as a status rather than raised,
     # because a traceback would bury the one line that says what to change.
     try:
-        url = get_results_db_url(arguments, DEFAULT_CONFIG)
+        url = get_results_index_db_url(arguments, DEFAULT_CONFIG)
     except ValueError as exc:
         _to_stderr(str(exc))
         return 1
@@ -932,8 +932,8 @@ def _report_from_an_index(
         engine.dispose()
         print(
             f'The results index {url} holds no completed ingest of any root, so there is '
-            f'nothing it can be asked about. Run sd_stats_ingest over a root first, or '
-            f'report over the tree with --results-db none.',
+            f'nothing it can be asked about. Run sd_results_index over a root first, or '
+            f'report over the tree with --results-index-db none.',
             file=sys.stderr,
         )
         return 1
@@ -982,7 +982,7 @@ def _report_over_a_tree(arguments: argparse.Namespace, parser: argparse.Argument
         parser.error(
             '--root restricts a report to a root the index holds, and no index was named. '
             'Name the trees to report on with --nav-results-root, or name an index with '
-            '--results-db.'
+            '--results-index-db.'
         )
     try:
         named = arguments.nav_results_roots or [get_nav_results_root(arguments, DEFAULT_CONFIG)]
@@ -990,7 +990,7 @@ def _report_over_a_tree(arguments: argparse.Namespace, parser: argparse.Argument
         print(
             f'No results index and no navigation results root: {exc}. Name a tree with '
             f'--nav-results-root, the nav_results_root configuration variable or '
-            f'NAV_RESULTS_ROOT, or name an index with --results-db.',
+            f'NAV_RESULTS_ROOT, or name an index with --results-index-db.',
             file=sys.stderr,
         )
         return 1

@@ -30,6 +30,7 @@ import asyncio
 import contextlib
 import importlib
 import io
+import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -61,6 +62,17 @@ from tests.spindoctor.cli.sd_create_ck_helpers import (
 
 from spindoctor.cli import sd_backplanes, sd_mosaic
 
+_HELP_WIDTH = '4000'
+"""Terminal width every help text is rendered at.
+
+argparse wraps a help string to the terminal it is printed on, and it breaks a
+long word at a hyphen to do it, so on an ordinary terminal an option named in
+the middle of a sentence arrives split across two lines.  A test asking what a
+program says about an option is asking about the string rather than about the
+width of whoever ran it, so the width is fixed here at more than the longest
+help string, which leaves every one of them on a line of its own.
+"""
+
 
 def help_text(program: str, argv: list[str]) -> str:
     """Return what ``program --help`` prints.
@@ -75,13 +87,19 @@ def help_text(program: str, argv: list[str]) -> str:
     """
     module = importlib.import_module(f'spindoctor.cli.{program}')
     buffer = io.StringIO()
-    saved = sys.argv
+    saved_argv = sys.argv
+    saved_columns = os.environ.get('COLUMNS')
     sys.argv = [program, *argv, '--help']
+    os.environ['COLUMNS'] = _HELP_WIDTH
     try:
         with contextlib.redirect_stdout(buffer), contextlib.suppress(SystemExit):
             module.main()
     finally:
-        sys.argv = saved
+        sys.argv = saved_argv
+        if saved_columns is None:
+            del os.environ['COLUMNS']
+        else:
+            os.environ['COLUMNS'] = saved_columns
     return buffer.getvalue()
 
 
@@ -153,12 +171,12 @@ def datasetless(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(module, 'dataset_name_to_class', lambda _name: _NoImages)
 
 
-def backplane_argv(tmp_path: Path, results_db: str, *flags: str) -> list[str]:
+def backplane_argv(tmp_path: Path, results_index_db: str, *flags: str) -> list[str]:
     """Return a backplane command line naming both roots and an index.
 
     Parameters:
         tmp_path: Directory the roots are placed under.
-        results_db: The value of ``--results-db``.
+        results_index_db: The value of ``--results-index-db``.
         flags: Extra flags for the mode under test, which include the one
             saying where the run's own logs go.
 
@@ -171,18 +189,18 @@ def backplane_argv(tmp_path: Path, results_db: str, *flags: str) -> list[str]:
         (tmp_path / 'nav').as_posix(),
         '--backplane-results-root',
         (tmp_path / 'backplanes').as_posix(),
-        '--results-db',
-        results_db,
+        '--results-index-db',
+        results_index_db,
         *flags,
     ]
 
 
-def mosaic_argv(tmp_path: Path, results_db: str, *flags: str) -> list[str]:
+def mosaic_argv(tmp_path: Path, results_index_db: str, *flags: str) -> list[str]:
     """Return a ring-mosaic command line naming a root and an index.
 
     Parameters:
         tmp_path: Directory the roots are placed under.
-        results_db: The value of ``--results-db``.
+        results_index_db: The value of ``--results-index-db``.
         flags: Extra flags for the mode under test, which include the one
             saying where the run's own logs go.
 
@@ -206,8 +224,8 @@ def mosaic_argv(tmp_path: Path, results_db: str, *flags: str) -> list[str]:
         '100',
         '--longitude-resolution',
         '0.1',
-        '--results-db',
-        results_db,
+        '--results-index-db',
+        results_index_db,
         *flags,
     ]
 

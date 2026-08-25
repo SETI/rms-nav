@@ -20,7 +20,7 @@ The code divides in two. The library package
 :mod:`spindoctor.results_index` owns the schema, the opener and the queries
 consumers issue; it is imported by anything that reads an index. The ingest
 lives under the command-line package, in
-``spindoctor/cli/stats/ingest/``, because writing the index is a program an
+``spindoctor/cli/results_index/``, because writing the index is a program an
 operator runs rather than an API a consumer calls.
 
 .. list-table::
@@ -70,7 +70,7 @@ operator runs rather than an API a consumer calls.
        settles which images have a document; the per-image facts of a batch of
        candidates settle what each one records. One implementation therefore
        serves both storages.
-   * - ``spindoctor.cli.stats.ingest``
+   * - ``spindoctor.cli.results_index``
      - The pass itself: walk, select, read, write, prune, complete --- in one
        process or divided into queue tasks.
 
@@ -114,7 +114,7 @@ Several programs read what a navigation pass wrote, and each of them can be
 pointed at either storage. What decides whether they agree is that none of them
 reads a storage itself: they all go through
 :class:`~spindoctor.nav_records.RecordSource`, and each storage implements it.
-``sd_stats_ingest`` is the one that reads only documents, since documents are
+``sd_results_index`` is the one that reads only documents, since documents are
 what it builds the index out of: it discovers them through the seam's listing
 and keeps a reading loop of its own, which owns the refusal vocabulary the
 index stores.
@@ -502,15 +502,16 @@ choice, made by
      - The results tree, by listing and by reading documents.
 
 A results index URL resolves only for a program that **declares**
-``--results-db``. The test is whether the parsed arguments carry a
-``results_db`` attribute, which :mod:`argparse` supplies with its default as
-soon as the option is added, so an operator need type nothing: a declaring
+``--results-index-db``. The test is whether the parsed arguments carry a
+``results_index_db`` attribute, which :mod:`argparse` supplies with its default
+as soon as the option is added, so an operator need type nothing: a declaring
 program still resolves the URL through the command line, then the
-``environment.results_db`` configuration variable, then ``NAV_RESULTS_DB``. A
-program that declares no such option has no attribute to find, so an exported
-variable cannot quietly change what its selection means. ``--results-db none``
-is the deliberate spelling of "no index", honored at every level, so a machine
-that exports one can still be told to read the tree.
+``environment.results_index_db`` configuration variable, then
+``NAV_RESULTS_INDEX_DB``. A program that declares no such option has no
+attribute to find, so an exported variable cannot quietly change what its
+selection means. ``--results-index-db none`` is the deliberate spelling of "no
+index", honored at every level, so a machine that exports one can still be told
+to read the tree.
 
 What each flag costs
 --------------------
@@ -636,7 +637,7 @@ after a delete that cascades to the children, so a concurrent reader never sees
 half an image and re-ingesting one replaces its children rather than doubling
 them.
 
-**Writes are chunked, not batched into one transaction.** ``sd_stats_ingest``
+**Writes are chunked, not batched into one transaction.** ``sd_results_index``
 commits every ``INGEST_COMMIT_CHUNK_SIZE`` images, which bounds both what a
 crash costs and how long a writer holds its lock. Retrieval is batched
 separately (``RETRIEVE_BATCH_SIZE``), because one bounds a download and
@@ -666,20 +667,20 @@ cannot touch the same stub.
 
 **A pass may be told to keep them, and only presence is weakened by it.**
 ``ingest_metadata_files`` and ``fan_out_ingest_tasks`` both take ``prune``, and
-``sd_stats_ingest --no-prune`` is what sets it. A row then outlives its document
-and presence of one stops implying the tree still holds the result; absence is
-untouched, because skipping a delete adds no row, so every rule above that reads
-absence is unaffected. The relaxation is bounded by there being no ingest of part
-of a root: a pass that reaches the prune listed the whole of one, so the rows it
-declines to remove are exactly the rows it would have removed.
+``sd_results_index --no-prune`` is what sets it. A row then outlives its
+document and presence of one stops implying the tree still holds the result;
+absence is untouched, because skipping a delete adds no row, so every rule above
+that reads absence is unaffected. The relaxation is bounded by there being no
+ingest of part of a root: a pass that reaches the prune listed the whole of one,
+so the rows it declines to remove are exactly the rows it would have removed.
 
 Which query that saves differs between the two passes, and the rule is written
-once, in ``spindoctor.cli.stats.ingest.driver._reads_recorded_rows``. The
-rows the index already holds have two readers --- the skip rule and the prune ---
-and the query runs when either wants them. So an ordinary pass under
-``--no-prune`` still runs it for the skip rule and stops only under ``--force``
-as well, while a fan-out, whose workers skip from the metrics their own shares
-carry, stops running it either way.
+once, in ``spindoctor.cli.results_index.driver._reads_recorded_rows``. The rows
+the index already holds have two readers --- the skip rule and the prune --- and
+the query runs when either wants them. So an ordinary pass under ``--no-prune``
+still runs it for the skip rule and stops only under ``--force`` as well, while
+a fan-out, whose workers skip from the metrics their own shares carry, stops
+running it either way.
 
 **A root is unreadable until its run is stamped.** The run row is written
 before the walk and its finish time is left NULL until the pass completes, so

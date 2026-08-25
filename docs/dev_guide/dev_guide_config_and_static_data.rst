@@ -78,7 +78,7 @@ shipping sections:
   :doc:`dev_guide_pds4`.
 - ``environment`` — deployment locations (``pds3_holdings_root``,
   ``nav_results_root``, ``backplane_results_root``, ``bundle_results_root``,
-  ``results_db``).
+  ``results_index_db``).
 - ``body_shape`` — static per-body shape catalogue (see
   :ref:`static-data-citations` below).
 - ``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri`` — per-camera blocks
@@ -210,23 +210,23 @@ output roots, and the results index URL:
   produced by ``sd_backplanes``.
 - ``bundle_results_root`` — write root for PDS4 bundles produced by
   ``sd_create_bundle``.
-- ``results_db`` — connection URL of the results index, a database derived from
-  the navigation results tree by a separate ingest step. It is not
+- ``results_index_db`` — connection URL of the results index, a database derived
+  from the navigation results tree by a separate ingest step. It is not
   authoritative: the per-image ``_metadata.json`` documents are, and the index
-  can be deleted and rebuilt from them. A ``sqlite:`` URL names a
-  local filesystem path and nothing else: it carries no query string, because
-  the driver would then open a file named after the query rather than the file
-  named in the URL. A ``postgresql+psycopg:`` URL names a server. Leaving it
-  unset means "no index", which is the default mode of every program, and the
-  literal value ``none`` says so explicitly, overriding a URL set elsewhere. A
-  value that is empty, or nothing but spaces, is neither a URL nor that word, and
-  is refused at whichever level carries it rather than read as either.
+  can be deleted and rebuilt from them. A ``sqlite:`` URL names a local
+  filesystem path and nothing else: it carries no query string, because the
+  driver would then open a file named after the query rather than the file named
+  in the URL. A ``postgresql+psycopg:`` URL names a server. Leaving it unset
+  means "no index", which is the default mode of every program, and the literal
+  value ``none`` says so explicitly, overriding a URL set elsewhere. A value
+  that is empty, or nothing but spaces, is neither a URL nor that word, and is
+  refused at whichever level carries it rather than read as either.
 
 Each root may be a local path or a URL; ``filecache``-aware consumers handle
-both. ``results_db`` is the exception: it is a database connection URL, not a
-location ``filecache`` resolves. Environment-variable overrides
+both. ``results_index_db`` is the exception: it is a database connection URL,
+not a location ``filecache`` resolves. Environment-variable overrides
 (``PDS3_HOLDINGS_DIR``, ``NAV_RESULTS_ROOT``, ``BACKPLANE_RESULTS_ROOT``,
-``BUNDLE_RESULTS_ROOT``, ``NAV_RESULTS_DB``) take precedence over the YAML
+``BUNDLE_RESULTS_ROOT``, ``NAV_RESULTS_INDEX_DB``) take precedence over the YAML
 defaults; CLI flags take precedence over the env vars.
 
 The whole ``environment`` block is left out of the provenance configuration

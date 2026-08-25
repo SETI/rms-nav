@@ -61,10 +61,10 @@ they run rather than afterwards.
    * - ``sd_mosaic_cloud_tasks``
      - no
      - ``reproj``
-   * - ``sd_stats_ingest``
+   * - ``sd_results_index``
      - yes
      - none
-   * - ``sd_stats_ingest_cloud_tasks``
+   * - ``sd_results_index_cloud_tasks``
      - no
      - none
    * - ``sd_stats_report``
@@ -375,8 +375,8 @@ report there is returned in the task result instead. A backplanes task reports
 whether the image was processed or skipped, and a reprojection task returns how
 many images it completed, skipped and failed.
 
-``sd_stats_ingest_cloud_tasks`` is the case where the task result is the whole
+``sd_results_index_cloud_tasks`` is the case where the task result is the whole
 record: it has no per-image log either, because it reads documents rather than
 images. Each task returns how many files it ingested, skipped and could not
-read, and names every file it could not read. ``sd_stats_ingest`` reads those
+read, and names every file it could not read. ``sd_results_index`` reads those
 tallies back and writes them into the index, where they stay.
