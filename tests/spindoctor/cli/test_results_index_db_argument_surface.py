@@ -44,7 +44,13 @@ _SOURCE_ROOT = FCPath(Path(__file__).resolve().parents[3]) / 'src' / 'spindoctor
 
 _URL = 'sqlite:///tmp/index.sqlite3'
 
-_PASSWORD = 'hunter2'
+_PASSWORD = 'sup3rs3cr3t'
+"""A password distinctive enough that finding it in a log is unambiguous.
+
+Not a real credential and not a well-known example of one: what this value has
+to be is a string that appears nowhere else, so that a search of the log
+distinguishes a leak from a coincidence.
+"""
 
 _URL_WITH_PASSWORD = f'postgresql+psycopg://spindoctor:{_PASSWORD}@db.example:5432/spindoctor'
 

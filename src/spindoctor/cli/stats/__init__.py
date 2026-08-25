@@ -33,7 +33,6 @@ reads the documents themselves, one file read per image in place of one query
 per run.
 """
 
-from spindoctor.cli.results_index import ingest_metadata_files
 from spindoctor.cli.stats.report import main_report
 
-__all__ = ['ingest_metadata_files', 'main_report']
+__all__ = ['main_report']

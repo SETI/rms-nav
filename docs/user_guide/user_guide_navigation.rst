@@ -130,7 +130,8 @@ Environment options
   overriding both the ``NAV_RESULTS_INDEX_DB`` environment variable and any
   corresponding configuration setting. The results-file selection filters below
   are then answered from the index's rows, and the results tree is not read.
-  Pass ``--results-index-db none`` to read the tree even when a URL is set in
+  Pass ``--results-index-db none`` to name no index, and so read the tree, even
+  when a URL is set in
   the environment or a configuration file; the opt-out is that word exactly, in
   lower case, with any surrounding spaces ignored, since any other non-empty
   value is read as the URL of an index. A value that is empty, or nothing but
@@ -324,7 +325,8 @@ since is one the index still holds, so ``--has-offset-file`` selects an image
 whose metadata file is gone. The run log says when the pass that filled the
 index finished and how long ago that was, which is what says whether either
 applies to this run. Run ``sd_results_index`` to bring the index up to date, or
-pass ``--results-index-db none`` for a run that must read the tree. That age is
+pass ``--results-index-db none``, which names no index, for a run that must read
+the tree. That age is
 what decides the answer outside the paragraphs above; inside them it decides
 nothing, since each of them survives a pass that finished a second ago.
 
