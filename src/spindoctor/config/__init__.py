@@ -1,9 +1,11 @@
 from .config import DEFAULT_CONFIG, Config
 from .config_helper import (
+    RESULTS_INDEX_DB_NONE,
     get_backplane_results_root,
     get_log_root,
     get_nav_results_root,
     get_pds4_bundle_results_root,
+    get_results_index_db_url,
     load_default_and_user_config,
 )
 from .log_scope import (
@@ -52,6 +54,7 @@ __all__ = [
     'IMAGE_LOGGER',
     'LOG_TIMESTAMP_FORMAT',
     'MAIN_LOGGER',
+    'RESULTS_INDEX_DB_NONE',
     'SILENT_LEVEL',
     'Config',
     'ImageLoggerProxy',
@@ -69,6 +72,7 @@ __all__ = [
     'get_log_root',
     'get_nav_results_root',
     'get_pds4_bundle_results_root',
+    'get_results_index_db_url',
     'image_log_path',
     'image_log_section',
     'image_scope',

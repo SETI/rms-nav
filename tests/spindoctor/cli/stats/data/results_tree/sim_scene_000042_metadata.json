@@ -1,0 +1,155 @@
+{
+  "status": "success",
+  "observation": {
+    "image_path": "/holdings/sim_scene_000042.img",
+    "image_name": "sim_scene_000042.img",
+    "instrument": "sim",
+    "camera": "SIM",
+    "image_shape": [
+      256,
+      256
+    ]
+  },
+  "navigation_result": {
+    "status": "success",
+    "status_reason": "ok",
+    "offset_px": [
+      1.5,
+      0.5
+    ],
+    "sigma_px": [
+      0.31,
+      0.28
+    ],
+    "sigma_along_unobservable_px": null,
+    "confidence": 0.88,
+    "confidence_provisional": true,
+    "confidence_rank": "high",
+    "covariance_px2": [
+      [
+        0.0961,
+        0.0
+      ],
+      [
+        0.0,
+        0.0784
+      ]
+    ],
+    "techniques_used": [
+      "BodyLimbNav"
+    ],
+    "excluded_from_consensus": [],
+    "feature_count_by_type": {
+      "LIMB_ARC": 1
+    },
+    "per_technique": [
+      {
+        "technique_name": "BodyLimbNav",
+        "feature_ids": [
+          "limb_arc:MIMAS"
+        ],
+        "offset_px": [
+          1.5,
+          0.5
+        ],
+        "covariance_px2": [
+          [
+            0.0961,
+            0.0
+          ],
+          [
+            0.0,
+            0.0784
+          ]
+        ],
+        "confidence": 0.88,
+        "spurious": false,
+        "at_edge": false,
+        "diagnostics": {
+          "visible_limb_arc_fraction": 1.0,
+          "visible_arc_px": 188.0,
+          "dt_fit_rms_px": 0.121,
+          "lm_iterations": 7,
+          "tukey_inlier_count": 186,
+          "lm_converged": true,
+          "polarity_rejection_fraction": 0.0,
+          "coarse_peak_fraction": 0.914
+        }
+      }
+    ],
+    "feature_inventory": [
+      {
+        "feature_id": "limb_arc:MIMAS",
+        "feature_type": "LIMB_ARC",
+        "source_model": "body:MIMAS",
+        "reliability": 0.88,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          84,
+          92,
+          172,
+          180
+        ],
+        "reliability_reasons": {
+          "visible_arc_fraction": 1.0,
+          "incidence_factor": 0.97
+        }
+      }
+    ],
+    "image_classifier": {
+      "class": "clean",
+      "saturation_frac": 0.0,
+      "missing_frac": 0.0,
+      "noise_sigma": 0.75,
+      "max_dn": 0.64,
+      "background_gradient_score": null,
+      "flags": []
+    },
+    "provenance": {
+      "spindoctor_version": "0.0.0",
+      "spindoctor_git_sha": "719cde5",
+      "spice_kernels": [],
+      "spice_kernel_count": 0,
+      "static_data_hashes": {
+        "config_220_body_shape.yaml": "ac10e82c9c141c0e449dcfc92d8c4f341400ffa51976f53c94c98eaabac7a52a",
+        "config_310_saturn_rings.yaml": "5f5f0b8f9a3b4d8c6e2a1c7d9b0e4f3a2d6c8b1e7f0a9d3c5b2e8f1a4d7c0b63",
+        "config_400_inst_coiss.yaml": "8c20d352ed0b5b690f7fc573f505f062551966c3305a01ae0e6fba63a8400f17"
+      },
+      "technique_names": [
+        "BodyBlobNav",
+        "BodyDiscCorrelateNav",
+        "BodyLimbNav",
+        "BodyTerminatorNav",
+        "RingAnnulusNav",
+        "RingEdgeNav",
+        "StarFieldFromCatalogNav",
+        "StarRefineNav",
+        "StarUniqueMatchNav",
+        "TitanHazeNav"
+      ],
+      "extractor_names": [
+        "body:MIMAS"
+      ],
+      "config_hash": "3ca76ec39b1fb875a86bed2793adc4430785242e07d705f2d65581963040a6b6",
+      "config_overrides": [],
+      "star_catalogs": {
+        "tycho2": "/resources/SPICE/Stars",
+        "ucac4": "/star-catalogs/UCAC4",
+        "ybsc": "/star-catalogs/YBSC"
+      },
+      "image_et": 100.0,
+      "pipeline_run_iso8601": "2026-08-08T16:46:29Z"
+    }
+  },
+  "timing": {
+    "start_iso8601": "2026-08-08T16:47:55.180332Z",
+    "end_iso8601": "2026-08-08T16:48:07.680332Z",
+    "elapsed_s": 12.5
+  },
+  "offset": [
+    1.5,
+    0.5
+  ],
+  "confidence": 0.88
+}

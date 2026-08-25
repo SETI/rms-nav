@@ -5,18 +5,32 @@ Testing
 Overview
 ========
 
-The test suite has two tiers, separated by the ``integration`` marker:
+The test suite has three tiers, separated by the ``integration`` and
+``postgres`` markers. ``addopts`` in ``pyproject.toml`` carries ``-m "not
+integration and not postgres"``, so a plain ``pytest`` runs the default tier
+alone:
 
 - The **default tier** runs on a plain ``pytest``. Everything in it is fast and
   self-contained: it needs no spacecraft holdings, no SPICE kernels, and no
   network. Unit tests live here, and so do the in-process simulator tests --
   every simulated frame is rendered and navigated in memory, so the whole
   simulator-driven invariant and structural coverage runs without external data.
-- The **integration tier** is excluded by default (``addopts = ["-m", "not
-  integration"]`` in ``pyproject.toml``) and opted into with ``-m ""`` or ``-m
-  integration``. It holds the slow and the archive-backed tests: the real-image
+- The **integration tier** is opted into with ``-m ""`` or ``-m integration``.
+  It holds the slow and the archive-backed tests: the real-image
   regression cohort (which fetches PDS holdings and resolves SPICE geometry) and
   the heavier or jitter-prone in-process simulator tests.
+- The **postgres tier** is opted into with ``-m postgres`` (or ``-m ""``). It
+  re-asks the results-index questions against a real PostgreSQL server, because
+  SQLite accepts spellings a server rejects: an integer compared against a
+  boolean, a single-precision float where a double was meant, a foreign key that
+  is only enforced when asked. The tests read their connection URL from
+  ``SPINDOCTOR_TEST_POSTGRES_URL`` and skip themselves when it is unset, so the
+  tier is runnable on any machine with a server and harmless on any machine
+  without one. Each test creates and drops a PostgreSQL schema of its own, so
+  repeat runs and parallel workers do not collide. CI has no service container
+  for it; run it locally before changing anything in
+  :mod:`spindoctor.results_index`
+  or the statistics programs.
 
 The simulator (:doc:`dev_guide_simulator`) is the engine behind several tiers: it
 lets the suite grow algorithmic-invariant and sensitivity coverage on frames
@@ -29,8 +43,9 @@ Running the suite
 .. code-block:: bash
 
    pytest                              # default tier (fast, no holdings)
-   pytest -m ""                        # full suite, including integration
+   pytest -m ""                        # full suite, every tier
    pytest -m integration               # only the integration tier
+   pytest -m postgres                  # only the postgres tier
    pytest -n auto --dist=loadfile      # parallel, matching CI (loadfile avoids
                                        #   PyQt6 worker crashes)
    pytest tests/spindoctor/sim/test_sim_noise.py            # one file
@@ -39,10 +54,43 @@ Running the suite
 
    ./scripts/run-all-checks.sh         # ruff + mypy + pytest + docs + markdown
    ./scripts/run-all-checks.sh -i      # the same, including integration tests
+   ./scripts/run-all-checks.sh -P      # the same, including the postgres tier
+
+The postgres tier additionally needs a server to point at:
+
+.. code-block:: bash
+
+   export SPINDOCTOR_TEST_POSTGRES_URL=postgresql+psycopg://USER@HOST:5432/spindoctor
+
+Supply the credentials the way the server expects them -- a ``~/.pgpass`` entry,
+``PGPASSWORD``, or a peer-authenticated local socket -- rather than writing a
+password into a shell profile or a checked-in file. A password inside the URL
+works, and the tier masks it out of every message, but the URL itself is then a
+secret in the environment of every process the shell starts.
 
 ``pytest-xdist`` must run with ``--dist=loadfile``; the default scheduling
 crashes PyQt6 workers when tests from one file split across processes. Multi-test
 integration runs should always use ``-n auto --dist=loadfile``.
+
+**The suite opens no results index it was not handed.** An index URL resolves
+from an argument, then from the ``environment.results_index_db`` configuration
+variable, then from ``NAV_RESULTS_INDEX_DB``; a test of what a program does with
+no index names none of the three. Both ambient levels are closed by fixtures in
+``tests/conftest.py``, which unset the environment variable and run from a
+directory holding no ``nav_default_config.yaml``: once for the whole session, so
+that a fixture of any scope is built with both closed, and again around each
+test, so that what a test sets up for itself is undone afterwards. The suite
+started in a directory that names a live index therefore neither reads nor locks
+it -- for a SQLite index, an open takes a write-lock probe against a file an
+ingest may be holding.
+
+A test that wants either level sets it up for itself. Two things the closure
+cannot do for you: a subprocess given a working directory of its own resolves
+its configuration there, so a test that starts one names the directory it means;
+and nothing may be written into the directory the suite runs from, which is
+shared by every test of the worker -- a file left there is a configuration every
+later test in that worker resolves through, so a test that writes one is failed
+on the way out. Move to a directory of your own with ``monkeypatch.chdir`` first.
 
 Archive-backed tests additionally require the holdings and catalog environment
 (set by CI; see :doc:`dev_guide_introduction`):
@@ -75,6 +123,33 @@ tests need none of the archive environment above.
      - nothing
      - One component in isolation (config, feature, dataset, obs, model,
        technique, orchestrator, reproj, support).
+   * - Results index on a server
+       (``tests/spindoctor/results_index/test_postgres.py``,
+       ``tests/spindoctor/results_index/test_drop_postgres.py``,
+       ``tests/spindoctor/results_index/test_creating_open_postgres.py``)
+     - postgres
+     - PostgreSQL
+     - The schema, the version gate, and the type discipline against a backend
+       that enforces them, rather than against SQLite's permissive typing; the
+       questions only a server can be asked of a drop -- that it leaves another
+       owner's tables standing, including one named as the index names its own;
+       that a search path crossing schemas cannot make one drop span two of
+       them; that an emptied database is the same database as one nothing was
+       built in; that a stamp column this account may not read costs the version
+       and not the drop; and that a lock somebody else holds ends it rather than
+       hanging it. And the questions only a server can be asked of a creating
+       open: that the schema it examines is the one the index resolves to rather
+       than the database around it, and that a table of one of the index's own
+       names in another schema of the search path is neither adopted nor built
+       around.
+   * - Statistics programs on a server
+       (``tests/spindoctor/cli/stats/test_postgres.py``, and the
+       ``postgres``-marked tests of ``tests/spindoctor/cli/stats/**``)
+     - postgres
+     - PostgreSQL
+     - That the command lines behave the same way against a server as against a
+       file: the same exit statuses for a database holding no index and for one
+       that is not there, and a failure named as what the server said it was.
    * - Simulator unit tests (``tests/spindoctor/sim/**``)
      - default
      - nothing

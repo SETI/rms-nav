@@ -72,11 +72,11 @@ Navigation Phase
   descending the per-volume path hierarchy (see
   :doc:`/user_guide/user_guide_navigation`).
 
-* ``sd_stats_ingest`` - Ingest per-image navigation metadata JSON files into a
-  SQLite database (see :doc:`/user_guide/user_guide_statistics`).
+* ``sd_results_index`` - Read per-image navigation metadata JSON files into the
+  results index (see :doc:`/user_guide/user_guide_results_index`).
 
 * ``sd_stats_report`` - Generate success/failure, technique-usage, offset, and
-  agreement reports from the ingested statistics database (see
+  agreement reports from a navigation results tree or the results index (see
   :doc:`/user_guide/user_guide_statistics`).
 
 Reprojection and Mosaic Phase
@@ -124,6 +124,11 @@ distributed processing:
   ring and body tasks; the mode is encoded per-task in the task payload.
   (Mosaic combination remains a single-node step; see
   :doc:`/user_guide/user_guide_reprojection`.)
+
+* ``sd_results_index_cloud_tasks`` - Cloud tasks worker that reads one share of
+  a navigation-results root into the results index. ``sd_results_index divide``
+  lists each root and divides it into shares, and ``sd_results_index complete``
+  adds the workers' tallies up again when they have run; see :doc:`/user_guide/user_guide_results_index`.
 
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud

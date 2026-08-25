@@ -337,14 +337,13 @@ class _LoadErrorObsClass:
 
 
 def _image_files(tmp_path: Path, count: int) -> ImageFiles:
-    """A batch of ``count`` placeholder images with index epoch and camera."""
+    """A batch of ``count`` placeholder images carrying the index camera."""
     img_path = tmp_path / 'N0.IMG'
     img_path.write_bytes(b'\x00')
     entry = ImageFile(
         image_file_url=FCPath(img_path),
         label_file_url=FCPath(img_path),
         results_path_stub='N0',
-        image_et=221309426.8040615,
         camera='NAC',
     )
     return ImageFiles(image_files=[entry] * count)

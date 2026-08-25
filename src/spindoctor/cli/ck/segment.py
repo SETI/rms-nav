@@ -67,8 +67,9 @@ from dataclasses import dataclass
 import cspyce
 import numpy as np
 
-from spindoctor.cli.ck.pointing import ImagePointing, NDArrayFloatType
+from spindoctor.cli.ck.pointing import ImagePointing
 from spindoctor.spice_ids import CK_OBJECT_SCLK_ID, FROZEN_ATTITUDE_CK_IDS
+from spindoctor.support.types import NDArrayFloatType
 
 # Every segment is written relative to J2000, which is what the recorded
 # C-matrices are referenced to.

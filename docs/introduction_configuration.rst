@@ -52,6 +52,7 @@ Configuration files use YAML format and are organized into sections:
    environment:
      nav_results_root: /path/to/results
      pds3_holdings_root: /path/to/pds3
+     results_index_db: sqlite:////path/to/results/index.sqlite3
 
    logging:
      models:
@@ -74,10 +75,12 @@ Logging Configuration
 
 Logging is configured by the top-level ``logging`` section, described under
 `Logging Options`_ below, together with command-line options that override it.
-It is the one section excluded from the provenance configuration digest
+It is one of the two sections excluded from the provenance configuration digest
 recorded with each navigation result: what a run wrote down about itself
 cannot change what it concluded, so two results differing only in logging were
-produced by the same configuration and compare as such.
+produced by the same configuration and compare as such. The other is
+``environment``, which says where a deployment keeps its files rather than how
+it navigates.
 
 Two loggers write during a run: the main logger, covering one program run, and
 the image logger, covering one image inside one processing stage. A component
@@ -159,6 +162,19 @@ Environment Options
 * ``--nav-results-root PATH``: Overrides the ``NAV_RESULTS_ROOT`` environment
   variable and any ``environment.nav_results_root`` configuration setting. This
   specifies the root directory or URL where navigation results will be written.
+
+* ``--results-index-db URL``: Overrides the ``NAV_RESULTS_INDEX_DB`` environment
+  variable and any ``environment.results_index_db`` configuration setting. This
+  names the results index --- a database derived from the navigation results
+  tree by a separate ingest step --- as a ``sqlite:`` URL naming a local file or
+  a ``postgresql+psycopg:`` URL naming a server. Unset means no index, which is
+  the default for every program that offers the option; the literal value
+  ``none`` says so explicitly and overrides a URL set elsewhere. A value that is
+  empty, or nothing but spaces, is neither, and is refused where it is spelled.
+  Only a program that offers the option reads one:
+  ``environment.results_index_db`` and ``NAV_RESULTS_INDEX_DB`` do not make a
+  program index-backed that does not declare ``--results-index-db``. See
+  :doc:`/user_guide/user_guide_results_index`.
 
 Navigation Options
 ------------------

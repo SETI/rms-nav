@@ -21,7 +21,12 @@ from spindoctor.config.logging_keys import (
     technique_log_keys,
     validate_logging_config,
 )
-from spindoctor.config.program_names import PROGRAM_NAMES, SD_MOSAIC, SD_OFFSET
+from spindoctor.config.program_names import (
+    PROGRAM_NAMES,
+    SD_MOSAIC,
+    SD_OFFSET,
+    SD_RESULTS_INDEX,
+)
 from spindoctor.support.nav_base import NavBase
 
 
@@ -486,6 +491,8 @@ def test_startup_load_accepts_a_good_logging_section(tmp_path: Path) -> None:
         ('sd_create_bundle', 'sd_create_bundle'),
         ('sd_create_ck', 'sd_create_ck'),
         ('sd_consolidate_metadata', 'sd_consolidate_metadata'),
+        ('sd_results_index', SD_RESULTS_INDEX),
+        ('sd_results_index_cloud_tasks', SD_RESULTS_INDEX),
     ],
 )
 def test_dispatch_module_declares_its_program_identity(module_name: str, expected: str) -> None:
@@ -507,6 +514,8 @@ def test_dispatch_module_declares_its_program_identity(module_name: str, expecte
         'sd_create_bundle',
         'sd_create_ck',
         'sd_consolidate_metadata',
+        'sd_results_index',
+        'sd_results_index_cloud_tasks',
     ],
 )
 def test_declared_program_identity_is_registered(module_name: str) -> None:

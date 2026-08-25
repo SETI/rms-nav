@@ -18,6 +18,11 @@ spindoctor.support
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.support.command_line
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.support.constants
    :members:
    :undoc-members:
@@ -74,6 +79,11 @@ spindoctor.support
    :show-inheritance:
 
 .. automodule:: spindoctor.support.nav_base
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: spindoctor.support.nav_record
    :members:
    :undoc-members:
    :show-inheritance:

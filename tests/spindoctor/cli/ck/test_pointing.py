@@ -10,7 +10,9 @@ from typing import Any
 import numpy as np
 import pytest
 
+from spindoctor.cli.ck import pointing
 from spindoctor.cli.ck.pointing import ImagePointing
+from spindoctor.support import types
 
 # A recognizable, deliberately non-symmetric rotation: a quarter turn about Z.
 _QUARTER_TURN = [0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
@@ -462,3 +464,15 @@ def test_from_metadata_refuses_a_matrix_that_is_not_a_sequence(cmatrix: Any) -> 
     """
     with pytest.raises(ValueError, match='cmatrix must be nine row-major floats'):
         ImagePointing.from_metadata(_metadata(cmatrix=cmatrix))
+
+
+def test_the_array_type_is_the_one_the_rest_of_the_package_names() -> None:
+    """One spelling of the array type, so narrowing it reaches every reader.
+
+    A second definition of the same alias is equal to the first and is not the
+    first, so a change to the shared one would leave this module holding the old
+    meaning while every type check still passed.  Read out of the module's own
+    namespace because the name is bound there for this module's own annotations
+    rather than offered to anyone else.
+    """
+    assert vars(pointing)['NDArrayFloatType'] is types.NDArrayFloatType

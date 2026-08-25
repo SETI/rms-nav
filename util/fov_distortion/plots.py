@@ -160,7 +160,7 @@ def plot_frame_decomposition(frame: FrameMeasurement, image: FloatArray, path: s
     axes[2].set_xlabel('normalized field radius')
     axes[2].set_ylabel('radial residual (px)')
     axes[2].set_title(f'{frame.image_name}: radial distortion\n{decomp.n_stars} stars', fontsize=10)
-    axes[2].legend(fontsize=8)
+    axes[2].legend(fontsize=8, loc='best')
     axes[2].grid(alpha=0.3)
 
     fig.tight_layout()
@@ -217,7 +217,7 @@ def plot_instrument_twist(summary: InstrumentSummary, path: str) -> None:
         f'{summary.consistency.n_frames} frames',
         fontsize=11,
     )
-    ax.legend(fontsize=9)
+    ax.legend(fontsize=9, loc='best')
     ax.grid(alpha=0.3)
     fig.tight_layout()
     fig.savefig(path, dpi=_DPI)
@@ -373,7 +373,7 @@ def plot_instrument_radial(summary: InstrumentSummary, path: str) -> None:
     axes[0].set_xlabel('normalized field radius')
     axes[0].set_ylabel('radial residual (px)')
     axes[0].set_title(f'{summary.label}: pooled radial distortion', fontsize=11)
-    axes[0].legend(fontsize=9)
+    axes[0].legend(fontsize=9, loc='best')
     axes[0].grid(alpha=0.3)
 
     # Binned RMS of the post-fit residual vs radius: the centroid-noise floor,

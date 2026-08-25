@@ -35,11 +35,11 @@ from tests.spindoctor.cli.sd_create_ck_helpers import (
 )
 
 from spindoctor.cli import sd_create_ck
-from spindoctor.cli.ck import inputs
 from spindoctor.cli.ck.assignment import Assignment
 from spindoctor.cli.ck.images import ImageEntry, OmissionReason
 from spindoctor.cli.ck.index import CkFile, KernelClass
 from spindoctor.cli.ck.pointing import ImagePointing
+from spindoctor.nav_records import METADATA_SUFFIX, NavRecord
 
 
 @pytest.fixture(scope='module', autouse=True)
@@ -75,11 +75,58 @@ def test_a_remote_output_directory_is_refused() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _unlistable_volume(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the one volume of the run tree refuse to be listed.
+
+    Parameters:
+        monkeypatch: Fixture the listing is wrapped through.
+    """
+    real_iterdir = FCPath.iterdir_metadata
+
+    def unlistable_vol(self: FCPath) -> Any:
+        if self.name == 'vol':
+            raise PermissionError(self.as_posix())
+        yield from real_iterdir(self)
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', unlistable_vol)
+
+
+def test_a_directory_that_cannot_be_listed_stops_the_run(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """A kernel set covering less than the tree is worse than one that stops.
+
+    The walk refuses the directory, and this program is a console entry point:
+    it owes its caller a status rather than a traceback, which is what the
+    ingest already does with the same refusal.
+    """
+    _unlistable_volume(monkeypatch)
+    run_driver(run_tree, monkeypatch, expected_exit=1)
+
+
+def test_the_directory_that_stopped_the_run_is_named(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """An operator has one thing to fix and the log has to say which."""
+    _unlistable_volume(monkeypatch)
+    run_driver(run_tree, monkeypatch, expected_exit=1)
+    assert 'could not be listed' in run_log(run_tree)
+
+
+def test_a_run_stopped_by_a_directory_writes_nothing(
+    run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
+) -> None:
+    """Nothing has been built at that point, so nothing claims to say what was."""
+    _unlistable_volume(monkeypatch)
+    run_driver(run_tree, monkeypatch, expected_exit=1)
+    assert list(run_tree['output'].glob('*.bc')) == []
+
+
 def test_an_unreadable_metadata_file_is_named_in_the_run_log(
     run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
 ) -> None:
     """It names no image, so the run log is the only place it can be reported."""
-    (run_tree['results'] / 'vol' / f'broken{inputs.METADATA_SUFFIX}').write_text('{not json')
+    (run_tree['results'] / 'vol' / f'broken{METADATA_SUFFIX}').write_text('{not json')
     run_driver(run_tree, monkeypatch, expected_exit=1)
     log = run_log(run_tree)
     assert 'broken_metadata.json' in log
@@ -90,7 +137,7 @@ def test_an_unreadable_metadata_file_makes_the_run_exit_non_zero(
     run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
 ) -> None:
     """A batch wrapper cannot otherwise tell a clean run from a skipped one."""
-    (run_tree['results'] / 'vol' / f'broken{inputs.METADATA_SUFFIX}').write_text('[1, 2]')
+    (run_tree['results'] / 'vol' / f'broken{METADATA_SUFFIX}').write_text('[1, 2]')
     run_driver(run_tree, monkeypatch, expected_exit=1)
 
 
@@ -98,7 +145,7 @@ def test_the_run_still_writes_what_it_could_read(
     run_tree: dict[str, Path], monkeypatch: pytest.MonkeyPatch, pool_restored: None
 ) -> None:
     """One unreadable file is reported, not a reason to abandon the others."""
-    (run_tree['results'] / 'vol' / f'broken{inputs.METADATA_SUFFIX}').write_text('{not json')
+    (run_tree['results'] / 'vol' / f'broken{METADATA_SUFFIX}').write_text('{not json')
     run_driver(run_tree, monkeypatch, expected_exit=1)
     assert (run_tree['output'] / 'orig_a_nav.bc').exists()
 
@@ -144,7 +191,7 @@ def test_a_run_whose_every_metadata_file_is_unreadable_exits_non_zero(
     }
     tree['kernels'].mkdir()
     tree['results'].mkdir()
-    (tree['results'] / f'broken{inputs.METADATA_SUFFIX}').write_text('{not json')
+    (tree['results'] / f'broken{METADATA_SUFFIX}').write_text('{not json')
     run_driver(tree, monkeypatch, expected_exit=1)
 
 
@@ -581,22 +628,22 @@ def test_a_build_omission_naming_an_already_omitted_image_is_refused() -> None:
         )
 
 
-def test_two_documents_naming_one_image_are_refused(tmp_path: Path) -> None:
+def test_two_records_naming_one_image_are_refused(tmp_path: Path) -> None:
     """One set of facts would silently stand in for the other's.
 
-    The documents are the ones an image that failed to load leaves, which
-    record a name and a status and no epoch, so no leapseconds kernel is
-    needed to read them.
+    The records are the ones an image that failed to load leaves, which record a
+    name and a status and no epoch, so no leapseconds kernel is needed to read
+    them.
     """
     metadata: dict[str, Any] = {'status': 'failed', 'observation': {'image_name': 'A_CALIB'}}
-    documents = [
-        inputs.Document(
+    records = [
+        NavRecord(
             path=FCPath(str(tmp_path / f'{stub}_metadata.json')), stub=stub, metadata=metadata
         )
         for stub in ('vol/first', 'vol/second')
     ]
-    with pytest.raises(ValueError, match='two documents name the image'):
-        sd_create_ck.image_facts(documents)
+    with pytest.raises(ValueError, match='two records name the image'):
+        sd_create_ck.image_report_facts(records)
 
 
 def test_an_image_with_no_pointing_has_no_segment_to_build() -> None:

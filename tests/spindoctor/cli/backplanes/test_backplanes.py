@@ -29,6 +29,7 @@ from tests.cmatrix_helpers import synthetic_frame_identity
 import spindoctor.support.cmatrix as cmatrix_module
 from spindoctor.cli.backplanes import backplanes as backplanes_mod
 from spindoctor.cli.backplanes.backplanes import generate_backplanes_image_files
+from spindoctor.cli.reproj.pointing_source import FilePointingSource
 from spindoctor.config import (
     DEFAULT_CONFIG,
     MAIN_LOGGER,
@@ -288,7 +289,7 @@ def _run(
     generate_backplanes_image_files(
         obs_class,
         _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
+        pointing_source=FilePointingSource(nav_root),
         backplane_results_root=bp_root,
         write_output_files=write_output_files,
     )
@@ -317,7 +318,7 @@ def _result_for(
     result = generate_backplanes_image_files(
         obs_class,
         _image_files(root, 'IMG1'),
-        nav_results_root=nav_root,
+        pointing_source=FilePointingSource(nav_root),
         backplane_results_root=bp_root,
         write_output_files=False,
     )
@@ -342,7 +343,7 @@ def test_driver_rejects_multi_image_batches(tmp_path: Path) -> None:
         generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1', 'IMG2'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
         )
 
@@ -371,7 +372,7 @@ def test_driver_invalid_metadata_json_raises(tmp_path: Path) -> None:
         generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
         )
 
@@ -409,16 +410,137 @@ def test_driver_skips_image_with_missing_status(
     assert calls['write'] == []
 
 
-def test_driver_requires_offset_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Successful metadata without an offset field is a hard error.
+@pytest.mark.parametrize(
+    'metadata',
+    [{'offset': [0.0, 0.0]}, {'status': None}, {'status': ''}, {'status': 42}],
+    ids=['absent', 'null', 'empty', 'number'],
+)
+def test_the_skip_names_the_outcome_every_consumer_reports_such_a_record_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any]
+) -> None:
+    """The stage reads the outcome through the one function every consumer uses.
+
+    A cloud task has no run log, so this value is the only account of the skip
+    that leaves the worker, and the index records a document naming no outcome
+    as this same word.  A stage reading the field directly would report
+    ``None`` through a document and ``unknown`` through the row it ingested
+    into, for the same image.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+        metadata: A record naming no outcome of its own.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, metadata)
+    assert result['nav_status'] == 'unknown'
+
+
+@pytest.mark.parametrize(
+    'metadata',
+    [
+        {'status': 'failed'},
+        {'status': 'failed', 'status_error': None},
+        {'status': 'failed', 'status_error': ''},
+        {'status': 'failed', 'status_error': 42},
+    ],
+    ids=['absent', 'null', 'empty', 'number'],
+)
+def test_the_skip_names_the_error_every_consumer_reports_such_a_record_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any]
+) -> None:
+    """And the error beside it, through that same shared function.
+
+    Every failed and conflicted navigation writes no ``status_error`` at all,
+    so the default is the common case; a stage defaulting on its own would
+    report ``None`` for a field present and holding null while the row said
+    ``unknown``.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+        metadata: An unsuccessful record naming no error.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, metadata)
+    assert result['nav_status_error'] == 'unknown'
+
+
+def test_the_skip_still_names_an_error_the_record_does_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control for the default above, which an empty reader would pass.
 
     Parameters:
         tmp_path: pytest-provided temporary directory.
         monkeypatch: pytest monkeypatch fixture.
     """
     _stub_pipeline(monkeypatch)
-    with pytest.raises(ValueError, match='"offset" field not found'):
-        _run(tmp_path, metadata={'status': 'success'})
+    result, _snapshot = _result_for(
+        tmp_path, {'status': 'error', 'status_error': 'missing_spice_data'}
+    )
+    assert result['nav_status_error'] == 'missing_spice_data'
+
+
+def test_the_skip_still_names_an_outcome_the_record_does_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the control for the outcome, likewise.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, {'status': 'conflicted'})
+    assert result['nav_status'] == 'conflicted'
+
+
+def test_driver_treats_a_missing_offset_field_as_no_pointing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Successful metadata without an offset field degrades; it does not refuse.
+
+    An index stores an absent offset and a null one alike, so a stage that
+    refused one and processed the other would build a product from a document
+    and refuse the same image read as a row.  Both are recorded no-answers and
+    both leave the pointing uncorrected.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, {'status': 'success'})
+    assert result['uncorrected_pointing'] is True
+
+
+def test_driver_names_the_missing_offset_field_as_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And says which of the recorded no-answers it was.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    _stub_pipeline(monkeypatch)
+    result, _snapshot = _result_for(tmp_path, {'status': 'success'})
+    assert result['pointing_reason'] == 'missing_offset_key'
+
+
+def test_driver_still_produces_the_backplanes_for_that_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The product is built, which is what the index-backed path always did.
+
+    Parameters:
+        tmp_path: pytest-provided temporary directory.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    calls = _stub_pipeline(monkeypatch)
+    _result_for(tmp_path, {'status': 'success'})
+    assert len(calls['merge']) == 1
 
 
 def test_driver_leaves_a_none_offset_uncorrected(
@@ -672,7 +794,7 @@ def _run_with_null_offset(
         result = generate_backplanes_image_files(
             obs_class,
             _image_files(root, 'IMG1'),
-            nav_results_root=nav_root,
+            pointing_source=FilePointingSource(nav_root),
             backplane_results_root=bp_root,
             write_output_files=False,
         )

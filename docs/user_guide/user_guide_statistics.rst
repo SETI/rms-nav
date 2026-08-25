@@ -1,321 +1,146 @@
 Navigation Statistics
 =====================
 
-The statistics system turns the per-image metadata JSON files written by the
-navigation pipeline into a local SQLite database and a deterministic report
-(Markdown text plus PNG charts). It is the standing quality check on a
-production run: success and failure rates, which techniques and models carry
-the load, offset distributions, how well the techniques agree with one
-another, and whether the confidence tiers behave as designed.
-
-Two commands cooperate over the database and are cron-friendly (each is a
-single non-interactive invocation):
+``sd_stats_report`` turns the results of a navigation run into a deterministic
+report: Markdown text plus PNG charts. It is the standing quality check on a
+production run -- success and failure rates, which techniques and models carry
+the load, offset distributions, how well the techniques agree with one another,
+and whether the confidence tiers behave as designed -- and it is cron-friendly,
+being a single non-interactive invocation:
 
 .. code-block:: bash
 
-    # Ingest one or more navigation-results roots into ./nav_stats.sqlite3
-    sd_stats_ingest /data/nav-offset-results --db nav_stats.sqlite3
+    sd_stats_report --nav-results-root /data/nav-offset-results \
+        --output-dir stats_report
+    sd_stats_report \
+        --results-index-db sqlite:////data/nav-offset-results/index.sqlite3 \
+        --instrument coiss --start-date 2005-03-01 --end-date 2005-03-01 \
+        --output-dir day_report
 
-    # Generate report.md + charts for any slice of the database
-    sd_stats_report --db nav_stats.sqlite3 --output-dir stats_report
-    sd_stats_report --db nav_stats.sqlite3 --instrument coiss \
-        --start-date 2005-03-01 --end-date 2005-03-01 --output-dir day_report
+**The report reads a navigation results tree or a results index, and over the
+records both storages can read it is the same report either way.** Every number
+in it comes from one pass over the per-image records, and the two storages hand
+that pass the same records, so a report over a tree and a report from an index
+built from that tree carry the same text and the same charts.
 
-Ingestion
----------
+One count is the exception, and it is the count of files that yielded no record:
+a file the storage could not deliver at all is counted from a tree and not from
+an index, because the ingest deliberately records no refusal for a retrieval
+that failed once. The **Files that yielded no record** entry below says what
+that means for the number printed.
 
-``sd_stats_ingest ROOT [ROOT ...] [--db PATH]`` scans each root recursively
-for ``*_metadata.json`` files (the documents
-:func:`~spindoctor.navigate_image_files.navigate_image_files` writes under
-``nav_results_root``) and loads them into the database. Roots may be
-local directories or any URL the project's ``filecache`` layer accepts, so
-cloud-hosted results ingest the same way as local ones.
+An index built by an ingest run with ``--no-prune`` is the other way the two can
+differ, and it is a choice somebody made rather than a property of the storages:
+that ingest leaves in place the rows of documents that have left the tree, so
+the report from it counts images the tree no longer holds and the report over
+the tree does not. Running ``sd_results_index ingest`` again without the flag
+removes them. :doc:`user_guide_results_index` says what the flag gives up and what it
+saves.
 
-Ingestion is idempotent: the database holds one row per image (keyed by image
-name), and re-ingesting the same or an updated metadata file replaces that
-image's row and its child rows rather than duplicating them. Malformed files
-are logged and skipped; the exit status is nonzero only when nothing at all
-was ingested.
+An index is optional here exactly as it is everywhere else, and
+``--results-index-db`` is resolved the same way: from the command line, then the
+``environment.results_index_db`` configuration variable, then the
+``NAV_RESULTS_INDEX_DB`` environment variable, with the literal ``none`` at any
+level meaning no index. The index is a database built from the navigation
+results tree by a separate pass, ``sd_results_index ingest``, and
+:doc:`user_guide_results_index` is where it is documented: how it is named and
+resolved, how to build and rebuild one, the tables it holds, and how to query it
+directly for the questions this report does not answer.
 
-Every ingestible document must carry ``observation.image_name`` and
-``observation.instrument`` (the pipeline records both in every metadata
-document it writes). A document missing either field is logged, skipped, and
-counted as an error, exactly like a file that fails to parse.
+.. code-block:: bash
 
-The database is disposable, and there is no schema migration: opening a
-database whose ``images`` table does not match the current column set raises
-an error naming the mismatched columns. The remedy is always the same --
-delete the database file and re-run ``sd_stats_ingest`` (the source of truth
-is the metadata documents, so nothing is lost).
+    sd_results_index ingest --nav-results-root /data/nav-offset-results \
+        --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
+    sd_stats_report \
+        --results-index-db sqlite:////data/nav-offset-results/index.sqlite3
 
-Database schema
----------------
+With no index the navigation results tree is read instead. The roots to read
+come from ``--nav-results-root`` (repeatable), then the ``nav_results_root``
+configuration variable, then ``NAV_RESULTS_ROOT``, as they do for the ingest.
+On a machine where an index is configured, ``--results-index-db none`` is how a
+single run is made to read the tree anyway:
 
-The database is plain SQLite; opening it directly (``sqlite3`` command-line
-shell, Python's ``sqlite3`` module, pandas, a GUI browser) is a supported way
-to answer questions the standard report does not. Three tables hold the data;
-``techniques`` and ``feature_sources`` reference ``images`` by
-``image_name`` with ``ON DELETE CASCADE``, and re-ingesting an image replaces
-its row and children.
+.. code-block:: bash
 
-``images`` — one row per image, keyed by ``image_name``:
+    sd_stats_report --nav-results-root /data/nav-offset-results \
+        --results-index-db none
 
-.. list-table::
-   :header-rows: 1
-   :widths: 22 10 68
+**Reading a tree costs one full read of every document under every root, on
+every report run.** That is exactly the cost an index exists to remove -- a
+Cassini-scale root is several hundred thousand documents, and on a cloud root
+each one is a paid round trip. For a local tree and a single report that is
+the right trade; for a cloud root, or for a report you will run more than
+once, build an index with ``sd_results_index ingest`` first and name it.
 
-   * - Column
-     - Type
-     - Meaning
-   * - ``image_name``
-     - TEXT
-     - Image filename (primary key), e.g. ``N1454725799_1_CALIB.IMG``.
-   * - ``instrument``
-     - TEXT
-     - ``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri`` / ``sim``, from the
-       metadata document's ``observation.instrument`` field (required; a
-       document without it is skipped as an ingest error).
-   * - ``camera``
-     - TEXT
-     - The camera that took the image (``NAC`` / ``WAC`` / ``SSI`` /
-       ``LORRI``), from the metadata document's ``observation.camera``
-       field. Offset statistics group by this: pointing error belongs to
-       the camera, not the spacecraft. NULL when the document carries no
-       camera (results navigated before the field existed); it is never
-       inferred from the image name.
-   * - ``image_path``
-     - TEXT
-     - Absolute path of the source image at navigate time.
-   * - ``image_et``
-     - REAL
-     - Observation midtime, TDB seconds past J2000. Taken from the
-       navigation provenance, or — for an image that never loaded, which
-       has no provenance — from the ``observation.image_et`` the navigator
-       read out of the PDS3 index. An image whose navigation died for want
-       of a SPICE kernel is therefore still placed in time.
-   * - ``image_date``
-     - TEXT
-     - UTC calendar date ``YYYY-MM-DD`` derived from ``image_et``; drives
-       the ``--start-date`` / ``--end-date`` report filters.
-   * - ``status``
-     - TEXT
-     - Navigation outcome: ``success``, ``failed``, ``conflicted``, or
-       ``error`` (the last from image-load failures); ``unknown`` when the
-       metadata document carries no status at all.
-   * - ``status_reason``
-     - TEXT
-     - Outcome reason: successes hold ``ok`` or ``rank_1_only``; failures
-       hold the failure reason (e.g. ``no_features_extracted``,
-       ``missing_spice_data``). NULL only when the metadata carries
-       neither ``status_reason`` nor ``status_error``.
-   * - ``offset_dv``, ``offset_du``
-     - REAL
-     - Fused pointing offset in pixels (V then U); NULL when navigation
-       found no offset.
-   * - ``sigma_dv``, ``sigma_du``
-     - REAL
-     - Per-axis 1-sigma uncertainty of the fused offset, pixels.
-   * - ``confidence``
-     - REAL
-     - Fused confidence in ``[0, 1]``.
-   * - ``confidence_rank``
-     - TEXT
-     - Confidence tier label assigned by the ensemble.
-   * - ``n_techniques``
-     - INTEGER
-     - Number of per-technique results recorded for the image.
-   * - ``excluded_from_consensus``
-     - TEXT
-     - JSON list of technique names the ensemble excluded as outliers
-       (``[]`` when none).
-   * - ``image_class``
-     - TEXT
-     - Image-classifier verdict (e.g. ``clean``).
-   * - ``noise_sigma``
-     - REAL
-     - Image-classifier noise estimate.
-   * - ``image_shape_v``, ``image_shape_u``
-     - INTEGER
-     - Pixel dimensions of the image data (V then U), from the metadata
-       document's ``observation.image_shape`` field; NULL when the image
-       never loaded (e.g. a read error).
-   * - ``run_start``, ``run_end``
-     - TEXT
-     - UTC ISO8601 run start and end of the navigation of this image, from
-       the metadata document's ``timing`` section; start is captured before
-       the image load and end after navigation (or at error time).
-   * - ``elapsed_s``
-     - REAL
-     - Wall-clock seconds between ``run_start`` and ``run_end``.
-   * - ``config_hash``
-     - TEXT
-     - sha256 of the fully-resolved configuration used for the run.
-   * - ``git_sha``
-     - TEXT
-     - Short git SHA of the navigating code (``-dirty`` suffix when the
-       tree had uncommitted changes).
-   * - ``pipeline_run``
-     - TEXT
-     - UTC ISO8601 timestamp of the navigation run.
-   * - ``source_file``
-     - TEXT
-     - Path or URL of the ingested metadata document.
+A root, or a directory under one, that cannot be listed fails the run, and no
+report is written. A report that quietly covered less than the tree could not
+be told apart from one that covered all of it, so the pass stops instead.
 
-``techniques`` — one row per technique result per image:
+``sd_stats_report [--results-index-db URL] [--nav-results-root ROOT] [--root ROOT] [--output-dir DIR] [--instrument NAME] [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--min-image NAME] [--max-image NAME] [--top-n N] [--filelists] [--suspect-fraction F] [--csv]``
+writes ``report.md`` and its charts into the output directory. All filters
+combine and apply to every section; dates are inclusive UTC image dates, so a
+single day's run is ``--start-date D --end-date D``. An image records its epoch
+as the midtime of the observation that was loaded for it, so an image whose load
+failed has no date and either bound passes it over. ``--min-image`` /
+``--max-image`` bound the numeric portion of the image name (the first digit run
+in the basename, so ``--min-image N1454725799`` and ``--min-image 1454725799``
+are equivalent); both bounds are inclusive and either may be given alone. The
+same inputs always produce the same numbers and the same charts.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 22 10 68
+``--root`` restricts an index-backed report to one ingested navigation-results
+root and may be given more than once; with none given the report covers every
+root the index holds a completed ingest of. A root whose newest ingest run did
+not finish is passed over rather than counted, because no absence under it can
+be read as an image nothing navigated; naming such a root outright is an error
+rather than an empty report. A report legitimately spans roots where a
+per-image lookup never does.
 
-   * - Column
-     - Type
-     - Meaning
-   * - ``image_name``
-     - TEXT
-     - Foreign key into ``images``.
-   * - ``technique_name``
-     - TEXT
-     - Technique class name (e.g. ``BodyLimbNav``, ``StarUniqueMatchNav``).
-   * - ``offset_dv``, ``offset_du``
-     - REAL
-     - The technique's own offset estimate, pixels.
-   * - ``sigma_dv``, ``sigma_du``
-     - REAL
-     - Per-axis 1-sigma from the technique's covariance.
-   * - ``confidence``
-     - REAL
-     - The technique's calibrated confidence in ``[0, 1]``.
-   * - ``spurious``
-     - INTEGER
-     - 1 when the technique flagged its own result as spurious.
-   * - ``at_edge``
-     - INTEGER
-     - 1 when the fit landed at the edge of its search space.
-   * - ``source_names``
-     - TEXT
-     - JSON list of body / ring / catalog names the technique used.
-   * - ``diagnostics``
-     - TEXT
-     - The technique's full diagnostics dataclass as a JSON object.
+**A report that passed a root over says so.** Its header names the roots it
+covered as the narrowing they are, and a ``Roots dropped`` line under them names
+the ones it left out; nothing under a dropped root is reported, neither its
+images nor its files that yielded no record, because a half-covered root is
+worse than an uncovered one. Ingest such a root and the next report covers it.
 
-``feature_sources`` — per image, feature counts grouped by source:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 22 10 68
-
-   * - Column
-     - Type
-     - Meaning
-   * - ``image_name``
-     - TEXT
-     - Foreign key into ``images``.
-   * - ``feature_type``
-     - TEXT
-     - Feature type (e.g. ``BODY_DISC``, ``STAR``, ``RING_EDGE``).
-   * - ``source_model``
-     - TEXT
-     - NavModel family that produced the features (``body``, ``rings``,
-       ``stars``, ``titan``).
-   * - ``source_name``
-     - TEXT
-     - Body, ring, or catalog name (e.g. ``IAPETUS``, ``UCAC4``).
-   * - ``n_features``
-     - INTEGER
-     - Features of this type/source extracted for the image.
-   * - ``n_gated``
-     - INTEGER
-     - How many of them the reliability gate removed.
-
-Indexes exist on ``images(image_date)``, ``images(instrument)``, and the
-``image_name`` foreign keys.
-
-Querying the database directly
-------------------------------
-
-Success rate per instrument, from the ``sqlite3`` shell:
-
-.. code-block:: sql
-
-    SELECT instrument,
-           COUNT(*) AS images,
-           AVG(status = 'success') AS success_rate
-    FROM images
-    GROUP BY instrument;
-
-The ten largest fused offsets, with their confidence tier:
-
-.. code-block:: sql
-
-    SELECT image_name, offset_dv, offset_du, confidence_rank
-    FROM images
-    WHERE status = 'success'
-    ORDER BY MAX(ABS(offset_dv), ABS(offset_du)) DESC
-    LIMIT 10;
-
-JSON columns unpack with SQLite's built-in JSON functions -- for example,
-counting how often each technique was excluded from the consensus:
-
-.. code-block:: sql
-
-    SELECT excluded.value AS technique, COUNT(*) AS images
-    FROM images, json_each(images.excluded_from_consensus) AS excluded
-    GROUP BY excluded.value
-    ORDER BY COUNT(*) DESC;
-
-The same database loads straight into pandas:
-
-.. code-block:: python
-
-    import pandas as pd
-    import sqlite3
-
-    conn = sqlite3.connect('nav_stats.sqlite3')
-    images = pd.read_sql_query('SELECT * FROM images', conn)
-    per_technique = pd.read_sql_query(
-        'SELECT t.*, i.instrument, i.image_date '
-        'FROM techniques t JOIN images i USING (image_name)',
-        conn,
-    )
-    # Median per-technique confidence by instrument:
-    print(per_technique.groupby(['instrument', 'technique_name'])['confidence'].median())
-
-Reporting
----------
-
-``sd_stats_report [--db PATH] [--output-dir DIR] [--instrument NAME]
-[--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD] [--min-image NAME]
-[--max-image NAME] [--top-n N] [--filelists] [--suspect-fraction F]
-[--csv]`` writes ``report.md`` and its charts into the output directory.
-All filters combine and apply to every section; dates are inclusive UTC
-image dates, so a single day's run is ``--start-date D --end-date D``.
-``--min-image`` / ``--max-image`` bound the numeric portion of the image
-name (the first digit run in the basename, so ``--min-image N1454725799``
-and ``--min-image 1454725799`` are equivalent); both bounds are inclusive
-and either may be given alone. The same inputs always produce the same
-numbers and the same charts.
+Because ``--root`` selects among the roots one index holds, it is a different
+thing from ``--nav-results-root``, and it is refused when no index is named
+rather than read as a second spelling of it.
 
 Three options control drill-down output:
 
 - ``--top-n N`` makes each categorical section (failure reasons, failure
   taxonomy, ensemble exclusions, suspect offsets) list up to N example
   image names per category and instrument, caps the suspect-offset and
-  worst-BOTSIM-pair tables at N rows, and lists the N slowest images.
+  worst-BOTSIM-pair tables at N rows, and lists the N slowest images. The
+  default is 0, which turns the example lists, the worst-pair table and the
+  slowest-image list off entirely -- but leaves the suspect-offset table
+  uncapped, so it prints one row for every suspect image the selection holds.
 - ``--filelists`` writes one plain-text file per category and instrument
   (one image name per line, the full list rather than the top N) into the
   ``filelists/`` subdirectory of the output directory, ready to feed back
   into re-runs and triage scripts.
-- ``--csv`` writes ``images.csv`` next to ``report.md``: one row per image
-  with every ``images`` column plus per-image technique and feature-source
-  counts, for pandas or spreadsheet analysis.
+- ``--csv`` writes ``images.csv`` next to ``report.md``: one row per image,
+  ``results_path_stub`` first and then every remaining per-image field in
+  schema order -- ``root_url`` through ``mtime_ns`` and ``size_bytes`` -- plus
+  ``n_technique_rows``, ``n_feature_sources``, ``n_features`` and ``n_gated``
+  aggregates, for pandas or spreadsheet analysis. Rows end with a single
+  newline on every platform, and a JSON column that holds nothing is an empty
+  cell. Each row is written as it is read, so the rows are **not sorted**:
+  their order is whatever the storage yields them in -- the directory order of
+  a tree, the server's own order for an index -- and the two do not agree.
+  ``results_path_stub`` is the first column so that putting them in order is
+  one shell pipeline, with the header line held out of the sort:
 
-The first two write *image names* rather than file names — ``N1454725799``
-rather than ``N1454725799_1_CALIB.IMG`` — because that is the token the
+  .. code-block:: bash
+
+      { head -n 1 images.csv; tail -n +2 images.csv | sort -t, -k1,1; } > sorted-images.csv
+
+The first two write *image names* rather than file names -- ``N1454725799``
+rather than ``N1454725799_1_CALIB.IMG`` -- because that is the token the
 datasets' ``--image-filelist`` option selects on. The filelists are
 directly consumable by it: one name per line, with a leading ``#`` comment
 naming the category.
 
-Every image count in the report carries its percentage — ``5 (3.2%)``.
+Every image count in the report carries its percentage -- ``5 (3.2%)``.
 Counts are broken down by instrument: a table of counts gets one column per
 instrument plus a total column, where an instrument column's percentage is
 of that instrument's images and the total column's is of all selected
@@ -327,34 +152,55 @@ instrument, with a fixed color per instrument across every chart.
 
 The report contains:
 
-- **Images selected** — per instrument: how many images, the first and last
+- **Images selected** -- per instrument: how many images, the first and last
   image, and the first and last available date. Image numbers only compare
   within one instrument, so the bounds are never pooled across instruments.
   The date bounds are found independently of the image ordering, so a
   single image with no recorded epoch at either end of the number range
   cannot hide the instrument's real time span.
+- **Files that yielded no record** -- how many files named like a navigation
+  document no record could be read out of: one that could not be retrieved,
+  one that is not JSON, or JSON that is not a navigation document of the
+  current schema. The line is printed whether the count is zero or not,
+  because a line that vanished at zero could not be told apart from a report
+  that never looked for such files at all. **The count covers the whole of
+  every selected root and is not narrowed by ``--instrument``,
+  ``--start-date`` or ``--min-image``**: a file no record could be read out of
+  carries no instrument, no date and no image number, so it cannot obey a
+  filter that compares one. For the same reason it is kept out of the
+  per-instrument count tables, whose percentages are of images.
+
+  One of those kinds is counted from a tree and not from an index: a file the
+  storage could not deliver at all. The ingest deliberately records no refusal
+  for it, because a retrieval that failed once is worth trying again on the next
+  pass rather than being remembered as a file that will not read, so a
+  tree-backed count of unreadable files can exceed an index-backed one over the
+  same root by the number of files that would not come back. Every other kind --
+  a file that is not JSON, JSON that is not an object, and JSON that is not a
+  navigation document of the current schema -- is counted alike by both, under
+  the same reason.
 - **Success / failure counts** with a breakdown of failure reasons. The
   reason table carries each reason's status, so errors (SPICE-related or
   not) are visible alongside outright navigation failures.
-- **Failure taxonomy by image content** — failed images classified from
+- **Failure taxonomy by image content** -- failed images classified from
   their recorded feature inventory (``stars-only``, ``single-body``,
   ``multi-body``, ``rings-only``, ``body+rings``, ``no-features``), with a
   per-category failure-reason breakdown and a per-body table of how often
   each named body appears in failed versus successful images (a body with
   a high failure share points at a modeling problem for that body).
-- **Technique usage** — the images each technique ran on, plus a per-
+- **Technique usage** -- the images each technique ran on, plus a per-
   technique, per-instrument detail table of non-spurious runs and mean
   confidence.
-- **Model and source usage** — which bodies, rings, and star catalogs
+- **Model and source usage** -- which bodies, rings, and star catalogs
   appeared, in how many images, and how many of their features survived the
   reliability gate.
-- **Offset statistics** — mean, median, standard deviation, minimum, and
+- **Offset statistics** -- mean, median, standard deviation, minimum, and
   maximum of the fused V and U offsets over successful images, grouped by
   camera, with one histogram per camera, plus the same statistics grouped
   by (instrument, camera, image size). Distributions are never pooled
   across cameras: one Cassini WAC pixel is ten NAC pixels, so a pooled
   distribution would describe neither camera.
-- **Suspect offsets** — successful images whose fused offset reaches at
+- **Suspect offsets** -- successful images whose fused offset reaches at
   least ``--suspect-fraction`` (default 0.9) of the instrument's per-axis
   maximum expected pointing offset (the configured ``extfov_margin_vu``
   search margin; for Cassini ISS the NAC/WAC margin chosen from the image
@@ -362,7 +208,7 @@ The report contains:
   correlation artifact, so these images deserve operator review. When a
   limit cannot be resolved for an image (unknown instrument, no recorded
   image shape), the report says so rather than silently skipping it.
-- **BOTSIM pair consistency (Cassini ISS)** — BOTSIM observations shutter
+- **BOTSIM pair consistency (Cassini ISS)** -- BOTSIM observations shutter
   the NAC and WAC simultaneously and the image names share one
   spacecraft-clock count. One WAC pixel is ten NAC pixels, so a consistent
   pair satisfies NAC offset = 10 x WAC offset per axis; the section reports
@@ -370,10 +216,10 @@ The report contains:
   residuals over pairs where both frames navigated successfully, and (with
   ``--top-n``) the worst pairs. This is an end-to-end accuracy check that
   needs no ground truth.
-- **Cross-technique agreement** — for every technique pair, the median and
+- **Cross-technique agreement** -- for every technique pair, the median and
   95th-percentile Euclidean distance between their offsets on images where
   both produced non-spurious results.
-- **Confidence calibration** — per confidence tier, the distribution of each
+- **Confidence calibration** -- per confidence tier, the distribution of each
   image's maximum cross-technique disagreement. The tiers always read
   ``high`` / ``medium`` / ``low`` / ``failed`` / ``conflicted``, so a tier
   with no images reads as an explicit zero rather than a missing row.
@@ -383,10 +229,10 @@ The report contains:
   :doc:`/dev_guide/dev_guide_techniques_confidence`): a healthy pipeline shows
   high-tier images agreeing tightly and disagreement growing toward the low
   tier.
-- **Ensemble outlier exclusions** — how often the ensemble excluded a
+- **Ensemble outlier exclusions** -- how often the ensemble excluded a
   technique from the consensus, and which techniques.
-- **Run-time statistics** — per instrument (and pooled, when more than one
+- **Run-time statistics** -- per instrument (and pooled, when more than one
   instrument is selected): minimum, maximum, mean, median, standard
   deviation, and total of the per-image wall-clock run times, a run-time
   histogram, and (with ``--top-n``) the slowest images. The section is
-  omitted when no ingested document carries timing data.
+  omitted when no selected image carries timing data.

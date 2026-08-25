@@ -1,12 +1,21 @@
 """Tests for :mod:`spindoctor.config.config_helper`.
 
-Covers the documented resolution order of the three results-root getters
-(explicit argument, then ``config.environment``, then environment variable)
-and the user-config loading behavior of ``load_default_and_user_config``
-(bundled defaults always; explicit ``--config-file`` paths when given;
-otherwise ``nav_default_config.yaml`` from the current directory).
+Covers the documented resolution order of the getters (explicit argument, then
+``config.environment``, then environment variable) and the user-config loading
+behavior of ``load_default_and_user_config`` (bundled defaults always; explicit
+``--config-file`` paths when given; otherwise ``nav_default_config.yaml`` from
+the current directory).
 
-The tests are hermetic: every test clears the three ``NAV_*_RESULTS_ROOT``
+The results-root getters and the results-index getter share that order and part
+ways at the end of it: an unresolved root is an error, while an unresolved index
+URL is an answer -- no index was resolved -- and each caller decides for itself
+whether it can proceed without one. ``sd_results_index`` writes an index and
+refuses without one; every other consumer reads the results tree instead. A
+value that is empty, or nothing but spaces, is the exception to that answer: it
+is neither a URL nor the ``none`` that names no index, and is refused at
+whichever level carries it.
+
+The tests are hermetic: every test clears the results-root and results-index
 environment variables via ``monkeypatch``, seeds ``Config`` instances
 directly (never the ``DEFAULT_CONFIG`` singleton), and changes into
 ``tmp_path`` before exercising the relative ``nav_default_config.yaml``
@@ -16,6 +25,7 @@ lookup so the repository's real user-config file is never picked up.
 from __future__ import annotations
 
 import argparse
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -23,9 +33,11 @@ import pytest
 
 from spindoctor.config import Config
 from spindoctor.config.config_helper import (
+    RESULTS_INDEX_DB_NONE,
     get_backplane_results_root,
     get_nav_results_root,
     get_pds4_bundle_results_root,
+    get_results_index_db_url,
     load_default_and_user_config,
 )
 
@@ -36,7 +48,12 @@ ALL_ENV_VARS = (
     'NAV_BACKPLANE_RESULTS_ROOT',
     'NAV_BUNDLE_RESULTS_ROOT',
     'BUNDLE_RESULTS_ROOT',
+    'NAV_RESULTS_INDEX_DB',
 )
+
+SQLITE_URL = 'sqlite:////data/nav-results/index.sqlite3'
+
+POSTGRES_URL = 'postgresql+psycopg://user@host/spindoctor'
 
 # (getter, argparse attribute, environment-section key, env var, CLI flag)
 GETTER_CASES = [
@@ -69,7 +86,7 @@ GETTER_CASES = [
 
 @pytest.fixture(autouse=True)
 def _clear_root_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Remove every results-root environment variable before each test.
+    """Remove every results-root and results-index environment variable.
 
     Parameters:
         monkeypatch: Pytest fixture used to delete the environment variables
@@ -345,9 +362,6 @@ def test_bundle_getter_env_var_is_nav_prefixed(monkeypatch: pytest.MonkeyPatch) 
 
     The fallback environment variable carries the same ``NAV_`` prefix as the
     sibling getters; a value exported under the un-prefixed name is ignored.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
     """
 
     monkeypatch.setenv('NAV_BUNDLE_RESULTS_ROOT', '/from/nav/env')
@@ -357,16 +371,257 @@ def test_bundle_getter_env_var_is_nav_prefixed(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_bundle_getter_ignores_unprefixed_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A value exported under the un-prefixed name does not resolve the root.
-
-    Parameters:
-        monkeypatch: Pytest fixture for environment isolation.
-    """
+    """A value exported under the un-prefixed name does not resolve the root."""
 
     monkeypatch.setenv('BUNDLE_RESULTS_ROOT', '/from/documented/env')
     config = _config_with_environment(None)
     with pytest.raises(ValueError, match='NAV_BUNDLE_RESULTS_ROOT'):
         get_pds4_bundle_results_root(argparse.Namespace(), config)
+
+
+# ---------------------------------------------------------------------------
+# get_results_index_db_url
+# ---------------------------------------------------------------------------
+
+
+def test_results_index_db_argument_wins_over_config_and_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The parsed-argument value takes precedence over config and env var."""
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_index_db': 'sqlite:///from-config.sqlite3'})
+    arguments = argparse.Namespace(results_index_db=SQLITE_URL)
+    assert get_results_index_db_url(arguments, config) == SQLITE_URL
+
+
+def test_results_index_db_config_wins_over_env_when_argument_is_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the argument None, ``config.environment`` beats the env var."""
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_index_db': SQLITE_URL})
+    assert get_results_index_db_url(argparse.Namespace(results_index_db=None), config) == SQLITE_URL
+
+
+def test_results_index_db_missing_argument_attribute_uses_config() -> None:
+    """A namespace without the attribute at all falls through to the config.
+
+    A program that has not yet grown the flag still honors the configuration key.
+    """
+
+    config = _config_with_environment({'results_index_db': SQLITE_URL})
+    assert get_results_index_db_url(argparse.Namespace(), config) == SQLITE_URL
+
+
+def test_results_index_db_env_var_used_when_argument_and_config_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The env var is the last place looked before answering "no index"."""
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', POSTGRES_URL)
+    config = _config_with_environment(None)
+    assert get_results_index_db_url(argparse.Namespace(), config) == POSTGRES_URL
+
+
+def test_results_index_db_config_key_none_falls_through_to_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config key explicitly set to null is treated as unset, not as opted out."""
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_index_db': None})
+    assert get_results_index_db_url(argparse.Namespace(), config) == POSTGRES_URL
+
+
+def test_results_index_db_unset_everywhere_is_not_an_error() -> None:
+    """Absence is an answer here: no index was resolved.
+
+    This is the one way this getter differs from the results-root getters, which
+    raise when nothing is set. What a caller does with the answer is the
+    caller's: the statistics programs refuse, and the pipeline programs read
+    files.
+    """
+
+    config = _config_with_environment(None)
+    assert get_results_index_db_url(argparse.Namespace(results_index_db=None), config) is None
+
+
+def test_results_index_db_sentinel_on_the_command_line_overrides_the_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the sentinel an exported variable would make file mode impossible."""
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', POSTGRES_URL)
+    config = _config_with_environment(None)
+    arguments = argparse.Namespace(results_index_db=RESULTS_INDEX_DB_NONE)
+    assert get_results_index_db_url(arguments, config) is None
+
+
+def test_results_index_db_sentinel_on_the_command_line_overrides_the_config_key() -> None:
+    """The sentinel outranks a configured URL for the same reason."""
+
+    config = _config_with_environment({'results_index_db': SQLITE_URL})
+    arguments = argparse.Namespace(results_index_db=RESULTS_INDEX_DB_NONE)
+    assert get_results_index_db_url(arguments, config) is None
+
+
+def test_results_index_db_sentinel_in_the_config_opts_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sentinel is honored wherever the value came from, not only on argv."""
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_index_db': RESULTS_INDEX_DB_NONE})
+    assert get_results_index_db_url(argparse.Namespace(), config) is None
+
+
+def test_results_index_db_sentinel_in_the_env_var_opts_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exporting the sentinel is how a machine turns the index off by default."""
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', RESULTS_INDEX_DB_NONE)
+    config = _config_with_environment(None)
+    assert get_results_index_db_url(argparse.Namespace(), config) is None
+
+
+def test_results_index_db_sentinel_is_the_exact_literal() -> None:
+    """A URL that merely contains the word is a URL, not an opt-out."""
+
+    config = _config_with_environment(None)
+    arguments = argparse.Namespace(results_index_db='sqlite:///none.sqlite3')
+    assert get_results_index_db_url(arguments, config) == 'sqlite:///none.sqlite3'
+
+
+@pytest.mark.parametrize('empty', ['', '   '])
+def test_results_index_db_set_to_nothing_is_refused(empty: str) -> None:
+    """An empty value is never a value anyone meant to write.
+
+    The sentinel is how a level says "no index" on purpose, so an empty one is a
+    typo, a script that computed nothing, or a variable half unset.
+
+    Parameters:
+        empty: A value carrying no URL.
+    """
+
+    config = _config_with_environment(None)
+    with pytest.raises(ValueError, match='empty value'):
+        get_results_index_db_url(argparse.Namespace(results_index_db=empty), config)
+
+
+@pytest.mark.parametrize('empty', ['', '   '])
+def test_results_index_db_set_to_nothing_does_not_fall_through_to_the_next_level(
+    empty: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The level that set it said something, so a lower level does not answer for it.
+
+    An operator who writes an empty option is not asking for whatever the
+    machine exports, and the refusal names the option rather than the variable.
+
+    Parameters:
+        empty: A value carrying no URL.
+        monkeypatch: Fixture the exported variable is set through.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', POSTGRES_URL)
+    config = _config_with_environment(None)
+    with pytest.raises(ValueError, match='--results-index-db'):
+        get_results_index_db_url(argparse.Namespace(results_index_db=empty), config)
+
+
+def test_results_index_db_set_to_nothing_names_the_environment_variable_that_set_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refusal that does not say which level carries the value is a hunt.
+
+    Parameters:
+        monkeypatch: Fixture the exported variable is set through.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', '')
+    config = _config_with_environment(None)
+    with pytest.raises(ValueError, match='NAV_RESULTS_INDEX_DB'):
+        get_results_index_db_url(argparse.Namespace(), config)
+
+
+def test_results_index_db_set_to_nothing_names_the_configuration_variable_that_set_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The middle level is named the same way, since one unset does not fix it.
+
+    A URL is exported below it so that a resolver falling through to the
+    environment would answer with that URL instead of refusing, which is the
+    regression this would otherwise pass over.
+
+    Parameters:
+        monkeypatch: Fixture the exported variable is set through.
+    """
+
+    monkeypatch.setenv('NAV_RESULTS_INDEX_DB', POSTGRES_URL)
+    config = _config_with_environment({'results_index_db': ''})
+    with pytest.raises(ValueError, match=re.escape('environment.results_index_db')):
+        get_results_index_db_url(argparse.Namespace(), config)
+
+
+def test_results_index_db_set_to_nothing_says_how_to_ask_for_no_index() -> None:
+    """The sentinel is what an operator writes to mean this on purpose."""
+
+    config = _config_with_environment({'results_index_db': ''})
+    with pytest.raises(ValueError, match=RESULTS_INDEX_DB_NONE):
+        get_results_index_db_url(argparse.Namespace(), config)
+
+
+def test_results_index_db_set_to_nothing_is_reported_by_the_caller_and_nowhere_else(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A refusal that also logged itself would print twice, once out of order.
+
+    Parameters:
+        capsys: Fixture the main log would be read back from.
+    """
+
+    config = _config_with_environment({'results_index_db': ''})
+    with pytest.raises(ValueError, match='empty value'):
+        get_results_index_db_url(argparse.Namespace(), config)
+    assert capsys.readouterr().out == ''
+
+
+def test_results_index_db_set_to_nothing_leaves_what_follows_to_the_caller() -> None:
+    """Two of the three programs that resolve a URL have no file-reading mode.
+
+    One resolver serves all of them, so a message saying what this run will do
+    next is false for the two that refuse.
+    """
+
+    config = _config_with_environment({'results_index_db': ''})
+    with pytest.raises(ValueError) as refusal:
+        get_results_index_db_url(argparse.Namespace(), config)
+    assert 'reads the navigation results files' not in str(refusal.value)
+
+
+@pytest.mark.parametrize('spaced', [' none', 'none ', '  none  '])
+def test_results_index_db_sentinel_written_with_spaces_around_it_opts_out(spaced: str) -> None:
+    """The spaces a shell or a configuration file leaves behind are not the value.
+
+    The value is read through the spaces around it, so the sentinel is recognized
+    rather than passed on as a URL that cannot be parsed.
+
+    Parameters:
+        spaced: The sentinel as some level wrote it.
+    """
+
+    config = _config_with_environment(None)
+    assert get_results_index_db_url(argparse.Namespace(results_index_db=spaced), config) is None
+
+
+@pytest.mark.parametrize('url', [SQLITE_URL, POSTGRES_URL])
+def test_results_index_db_returns_the_url_verbatim(url: str) -> None:
+    """Both URL forms pass through unchanged; the opener parses them, not this.
+
+    Parameters:
+        url: The URL to round-trip.
+    """
+
+    config = _config_with_environment(None)
+    assert get_results_index_db_url(argparse.Namespace(results_index_db=url), config) == url
 
 
 # ---------------------------------------------------------------------------

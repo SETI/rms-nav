@@ -21,10 +21,11 @@ from spindoctor.cli import (
     sd_backplanes_cloud_tasks,
     sd_mosaic_cloud_tasks,
     sd_offset_cloud_tasks,
+    sd_results_index_cloud_tasks,
 )
 from spindoctor.config.config import Config
 from spindoctor.config.logging_config import RunLogging, build_cloud_task_logging
-from spindoctor.config.program_names import SD_BACKPLANES, SD_MOSAIC
+from spindoctor.config.program_names import SD_BACKPLANES, SD_MOSAIC, SD_RESULTS_INDEX
 
 _DATASET = 'COISS_saturn'
 
@@ -187,6 +188,21 @@ def test_the_mosaic_driver_isolates_its_logging(
     assert recorder.program_name == SD_MOSAIC
 
 
+def test_the_ingest_driver_isolates_its_logging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sd_results_index_cloud_tasks resolves logging through the cloud-task builder.
+
+    An ingest worker has no per-image log at all, so isolation is the whole of
+    what the builder does for it -- and the whole of what keeps a pass that logs
+    a line per unreadable file off the worker's terminal.
+    """
+    recorder = _Recorder(FCPath(tmp_path))
+    monkeypatch.setattr(sd_results_index_cloud_tasks, 'build_cloud_task_logging', recorder)
+    sd_results_index_cloud_tasks.process_task('task-1', {}, _worker_data(results_index_db=None))
+    assert recorder.program_name == SD_RESULTS_INDEX
+
+
 def test_the_backplanes_driver_falls_back_to_its_own_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -278,10 +294,16 @@ def _reproject_task_result(
 ) -> dict[str, Any]:
     """Run one reprojection task far enough to reach the offset lookup.
 
+    The navigation results root is handed to the task the way the framework
+    hands it one -- on the worker's command line -- because that is all a task
+    receives: it runs in a process spawned for it, and builds its own source
+    from what crossed.
+
     Parameters:
         tmp_path: Directory used for output and logs.
         monkeypatch: Fixture used to stub the image load and reprojection.
-        nav_root: Navigation results root handed to the task, or None.
+        nav_root: Navigation results root handed to the task, or None for a
+            task asked to look no pointing up at all.
 
     Returns:
         The task result.
@@ -291,8 +313,11 @@ def _reproject_task_result(
     monkeypatch.setattr(
         sd_mosaic_cloud_tasks, 'reproject_one_ring', lambda *a, **k: _StubReprojResult()
     )
-    worker = _worker_data(nav_results_root=FCPath(tmp_path).as_posix())
-    worker.nav_results_root_path = nav_root  # type: ignore[attr-defined]
+    if nav_root is None:
+        monkeypatch.delenv('NAV_RESULTS_ROOT', raising=False)
+    worker = _worker_data(
+        nav_results_root=None if nav_root is None else nav_root.as_posix(), results_index_db=None
+    )
     _, result = sd_mosaic_cloud_tasks.process_task(
         'task-1',
         {
@@ -334,7 +359,6 @@ def test_an_offset_fallback_is_tallied_but_not_uncorrected(
     no correction at all.
     """
     nav_root = FCPath(tmp_path) / 'nav'
-    Path((nav_root / 'COISS_2001').as_posix()).mkdir(parents=True, exist_ok=True)
     (nav_root / 'COISS_2001' / 'N1234567890_1_metadata.json').write_text(
         json.dumps({'status': 'success', 'offset': [1.0, -2.0]})
     )
@@ -348,12 +372,11 @@ def test_a_missing_offset_key_is_counted_not_fatal(
 ) -> None:
     """A batch pass survives one defect-shaped record and counts it.
 
-    The backplane stage raises on the same record class, because a
-    single-image task should fail loudly; a batch pass must not lose the
-    whole task to one bad record, so here it is a tally entry instead.
+    The record is a recorded no-answer like a null offset, and every consumer
+    treats it as one: the index cannot tell the two apart, so a consumer that
+    did would build one product from a document and another from its row.
     """
     nav_root = FCPath(tmp_path) / 'nav'
-    Path((nav_root / 'COISS_2001').as_posix()).mkdir(parents=True, exist_ok=True)
     (nav_root / 'COISS_2001' / 'N1234567890_1_metadata.json').write_text(
         json.dumps({'status': 'success'})
     )
@@ -368,15 +391,143 @@ def test_the_image_is_still_reprojected(tmp_path: Path, monkeypatch: pytest.Monk
     assert result['n_done'] == 1
 
 
-def test_asking_for_no_offsets_still_counts_uncorrected(
+def test_asking_for_no_offsets_counts_nothing_as_uncorrected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A run that never asked for offsets is still an uncorrected run.
+    """A task that asked for no pointing is missing none.
 
-    The count exists so a batch reprojected entirely on uncorrected pointing
-    is visible in the task result; deliberateness lives in the reason tally,
-    which stays empty because nothing was asked for and so nothing degraded.
+    The count is a shortfall: it says how many images wanted a recorded
+    pointing and did not get one.  A task given no navigation results root
+    wanted none, so counting every image of it would report a whole batch as
+    short of something nobody asked for, which is what a reader of the count
+    would act on.
+
+    ``test_an_image_reprojected_without_an_offset_is_counted`` is the control
+    for this and for the reason tally below: it runs the same task with a root
+    and counts the image, so a worker that had stopped counting altogether
+    cannot satisfy both.
     """
     result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
-    assert result['n_uncorrected'] == 1
+    assert result['n_uncorrected'] == 0
+
+
+def test_asking_for_no_offsets_tallies_no_reason_either(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half: nothing was asked for, so there is no outcome to name."""
+    result = _reproject_task_result(tmp_path, monkeypatch, nav_root=None)
     assert 'pointing_reasons' not in result
+
+
+# ---------------------------------------------------------------------------
+# Every way one backplane image can fail is a result, not a traceback
+# ---------------------------------------------------------------------------
+#
+# One backplane task is one image, and the stage raises rather than returns for
+# two of its outcomes: nothing recorded the image, and the index cannot say what
+# recorded it.  Left to escape, both are reported by the framework as an
+# unhandled exception -- a traceback with no reason an enqueuer's tally can
+# count, and one that a queue set to retry on an exception retries although the
+# next attempt refuses identically.  The two are distinguished, because an
+# operator acts differently on an image nothing navigated and on a document
+# that has to be fixed and re-ingested.
+
+
+def _backplane_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, raises: Exception | None = None
+) -> tuple[bool, Any]:
+    """Run one backplane task over one image and return what the driver reported.
+
+    Parameters:
+        tmp_path: Directory used for both roots.
+        monkeypatch: Fixture used to stub the per-image stage.
+        raises: Exception the stage raises, or None to let it run for real
+            against a results root holding no document for the image.
+
+    Returns:
+        The driver's ``(retry, result)``.
+    """
+    if raises is not None:
+
+        def _fail(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            raise raises
+
+        monkeypatch.setattr(sd_backplanes_cloud_tasks, 'generate_backplanes_image_files', _fail)
+    return sd_backplanes_cloud_tasks.process_task(
+        'task-1',
+        {'dataset_name': _DATASET, 'files': [_image_entry(FCPath(tmp_path))]},
+        _worker_data(
+            nav_results_root=(FCPath(tmp_path) / 'nav').as_posix(),
+            backplane_results_root=(FCPath(tmp_path) / 'bp').as_posix(),
+            results_index_db=None,
+        ),
+    )
+
+
+def test_an_image_nothing_navigated_is_a_skip_the_task_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run for real against a root holding no document for the image."""
+    _, result = _backplane_result(tmp_path, monkeypatch)
+    assert result['status_error'] == 'no_navigation_record'
+
+
+def test_that_skip_names_the_navigation_record_it_looked_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stage reads the record before it opens the image, and both are lookups.
+
+    Every ``FileNotFoundError`` out of the stage is reported under this one
+    reason, so without naming the document the same result would be produced by
+    a stage that had reached the image first and found that missing instead.
+    """
+    _, result = _backplane_result(tmp_path, monkeypatch)
+    assert '_metadata.json' in result['status_exception']
+
+
+def test_that_skip_is_not_reported_as_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The interactive driver counts it as a skip, and so does this one."""
+    _, result = _backplane_result(tmp_path, monkeypatch)
+    assert result['status'] == 'skipped'
+
+
+def test_a_document_the_index_cannot_answer_for_fails_the_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other type the stage raises, which is an image lost rather than skipped.
+
+    Its type is what the seam chose deliberately: an image the index refuses
+    was navigated, and reading that as an image nothing navigated would build
+    one product through the documents and another through the index.
+    """
+    _, result = _backplane_result(tmp_path, monkeypatch, raises=ValueError('the ingest refused it'))
+    assert result['status_error'] == 'backplanes_failed'
+
+
+def test_that_failure_carries_what_the_stage_said(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator reading the task result has to know which document to fix."""
+    _, result = _backplane_result(tmp_path, monkeypatch, raises=ValueError('the ingest refused it'))
+    assert 'the ingest refused it' in result['status_exception']
+
+
+@pytest.mark.parametrize(
+    'raises',
+    [None, ValueError('the ingest refused it')],
+    ids=['no-navigation-record', 'document-the-ingest-refused'],
+)
+def test_neither_outcome_is_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raises: Exception | None
+) -> None:
+    """Both refuse identically on the next attempt, so neither asks for one.
+
+    Parameters:
+        tmp_path: Directory used for both roots.
+        monkeypatch: Fixture used to stub the per-image stage.
+        raises: What the stage raises, or None for the real missing record.
+    """
+    retry, _ = _backplane_result(tmp_path, monkeypatch, raises=raises)
+    assert retry is False

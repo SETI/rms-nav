@@ -6,6 +6,7 @@ was extracted, and provenance.  Not intended to be JSON-serialized
 directly; the curator builds a curated JSON-friendly subset.
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -37,6 +38,14 @@ class NavResult:
     Constructors ``NavResult.success``, ``NavResult.failed``, and
     ``NavResult.conflicted`` are the canonical entry points; direct
     instantiation is also supported.
+
+    Every number the result reports -- the offset, its per-axis sigma, and
+    the fitted rotation with its sigma -- is finite.  Each is this class's
+    own arithmetic over per-technique results whose own offset and rotation
+    are already required to be finite, so a non-finite one is a defect in
+    the combine rather than a value to report, and construction refuses it.
+    ``sigma_along_unobservable_px`` is the exception: infinity there is how
+    an unobservable translation axis is reported.
 
     Parameters:
         status: One of ``'success'``, ``'failed'``, ``'conflicted'``.
@@ -101,11 +110,28 @@ class NavResult:
     pointing: PointingSolution | None = None
 
     def __post_init__(self) -> None:
-        """Validate consistency between status, offset, and reason."""
+        """Validate status against offset and reason, and the solution's finiteness."""
         if self.status == 'failed' and self.offset_px is not None:
             raise ValueError('status=failed must have offset_px=None')
         if self.status == 'success' and self.offset_px is None:
             raise ValueError('status=success must have a non-None offset_px')
+        # The offset is the one number that reaches the metadata document
+        # unrounded, so nothing downstream maps it onto the finite sentinel a
+        # curated float gets; and the design keeps the per-axis sigmas finite
+        # on purpose, reporting an unobservable axis through
+        # ``sigma_along_unobservable_px`` instead of an inflated sigma.  So a
+        # non-finite value in any of these is this code's arithmetic gone
+        # wrong, and is refused here as it already is per technique.
+        if self.offset_px is not None and not all(math.isfinite(v) for v in self.offset_px):
+            raise ValueError(f'offset_px must be finite; got {self.offset_px!r}')
+        if self.sigma_px is not None and not all(math.isfinite(v) for v in self.sigma_px):
+            raise ValueError(f'sigma_px must be finite; got {self.sigma_px!r}')
+        if self.rotation_rad is not None and not math.isfinite(self.rotation_rad):
+            raise ValueError(f'rotation_rad must be finite when set; got {self.rotation_rad!r}')
+        if self.sigma_rotation_rad is not None and not math.isfinite(self.sigma_rotation_rad):
+            raise ValueError(
+                f'sigma_rotation_rad must be finite when set; got {self.sigma_rotation_rad!r}'
+            )
         if self.confidence_rank == 'failed' and self.status != 'failed':
             raise ValueError('confidence_rank=failed requires status=failed')
         if (self.confidence_rank == 'conflicted') != (self.status == 'conflicted'):

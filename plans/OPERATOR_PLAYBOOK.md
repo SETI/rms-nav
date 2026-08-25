@@ -211,7 +211,7 @@ Independent review before done; all CI gates; one PR."
   #435/#436 are a pair and #436 waits on #435. Whether Cassini navigation
   should run from the predicted rather than the reconstructed kernels
   (#459) is a pending operator decision, not dispatchable work.
-- **#430 (results index)**: implement `plans/RESULTS_DB_PLAN.md` -- the
+- **#430 (results index)**: implement `plans/RESULTS_INDEX_PLAN.md` -- the
   plan is the specification and its section 8 is the session protocol
   (per-phase implementer + adversarial reviewer, both Opus-class). Ready to
   dispatch as written.

@@ -142,6 +142,20 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
    * - ``sd_create_simulated_image``
      - Render a synthetic test image (operator-supplied bodies / rings / stars).
        See :doc:`dev_guide_simulator`.
+   * - ``sd_create_ck``
+     - Write the navigated attitudes of a results tree into SPICE C-kernels.
+       See :doc:`/user_guide/user_guide_ck_kernels`.
+   * - ``sd_results_index`` / ``sd_results_index_cloud_tasks``
+     - Read a navigation-results tree into the results index, in one process or
+       over a queue of workers. ``sd_results_index drop`` empties the index
+       instead. See :doc:`/user_guide/user_guide_results_index`.
+   * - ``sd_stats_report``
+     - Write the navigation statistics report and its charts, over a
+       navigation-results tree or over the index. See
+       :doc:`/user_guide/user_guide_statistics`.
+   * - ``sd_consolidate_metadata``
+     - Copy each image's metadata JSON and summary PNG into one flat directory.
+       See :doc:`/user_guide/user_guide_navigation`.
 
 Quick smoke test:
 
@@ -152,14 +166,18 @@ Quick smoke test:
 Running the test suite
 ======================
 
-Pytest defaults exclude integration tests; pass ``-m ""`` (empty marker filter) to
-include them. ``pyproject.toml`` sets ``addopts = ["-m", "not integration"]``.
+The suite has three tiers, separated by the ``integration`` and ``postgres``
+markers. ``pyproject.toml`` sets ``addopts = ["-m", "not integration and not
+postgres"]``, so a plain ``pytest`` runs the default tier alone; pass ``-m ""``
+(empty marker filter) to run every tier, or name one marker to run it by itself.
+:doc:`dev_guide_testing` describes what each tier holds and what it needs.
 
 .. code-block:: bash
 
-   pytest                                      # unit suite (fast)
-   pytest -m ""                                # full suite (incl. integration)
+   pytest                                      # default tier (fast)
+   pytest -m ""                                # full suite, every tier
    pytest -m integration                       # only integration
+   pytest -m postgres                          # only the postgres tier
    pytest -n auto --dist=loadfile              # parallel (matches CI)
    pytest tests/spindoctor/reproj/test_bodies.py      # one file
    pytest tests/spindoctor/reproj/test_bodies.py::test_foo  # one test
@@ -174,6 +192,11 @@ It needs the env vars listed above (in particular ``PDS3_HOLDINGS_DIR``,
 ``UCAC4_PATH``, ``YBSC_PATH``, ``OOPS_RESOURCES``) plus a ``SPICE_PATH``.
 ``scripts/run-all-checks.sh -i`` (or ``--integration``) flips the marker for the
 all-checks runner.
+
+The postgres tier re-asks the results-index questions against a real PostgreSQL
+server. It reads its connection URL from ``SPINDOCTOR_TEST_POSTGRES_URL`` and
+skips itself when that is unset. ``scripts/run-all-checks.sh -P`` (or
+``--postgres``) flips its marker.
 
 Test markers and layout
 -----------------------
@@ -245,14 +268,20 @@ GitHub Actions defines three workflows under ``.github/workflows/``:
 
   - **Lint** — Python 3.13. ``ruff check``, ``ruff format --check``, ``mypy``.
   - **Test** — matrix across Python 3.11 / 3.12 / 3.13 / 3.14 on Ubuntu. Runs
-    ``pytest -m "not integration" -n auto --dist=loadfile`` with the holdings /
-    catalog env vars exported. Uploads coverage to Codecov from the 3.13 job
-    on pushes (PRs from forks are excluded for secrets reasons).
+    ``pytest -m "not integration and not postgres" -n auto --dist=loadfile``
+    with the holdings / catalog env vars exported. Uploads coverage to Codecov
+    from the 3.13 job on pushes (PRs from forks are excluded for secrets
+    reasons).
   - **Docs** — ``sphinx-build -W`` against the ``[docs]`` extra.
 
-  Integration tests are skipped in CI (slow, holdings-dependent). Maintainers
-  run them locally before merging anything that could plausibly regress
-  navigation accuracy.
+  Both opt-in tiers are excluded in CI, and the marker expression restates the
+  exclusion that ``addopts`` already carries, because a ``-m`` flag replaces
+  that expression rather than adding to it. The integration tier — of which the
+  operator-curated image-library regression tests are one part — needs real
+  PDS3 holdings, SPICE kernels and the star catalogs, and is slow. The postgres
+  tier needs a server named by ``SPINDOCTOR_TEST_POSTGRES_URL``, and CI runs no
+  service container for one. Maintainers run both locally before merging
+  anything that could plausibly regress navigation accuracy or the index.
 
 - ``publish_to_test_pypi.yml`` — runs on pushes to ``main`` once tests pass.
   Builds a wheel + sdist and uploads to TestPyPI under the dev version stamped

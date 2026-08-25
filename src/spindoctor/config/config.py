@@ -70,13 +70,17 @@ def _deep_merge(base: dict[Any, Any], overlay: dict[Any, Any]) -> dict[Any, Any]
     return merged
 
 
-HASH_EXCLUDED_SECTIONS = frozenset({'logging'})
+HASH_EXCLUDED_SECTIONS = frozenset({'environment', 'logging'})
 """Sections left out of :meth:`Config.resolved_config_hash`.
 
 A configuration section belongs here when it cannot change what the pipeline
 computes.  ``logging`` decides what is written down about a run, never what
 the run concludes, so two results that differ only in it were produced by the
-same configuration and should compare as such.
+same configuration and should compare as such.  ``environment`` holds
+deployment locations -- where the holdings are read from, where results are
+written, which database indexes them -- and moving a directory does not change
+a single number the pipeline produces, so a digest that shifted when it moved
+would answer its own question wrongly.
 
 Named explicitly rather than inferred, so that a section added later has to be
 a deliberate choice rather than inheriting one.  Adding a section here changes

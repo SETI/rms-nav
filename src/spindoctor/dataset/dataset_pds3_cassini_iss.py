@@ -1,5 +1,6 @@
 import argparse
-from collections.abc import Iterator
+from collections.abc import Generator
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -30,7 +31,6 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         + list(range(_MIN_2xxx_VOL, _MAX_2xxx_VOL + 1))
     )
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
-    _INDEX_TIME_COLUMNS = ('IMAGE_MID_TIME', 'IMAGE_TIME', 'START_TIME')
     _INDEX_CAMERA_COLUMNS = ('INSTRUMENT_ID',)
     _INDEX_CAMERA_MAP: ClassVar[dict[str, str]] = {'ISSNA': 'NAC', 'ISSWA': 'WAC'}
     _VOLUMES_DIR_NAME = 'calibrated'
@@ -326,7 +326,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             return False
         return abs((first_time - second_time).total_seconds()) <= cls._BOTSIM_MAX_TIME_DELTA_SEC
 
-    def yield_image_files_index(self, **kwargs: Any) -> Iterator[ImageFiles]:
+    def yield_image_files_index(self, **kwargs: Any) -> Generator[ImageFiles, None, None]:
         """Yield filenames given search criteria using index files.
 
         Parameters:
@@ -341,8 +341,10 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         group = kwargs.pop('group', None)
 
         if group is None:
-            for imagefile in self._yield_image_files_index(**kwargs):
-                yield ImageFiles(image_files=[imagefile])
+            # closing(): see DataSetPDS3.yield_image_files_index.
+            with closing(self._yield_image_files_index(**kwargs)) as imagefiles:
+                for imagefile in imagefiles:
+                    yield ImageFiles(image_files=[imagefile])
             return
 
         if group != 'botsim':
@@ -353,32 +355,37 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         # to test it against its immediate successor, so no frame is ever dropped: an
         # unpaired held frame is always yielded before moving on.
         last_imagefile: ImageFile | None = None
-        for imagefile in self._yield_image_files_index(
-            additional_index_columns=(
-                'SHUTTER_MODE_ID',
-                'IMAGE_NUMBER',
-                'OBSERVATION_ID',
-                'IMAGE_TIME',
-            ),
-            **kwargs,
-        ):
-            if last_imagefile is None:
-                last_imagefile = imagefile
-                continue
-            if self._is_botsim_pair(last_imagefile, imagefile):
-                if last_imagefile.image_file_name[0] == 'N':
-                    nac_imagefile = last_imagefile
-                    wac_imagefile = imagefile
+        # closing(): see DataSetPDS3.yield_image_files_index.
+        paired = closing(
+            self._yield_image_files_index(
+                additional_index_columns=(
+                    'SHUTTER_MODE_ID',
+                    'IMAGE_NUMBER',
+                    'OBSERVATION_ID',
+                    'IMAGE_TIME',
+                ),
+                **kwargs,
+            )
+        )
+        with paired as imagefiles:
+            for imagefile in imagefiles:
+                if last_imagefile is None:
+                    last_imagefile = imagefile
+                    continue
+                if self._is_botsim_pair(last_imagefile, imagefile):
+                    if last_imagefile.image_file_name[0] == 'N':
+                        nac_imagefile = last_imagefile
+                        wac_imagefile = imagefile
+                    else:
+                        wac_imagefile = last_imagefile
+                        nac_imagefile = imagefile
+                    yield ImageFiles(image_files=[nac_imagefile, wac_imagefile])
+                    last_imagefile = None
                 else:
-                    wac_imagefile = last_imagefile
-                    nac_imagefile = imagefile
-                yield ImageFiles(image_files=[nac_imagefile, wac_imagefile])
-                last_imagefile = None
-            else:
-                # Not a pair: emit the held frame and hold the current one. The held
-                # frame is never silently discarded.
-                yield ImageFiles(image_files=[last_imagefile])
-                last_imagefile = imagefile
+                    # Not a pair: emit the held frame and hold the current one. The held
+                    # frame is never silently discarded.
+                    yield ImageFiles(image_files=[last_imagefile])
+                    last_imagefile = imagefile
 
         if last_imagefile is not None:
             yield ImageFiles(image_files=[last_imagefile])

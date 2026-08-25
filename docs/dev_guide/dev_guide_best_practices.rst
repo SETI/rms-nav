@@ -23,6 +23,34 @@ Code style
 * Do not introduce compatibility shims for prior versions unless explicitly
   requested; change the code instead.
 
+Imports
+-------
+
+* Imports go at the top of the file, in three alphabetically sorted groups
+  separated by blank lines: standard library, third party, then this project.
+* An import inside a function is permitted only to keep a heavy dependency off
+  a path that does not use it, and it must carry a comment naming the
+  dependency and the path. Most of them keep an optional or costly library out
+  of a module that only some callers reach: the GUI toolkit, the plotting and
+  imaging libraries, the SPICE and array libraries a single function needs, and
+  each instrument's ``oops`` host module.
+* Two of them protect a guarantee beyond their own module:
+
+  * PyQt6, imported where a dialog is opened rather than at the top of the
+    module that opens it -- the manual navigation technique in
+    ``spindoctor/nav_technique/nav_technique_manual.py`` is the one on the
+    navigation path -- so that a headless run never imports a GUI toolkit.
+  * :func:`spindoctor.results_index.masked_url` in
+    ``spindoctor/support/command_line.py``, imported only when the command line
+    being logged carries a value for a connection-URL option. Whether such a
+    value holds a credential is what the masking rule itself decides, so
+    locating one is as far as the module gets without it. The run banner of
+    every program passes through that module and most runs name no index, so a
+    top-level import would put the database layer behind every one of them.
+    A subprocess test in ``tests/spindoctor/support/test_command_line.py``
+    asserts that masking a command line carrying no URL imports no
+    :mod:`sqlalchemy` module.
+
 Linting and typing
 ------------------
 

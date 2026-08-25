@@ -390,6 +390,28 @@ Environment options
   takes precedence over the ``NAV_RESULTS_ROOT`` environment variable. One of
   the three is required.
 
+* ``--results-index-db URL``: connection URL of a results index built by
+  ``sd_results_index`` (see :doc:`user_guide_results_index`). The run then reads
+  the whole mission's records in bulk instead of walking the tree and reading
+  one file per image, which is what makes a cloud results root affordable: an
+  archive-scale root costs one paid round trip per image otherwise, and a
+  Cassini-scale root holds several hundred thousand. Takes precedence over the
+  ``environment.results_index_db`` configuration variable and
+  ``NAV_RESULTS_INDEX_DB``. ``--results-index-db none`` names no index, which is
+  how a machine that has one configured is told to read the tree for this run.
+  Without an index the tree is read, which is the default.
+
+  The index must hold a completed ingest of the same results root, and the run
+  is refused if it does not: a root nobody has ingested cannot say what it
+  holds, and a mission would silently come back short. What the run writes does
+  not otherwise depend on which it read -- the same images, the same
+  eligibility, the same matrices, epochs and recorded kernels -- with one
+  exception, which is that a value the ingest could not store is read as one
+  the document never recorded. A malformed offset, sigma or confidence is
+  refused outright when the tree is read, and reported as a blank column when
+  the index is; nothing a segment is built from can differ, because a matrix
+  the readers refuse is refused either way.
+
 * ``--kernel-dir DIR`` (repeatable, at least one required): a directory of
   SPICE kernels. These directories serve two purposes at once: every C-kernel
   in them is a candidate original to pair images against, and all of them
@@ -540,6 +562,15 @@ every file it wrote, and each of them is a complete, valid kernel.
   ``--start-time``/``--stop-time`` pair would select nothing, and a run that
   wrote nothing for that reason would be indistinguishable from a clean run
   over a quiet span, so it is refused by name instead.
+
+* **A directory under the navigation results root that cannot be listed.**
+  Reading the tree stops where the walk meets it, and the run says which
+  directory it was and exits 1. A directory nobody enumerated holds documents
+  nobody read, so a kernel set built around the gap would quietly cover less
+  than the tree and go on being trusted; a run that stops can simply be
+  repeated once the directory is readable. A results root that cannot be listed
+  at all is refused the same way, since nothing under it has been read either.
+  Nothing is written in either case.
 
 * **A metadata document that cannot be read as a navigated image**; an image
   whose segment copies its baseline's rates and whose baseline supplied

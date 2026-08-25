@@ -38,8 +38,8 @@ Each single-image result reports what happened: ``pointing_source`` is one
 of ``'cmatrix'``, ``'pool'``, ``'offset'``, or ``'none'``, joined by
 ``pointing_reason`` when the source is degraded and by
 ``uncorrected_pointing: true`` when it is ``'none'``. A success-status
-record with no ``offset`` key at all is defect-shaped and fails the task
-rather than degrading silently. For a result the kernel generator omitted
+record with no ``offset`` key at all is a recorded no-answer like a null one,
+counted under ``missing_offset_key``. For a result the kernel generator omitted
 from the corrected kernels (a BOTSIM-yielding WAC, or any image with an
 omission reason), the backplanes still carry that image's own recorded
 measurement — the authoritative product for it — while a kernel consumer
@@ -76,8 +76,55 @@ Common flags:
 - ``--nav-results-root``: Root containing prior navigation results
   (``*_metadata.json``).
 - ``--backplane-results-root``: Root directory for the backplane outputs.
+- ``--results-index-db``: Connection URL of a results index built by
+  ``sd_results_index``. With one, each image's navigation record is read as one
+  database row instead of one file, which on a cloud results root replaces a
+  round trip per image with a query. The index must already hold a completed
+  ingest of the root named by ``--nav-results-root``, and the rows it holds are
+  a snapshot of the tree as of that ingest. Omitting the option names no index,
+  which is the default: the navigation results tree is read directly.
+  ``--results-index-db none`` names no index either, which is how a machine that
+  sets the option through configuration or through ``NAV_RESULTS_INDEX_DB``
+  reads the files.
 - Dataset selection flags are the same as for ``sd_offset`` (see
   :doc:`user_guide_navigation`).
+
+An image the index has no row for is reported and skipped exactly as an image
+with no metadata file is, and a named index that cannot be opened, or a
+navigation results root it has not fully ingested, fails the run rather than
+quietly reverting to reading files.
+
+An image whose metadata document the ingest could not read is a third case, and
+it fails that image rather than skipping it. Such a document is recorded as a
+file the index holds no navigation record for, which is not the same fact as
+"nothing navigated this image": read directly, the same document may well carry
+a pointing and a status. The failure names the image, the index and the reason
+the ingest recorded, so the remedy — fix the document and ingest that root
+again, or run without ``--results-index-db`` — is visible from the run log. The
+rest of the pass continues; only that image is lost.
+
+A run that also names an error filter (``--has-offset-error``,
+``--has-no-offset-error``, ``--has-offset-spice-error``,
+``--has-offset-nonspice-error``) has already read each selected image's
+navigation document, because that is how the filter decided what to select. The
+record travels with the image, so each such image's document is read once for
+the whole run. A second read would be a second download on a cloud results root,
+not a second look at a file already local — the two readers hold caches of their
+own. What the backplanes are built on is what the document said when the
+selection was made, so a document rewritten or deleted while the run is going is
+not noticed for an image already selected, and the "skipped due to missing
+metadata" outcome is not reported for one: a record travels only with a document
+that was read whole. With ``--results-index-db`` nothing travels with the image,
+because the filter narrows on columns; each image's row is read as it is for any
+other run.
+
+Under ``sd_backplanes_cloud_tasks`` each of those outcomes is reported in the
+task result rather than in a run log, because a cloud task has none: an
+unusable index is ``unusable_results_index_db``, an image nothing navigated is a
+skip named ``no_navigation_record``, and every other way one image can fail —
+a document the ingest refused among them — is ``backplanes_failed``. All three
+are returned rather than raised, so a queue configured to retry on an
+exception does not retry a refusal that will refuse identically.
 
 Examples
 --------
@@ -184,6 +231,16 @@ program; see :doc:`user_guide_logging`.
 An image whose navigation did not succeed is skipped and gets no backplanes.
 The run's log says which images those were, and reports the navigation status
 that caused each skip.
+
+One image that cannot be processed does not end the run. Backplane generation
+is per-image work, so a failure is reported against that image, counted, and
+the next image is attempted. The run's log carries the image, the message and
+the traceback — an image can fail before it has a log of its own, and then the
+run's log is the only account of it — and that image's own log carries the
+traceback too whenever the failure got as far as opening one. The pass ends
+with a summary line counting what became of every image::
+
+   Backplane pass complete: 143 done, 4 skipped, 1 failed
 
 Backplane Viewer GUI
 ====================

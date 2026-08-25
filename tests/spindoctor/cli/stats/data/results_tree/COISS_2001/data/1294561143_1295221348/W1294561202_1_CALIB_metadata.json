@@ -1,0 +1,218 @@
+{
+  "status": "success",
+  "observation": {
+    "image_path": "/holdings/W1294561202_1_CALIB.IMG",
+    "image_name": "W1294561202_1_CALIB.IMG",
+    "instrument": "coiss",
+    "camera": "WAC",
+    "shutter_mode": "BOTSIM",
+    "image_shape": [
+      512,
+      512
+    ]
+  },
+  "navigation_result": {
+    "status": "success",
+    "status_reason": "ok",
+    "offset_px": [
+      0.35,
+      -0.12
+    ],
+    "sigma_px": [
+      0.31,
+      0.28
+    ],
+    "sigma_along_unobservable_px": null,
+    "confidence": 0.74,
+    "confidence_provisional": true,
+    "confidence_rank": "medium",
+    "covariance_px2": [
+      [
+        0.0961,
+        0.0
+      ],
+      [
+        0.0,
+        0.0784
+      ]
+    ],
+    "techniques_used": [
+      "RingEdgeNav"
+    ],
+    "excluded_from_consensus": [],
+    "feature_count_by_type": {
+      "RING_EDGE": 1
+    },
+    "per_technique": [
+      {
+        "technique_name": "RingEdgeNav",
+        "feature_ids": [
+          "ring_edge:SATURN:encke_gap:IEG"
+        ],
+        "offset_px": [
+          0.36,
+          -0.11
+        ],
+        "covariance_px2": [
+          [
+            0.0961,
+            0.0
+          ],
+          [
+            0.0,
+            0.0784
+          ]
+        ],
+        "confidence": 0.74,
+        "spurious": false,
+        "at_edge": false,
+        "diagnostics": {
+          "total_edge_length_px": 431.0,
+          "per_edge_dt_rms_summed": 0.216,
+          "per_edge_dt_rms_mean": 0.216,
+          "per_edge_dt_median_max": 0.184,
+          "edge_count": 1,
+          "is_rank_1": false,
+          "lm_converged": true,
+          "coarse_peak_fraction": 0.812,
+          "sigma_orbit_radial_px": 0.031
+        }
+      }
+    ],
+    "feature_inventory": [
+      {
+        "feature_id": "ring_edge:SATURN:encke_gap:IEG",
+        "feature_type": "RING_EDGE",
+        "source_model": "rings:SATURN",
+        "reliability": 0.72,
+        "gated": false,
+        "gate_reason": null,
+        "bbox_extfov_vu": [
+          118,
+          40,
+          402,
+          472
+        ],
+        "reliability_reasons": {
+          "visible_arc_fraction": 1.0,
+          "shadow_occluded_fraction": 0.0
+        }
+      },
+      {
+        "feature_id": "ring_edge:SATURN:encke_gap:OEG",
+        "feature_type": "RING_EDGE",
+        "source_model": "rings:SATURN",
+        "reliability": 0.18,
+        "gated": true,
+        "gate_reason": "reliability_0.180_below_threshold_0.300",
+        "bbox_extfov_vu": [
+          120,
+          41,
+          405,
+          474
+        ],
+        "reliability_reasons": {
+          "visible_arc_fraction": 0.21,
+          "shadow_occluded_fraction": 0.0
+        }
+      }
+    ],
+    "image_classifier": {
+      "class": "clean",
+      "saturation_frac": 0.0,
+      "missing_frac": 0.0,
+      "noise_sigma": 0.75,
+      "max_dn": 0.88,
+      "background_gradient_score": 1.417,
+      "flags": []
+    },
+    "provenance": {
+      "spindoctor_version": "0.0.0",
+      "spindoctor_git_sha": "719cde5",
+      "spice_kernels": [
+        "05138_05159ra.bc",
+        "cas00172.tsc",
+        "cpck15Dec2017.tpc",
+        "naif0012.tls",
+        "sat428.bsp"
+      ],
+      "spice_kernel_count": 5,
+      "static_data_hashes": {
+        "config_220_body_shape.yaml": "ac10e82c9c141c0e449dcfc92d8c4f341400ffa51976f53c94c98eaabac7a52a",
+        "config_310_saturn_rings.yaml": "5f5f0b8f9a3b4d8c6e2a1c7d9b0e4f3a2d6c8b1e7f0a9d3c5b2e8f1a4d7c0b63",
+        "config_400_inst_coiss.yaml": "8c20d352ed0b5b690f7fc573f505f062551966c3305a01ae0e6fba63a8400f17"
+      },
+      "technique_names": [
+        "BodyBlobNav",
+        "BodyDiscCorrelateNav",
+        "BodyLimbNav",
+        "BodyTerminatorNav",
+        "RingAnnulusNav",
+        "RingEdgeNav",
+        "StarFieldFromCatalogNav",
+        "StarRefineNav",
+        "StarUniqueMatchNav",
+        "TitanHazeNav"
+      ],
+      "extractor_names": [
+        "rings:SATURN",
+        "stars"
+      ],
+      "config_hash": "3ca76ec39b1fb875a86bed2793adc4430785242e07d705f2d65581963040a6b6",
+      "config_overrides": [],
+      "star_catalogs": {
+        "tycho2": "/resources/SPICE/Stars",
+        "ucac4": "/star-catalogs/UCAC4",
+        "ybsc": "/star-catalogs/YBSC"
+      },
+      "image_et": 170000000.0,
+      "pipeline_run_iso8601": "2026-08-08T16:46:29Z"
+    },
+    "pointing": {
+      "cmatrix": [
+        0.7339727320336087,
+        -0.19567256750036421,
+        0.6503816379318653,
+        0.6427935024707003,
+        -0.10909483222027334,
+        -0.7582313833944623,
+        0.2193183572174709,
+        0.9745822509725107,
+        0.04570442294553148
+      ],
+      "cmatrix_original": [
+        0.734074290948707,
+        -0.19565161004534604,
+        0.6502733139648412,
+        0.6427239921283785,
+        -0.10890187393762274,
+        -0.7583180413226591,
+        0.21918212817361082,
+        0.9746080388235765,
+        0.04580791798094368
+      ],
+      "camera_frame": "CASSINI_ISS_WAC",
+      "camera_frame_id": -82361,
+      "ck_frame_id": -82000
+    },
+    "times": {
+      "start_et": 169999999.77,
+      "stop_et": 170000000.23,
+      "midtime_et": 170000000.0,
+      "exposure_s": 0.46,
+      "sclk_start": "1/1294561202.077",
+      "sclk_midtime": "1/1294561202.136",
+      "sclk_stop": "1/1294561202.195"
+    }
+  },
+  "timing": {
+    "start_iso8601": "2026-08-08T16:47:21.008443Z",
+    "end_iso8601": "2026-08-08T16:47:33.508443Z",
+    "elapsed_s": 12.5
+  },
+  "offset": [
+    0.35,
+    -0.12
+  ],
+  "confidence": 0.74
+}

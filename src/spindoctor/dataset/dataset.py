@@ -20,17 +20,24 @@ class ImageFile:
         label_file_url: Remote URL for the label file.
         results_path_stub: Local path stub for storing results.
         index_file_row: Optional metadata from index files.
-        image_et: Optional observation epoch (TDB seconds past J2000) read
-            from the index row when the file was enumerated.  Known without
-            SPICE and without opening the image, so it is still available
-            for an image whose load fails.  None when the image was not
-            enumerated from an index, or its index row carries no readable
-            time.
         camera: Optional name of the camera that took the image, read from
-            the index row when the file was enumerated.  Available on the
-            same terms as ``image_et``, and uses the same names as
+            the index row when the file was enumerated.  Known without SPICE
+            and without opening the image, and uses the same names as
             ``ObsInst.camera``.  None when the image was not enumerated
             from an index, or its index row names no recognized camera.
+        nav_record: The navigation record already read for this image while the
+            run's selection was being made, in the shape the navigator writes
+            it -- the same shape a pointing source hands back.  A run that
+            selected its images on what their navigation documents record has
+            read and parsed each kept image's document to decide, so the record
+            travels with the image and the per-image stage reads no document of
+            its own.  None whenever nothing has read one: a run whose selection
+            asked nothing of the navigation results, one answered out of a
+            results index (where a record is rebuilt from a column set of its
+            consumer's own), and an image built from a cloud task file, which
+            carries an image's two URLs, its stub and its index row and no
+            record.  A consumer that meets None reads the record from its own
+            storage.
         extra_params: Optional extra parameters that will be passed to the observation
             class's from_file method when the file is read.
         image_url_resolver: Optional callable ``(image_file_url, label_file_path) ->
@@ -45,8 +52,8 @@ class ImageFile:
     label_file_url: FCPath
     results_path_stub: str
     index_file_row: dict[str, Any] = field(default_factory=dict)
-    image_et: float | None = None
     camera: str | None = None
+    nav_record: dict[str, Any] | None = None
     extra_params: dict[str, Any] = field(default_factory=dict)
     image_url_resolver: Callable[[FCPath, Path], FCPath | None] | None = None
     _image_file_path: Path | None = None

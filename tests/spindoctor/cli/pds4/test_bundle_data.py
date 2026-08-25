@@ -528,3 +528,51 @@ def test_cassini_lid_charset_is_pds4_legal(tmp_path: Path) -> None:
     lid = dataset.pds4_image_name_to_data_lid('N1454725799_1.IMG')
     assert lid == lid.lower()
     assert re.fullmatch(r'urn:nasa:pds(:[a-z0-9_-]+)+', lid) is not None
+
+
+# ---------------------------------------------------------------------------
+# A record the enumeration already read
+# ---------------------------------------------------------------------------
+
+
+def test_a_carried_record_is_used_in_place_of_the_document(tmp_path: Path) -> None:
+    """A record carried with the image is what the supplemental file records."""
+    env = make_bundle_env(tmp_path)
+    write_nav_inputs(env, nav_extra={'marker': 'from the document'})
+    env.image_file.nav_record = {'status': 'success', 'marker': 'from the enumeration'}
+    _generate(env)
+    suppl = env.bundle_dir / 'data' / f'{env.pds4_path_stub}_supplemental.txt'
+    combined = json.loads(suppl.read_text(encoding='utf-8'))
+    assert combined['navigation']['marker'] == 'from the enumeration'
+
+
+def test_a_carried_record_is_used_when_the_document_has_gone(tmp_path: Path) -> None:
+    """An image carrying a record needs no document under the results root."""
+    env = make_bundle_env(tmp_path)
+    write_nav_inputs(env)
+    (env.nav_root / f'{env.results_path_stub}_metadata.json').unlink()
+    env.image_file.nav_record = {'status': 'success', 'marker': 'from the enumeration'}
+    _generate(env)
+    suppl = env.bundle_dir / 'data' / f'{env.pds4_path_stub}_supplemental.txt'
+    combined = json.loads(suppl.read_text(encoding='utf-8'))
+    assert combined['navigation']['marker'] == 'from the enumeration'
+
+
+def test_an_image_carrying_no_record_reads_the_document(tmp_path: Path) -> None:
+    """With nothing carried, the document under the results root is what is read."""
+    env = make_bundle_env(tmp_path)
+    write_nav_inputs(env, nav_extra={'marker': 'from the document'})
+    assert env.image_file.nav_record is None
+    _generate(env)
+    suppl = env.bundle_dir / 'data' / f'{env.pds4_path_stub}_supplemental.txt'
+    combined = json.loads(suppl.read_text(encoding='utf-8'))
+    assert combined['navigation']['marker'] == 'from the document'
+
+
+def test_an_image_carrying_no_record_needs_the_document(tmp_path: Path) -> None:
+    """With nothing carried and no document, the read fails rather than proceeding."""
+    env = make_bundle_env(tmp_path)
+    write_nav_inputs(env)
+    (env.nav_root / f'{env.results_path_stub}_metadata.json').unlink()
+    with pytest.raises(FileNotFoundError, match=r'_metadata\.json'):
+        _generate(env)
