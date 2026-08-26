@@ -303,6 +303,30 @@ def test_a_record_naming_no_exception_is_refused() -> None:
         NavInternalErrorRecord(component='stars.to_features', exception_type='')
 
 
+def test_a_whitespace_only_component_is_refused() -> None:
+    """A component of blanks names nothing, and passes an emptiness check."""
+    with pytest.raises(ValueError, match='component must be a non-empty string'):
+        NavInternalErrorRecord(component='   ', exception_type='RuntimeError')
+
+
+def test_a_non_string_component_is_refused() -> None:
+    """An untyped caller cannot put a non-string into the document."""
+    with pytest.raises(TypeError, match='component must be str'):
+        NavInternalErrorRecord(
+            component=object(),  # type: ignore[arg-type]
+            exception_type='RuntimeError',
+        )
+
+
+def test_a_non_string_exception_type_is_refused() -> None:
+    """The exception class name is a string or the record is refused."""
+    with pytest.raises(TypeError, match='exception_type must be str'):
+        NavInternalErrorRecord(
+            component='stars.to_features',
+            exception_type=42,  # type: ignore[arg-type]
+        )
+
+
 def test_an_internal_error_cannot_be_reported_as_a_success() -> None:
     """A hand-built success cannot carry the block that says navigation failed.
 

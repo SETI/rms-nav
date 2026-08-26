@@ -54,21 +54,32 @@ class NavInternalErrorRecord:
             has both.
 
     Raises:
-        ValueError: If either field is empty.  A record naming nothing is
-            worse than no record: it says a component failed and declines to
-            say which, and every consumer of the document then has a field
-            it must special-case.
+        TypeError: If either field is not a ``str``.
+        ValueError: If either field is empty or only whitespace.  A record
+            naming nothing is worse than no record: it says a component
+            failed and declines to say which, and every consumer of the
+            document then has a field it must special-case.
     """
 
     component: str
     exception_type: str
 
     def __post_init__(self) -> None:
-        """Refuse a record that names no component or no exception."""
-        if not self.component:
-            raise ValueError('component must be a non-empty string')
-        if not self.exception_type:
-            raise ValueError('exception_type must be a non-empty string')
+        """Refuse a record that names no component or no exception.
+
+        Validated at runtime rather than left to the type checker because
+        this is a published package: mypy runs over this repository's call
+        sites and not over a third-party caller's.  The same pair of checks,
+        in the same order, guards ``ConfidenceTerm``.
+        """
+        for name in ('component', 'exception_type'):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise TypeError(
+                    f'NavInternalErrorRecord.{name} must be str; got {type(value).__name__}'
+                )
+            if not value.strip():
+                raise ValueError(f'NavInternalErrorRecord.{name} must be a non-empty string')
 
 
 @dataclass(frozen=True, eq=False)
