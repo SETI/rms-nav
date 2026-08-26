@@ -74,26 +74,21 @@ PR #484 (#447, the round-trip residual) has been open since 2026-08-09,
 is green and mergeable, and is fifty commits behind `main`. Rebase and
 merge it, or say what it is waiting on. Nothing else is in flight.
 
-### 0.1c Assignees (the one labelling gap left)
+### 0.1c Labels and assignees: check five inferred priorities
 
-Every open issue now carries exactly one Priority and one Effort label and at
-least one each of A-type and B-location; the `Priority TBD` label is unused
-and can be deleted from the repository if you want it gone.
-
-What is still uneven is the assignee. 52 open issues have none, against a
-convention of `rfrenchseti` on all of them, so any "assigned to me" filter is
-short by about a fifth of the backlog. Mass-assigning is one command; it is
-left to you because it notifies.
+The tracker is fully labelled. Every open issue carries exactly one Priority
+and one Effort label, at least one each of A-type and B-location, and
+`rfrenchseti` as an assignee. The `Priority TBD` label is unused and can be
+deleted from the repository if you want it gone.
 
 Five priorities were assigned by inference from these plans rather than by
-you, and are the ones most worth a glance: **#53** PDS4 bundle generator
-parent as Essential (the plans call output bundles required for all four
-instruments, and none of it works end to end); **#28** backplane generator
-parent as Important (a scope decision gating #54/#55/#57/#63/#77);
-**#34** PDS4 input as Defer (the plans say it is not required for project
-completion); and **#23** body shape models and **#78** CraterMaker as Defer
-(both sit with the far-off Track F items). Override any of them in one
-command.
+you, and are the ones worth a glance: **#53** PDS4 bundle generator parent as
+Essential (the plans call output bundles required for all four instruments,
+and none of it works end to end); **#28** backplane generator parent as
+Important (a scope decision gating #54/#55/#57/#63/#77); **#34** PDS4 input
+as Defer (the plans say it is not required for project completion); and
+**#23** body shape models and **#78** CraterMaker as Defer (both sit with the
+far-off Track F items). Override any of them in one command.
 
 ### 0.2 Adopt the calibration's falsification criterion (#334)
 
@@ -103,6 +98,66 @@ real-frame regression gate is suspended. Edit
 (proposed)" heading to "Transfer watch (adopted YYYY-MM-DD)", adjusting the
 thresholds if you disagree with the proposal. That gives the calibration a
 criterion that can fail. Tracked by #334.
+
+### 0.3 What runs while the decisions wait
+
+Everything in this section is dispatchable now, needs nothing from you until
+its pull request, and is ordered by leverage rather than by size. Hand out
+the first group before the second: the whole of Track A reads what the first
+group produces, so work done before it is work measured through a corrupted
+instrument.
+
+**Group 1 — evidence integrity.** Nothing above this in the whole project.
+
+1. **#503** — make an unexpected model or technique exception fatal to the
+   image, with a status reason naming it. The only Critical issue open, and
+   the reason every downstream number is currently unable to distinguish a
+   technique that had nothing to say from one that crashed.
+2. **#288 diagnosis** — attribute all 52 red library frames: which are
+   pinned, which are environment, which are genuine navigation changes. The
+   attribution is fully agent-executable and is the valuable half. Only the
+   resolution needs you, and only where it would move an operator-verified
+   `expected.*` field, which is never done to match current behavior.
+3. **#521** and **#522** — the fitted rotation dropped from a conflicted
+   result, and rotation fitting off for Galileo SSI. Both Essential, both
+   small, both keep a wrong attitude out of a delivered kernel. #522 is
+   configuration and documentation with no code change.
+
+**Group 2 — the coarse-lock family.** One family, best done as one campaign:
+**#504** (the pooled inlier veto discarding correct B-ring fits), **#476**
+(RingEdgeNav re-locking under a planted shift), **#346** (three frames locked
+onto the wrong ring feature) and **#373** (the coarse seed against competing
+edge populations). These gate the Track A study, which consumes ensemble
+output at scale.
+
+**Group 3 — parallel fill, any order, any number at once.**
+
+- **Results index:** #515 with #516 (the root-blind share write and the test
+  that cannot catch it); #501, #512, #514, #536 as one seam-cleanup batch;
+  #528 with #531 as a metadata-provenance pair; #493 and #496 (run-level
+  conditions reported per image); then the tail #472, #497, #524, #533,
+  #534, #535, #538, #540, #541.
+- **Test debt:** #241 and #242 first, because the plan wants tested ground
+  under any serious PDS4 or backplane work; then #243, #177, #524, #525,
+  #530, #473.
+- **CI:** #324, #336 and #426 — the agreement-estimator tests, the
+  data-independent simulator suites and the stale committed render, none of
+  which run in Actions today. #391 pins the lint tools so a release cannot
+  turn `main` red on its own.
+- **Products:** #265 then #519 (swallowed label-write errors, then the empty
+  `START_DATE_TIME` / `STOP_DATE_TIME` / `IMAGE_MID_TIME` those errors hide);
+  #520 (move the pointing selection out of the reprojection CLI package);
+  #495 (raw-product dataset names for Cassini ISS).
+- **Docs and cleanup:** #545, #549, #470, #471, #494, #518.
+
+**What looks dispatchable and is not.** #483 and #547 wait on #288. #129
+(Sphinx nitpicky-clean) wants #443 settled first, since that decides whether
+`spindoctor.cli` subpackages get autodoc pages at all. #418 is a policy
+question before it is a coding one. #464's affordability depends on #466.
+#552 waits on an upstream oops fix. #239's cohort scan is agent work but the
+sidecars it produces need your votes. And the two largest Track A items,
+#225 and #172/#235, are gated on your frame approvals and batch votes, which
+is what makes Group 1 worth starting today.
 
 ## 1. The library regression, and the deliberately-red set
 
