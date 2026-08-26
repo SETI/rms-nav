@@ -61,7 +61,7 @@ validation.
 Two facts about the evidence behind that health are worth stating plainly,
 because both are load-bearing and neither is comfortable. Suite coverage is
 79%, not the 90% two shipped plans' acceptance criteria claim, and nothing
-enforces any floor (#548). And 52 of 74 curated library frames disagree with
+enforces any floor (#548). And 23 of 75 curated library frames disagree with
 their sidecars in the local integration environment (#288), so the regression
 instrument that is supposed to catch a navigation change is itself red; until
 it is reconciled, "no new failures against `main`" is the only gate a
@@ -230,13 +230,6 @@ answer or fails on a navigable scene.
 navigator's output at scale) and are exactly what a user hits first.
 The known open defects:
 
-- **#503** — the only Critical issue open. The orchestrator's per-model and
-  per-technique sandboxes swallow exceptions, so an image whose model or
-  technique raised reports `success` on silently reduced evidence. Every
-  number downstream of it — the agreement study's inputs, the library
-  cross-check, the confidence calibration — is drawn from runs that cannot
-  distinguish "this technique had nothing to say" from "this technique
-  crashed". Fix before the study consumes navigator output at scale.
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature. Standing library reds.
 - **#504** — RingEdgeNav's pooled inlier-fraction veto discards correct ring
@@ -438,7 +431,7 @@ cannot follow.
 - Summary-PNG unit tests (#177).
 - The image-library regression reconciliation (#288). In the local
   integration environment it is not reduced to the deliberately-red pins:
-  52 of 74 frames disagree, which is the state Track A's evidence has to be
+  23 of 75 frames disagree, which is the state Track A's evidence has to be
   read against, and it is what blocks the only place a built product is
   compared between the results tree and the index (#547).
 - Suite coverage is 79% and unenforced against a stated 90% (#548). The
@@ -501,11 +494,9 @@ star-navigation bug fixes (#19, #18) can start any time.
 ## 5. Suggested global order
 
 0. **First, and small:** land PR #484 (#447, the round-trip residual), which
-   is green and fifty commits behind `main`, and fix #503, the swallowed
-   model and technique exceptions. Both sit upstream of every number Track A
-   is about to collect, and neither is a multi-day item. #521 and #522 belong
-   in the same sweep: they are Essential, small, and they put a wrong
-   attitude into a delivered kernel.
+   is green and fifty commits behind `main`. #521 and #522 belong in the same
+   sweep: they are Essential, small, and they put a wrong attitude into a
+   delivered kernel.
 1. **Then, in parallel:** Track A items 1-4 (library growth, sim
    realism campaign, agreement-estimator real-frame follow-ups, distortion
    feed-in). The operator decisions in section 6 go across as a batch — they
@@ -570,28 +561,27 @@ library votes and the decision gates, not by any implementation.
 ## 7. Issue index (open work by track)
 
 Every open issue, listed exactly once by the track that owns it. 239 issues
-as of 2026-08-25; the counts are given so a reader can tell a stale index
+as of 2026-08-26; the counts are given so a reader can tell a stale index
 from a current one at a glance.
 
 | Track | Count | Issues |
 |---|---|---|
 | A — validation & calibration | 50 | #84, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407, #409, #426 |
-| B — navigation correctness | 25 | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406, #447, #476, #482, #503, #504, #521, #522 |
+| B — navigation correctness | 24 | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406, #447, #476, #482, #504, #521, #522 |
 | C — statistics & QA | 4 | #240, #340, #533, #535 (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | 73 | #28, #30, #47, #53, #54, #55, #57, #63, #66, #67, #69, #71, #72, #73, #74, #75, #76, #77, #79, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #433, #434, #435, #436, #437, #440, #444, #448, #455, #459, #462, #464, #465, #466, #467, #468, #472, #486, #493, #495, #496, #497, #501, #512, #513, #514, #515, #519, #520, #528, #531, #534, #536, #538, #540, #541, #542 |
-| E — test & docs debt | 25 | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446, #470, #471, #473, #483, #516, #524, #525, #530, #545, #547, #548, #549 |
+| E — test & docs debt | 26 | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446, #470, #471, #473, #483, #516, #524, #525, #530, #545, #547, #548, #549, #554 |
 | F — instruments, features, hardening | 62 | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428, #494, #518, #552 |
 
-Priority census across all six tracks: 1 Critical (#503), 22 Essential, 64
-Important, 107 Useful, 34 Minor, 11 Defer. Every open issue carries exactly
+Priority census across all six tracks: no Critical, 22 Essential, 64
+Important, 107 Useful, 35 Minor, 11 Defer. Every open issue carries exactly
 one Priority and one Effort label and at least one each of A-type and
 B-location.
 
 Cross-listed items (listed once above, noted here): #150/#128 sit in Track B
 and also serve Track A's limb-bias workstream (WS-10); the confident-wrong
 ring-lock family (#346, #476, #504) sits in Track B but gates the Track A
-study, as does #503, whose swallowed exceptions reach every number the study
-reads; #103/#134/#126 serve both Track D performance and Track F hardening;
+study; #103/#134/#126 serve both Track D performance and Track F hardening;
 #513 and #520 are results-index work in Track D that lands in the kernel
 writer and the reprojection package respectively; #521/#522 are kernel-facing
 defects owned by Track B because the fix is in the navigator; the

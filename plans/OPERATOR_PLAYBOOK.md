@@ -109,16 +109,13 @@ instrument.
 
 **Group 1 — evidence integrity.** Nothing above this in the whole project.
 
-1. **#503** — make an unexpected model or technique exception fatal to the
-   image, with a status reason naming it. The only Critical issue open, and
-   the reason every downstream number is currently unable to distinguish a
-   technique that had nothing to say from one that crashed.
-2. **#288 diagnosis** — attribute all 52 red library frames: which are
-   pinned, which are environment, which are genuine navigation changes. The
-   attribution is fully agent-executable and is the valuable half. Only the
-   resolution needs you, and only where it would move an operator-verified
-   `expected.*` field, which is never done to match current behavior.
-3. **#521** and **#522** — the fitted rotation dropped from a conflicted
+1. **#288 resolution** — the library reds are attributed: 20 of the 23 are
+   one dependency defect (a ring backplane's key no longer survives a
+   polymath clone, so `rings:SATURN.create_model` raises), and 3 are genuine
+   navigation disagreements. The defect has a fix; the 3 need you, and only
+   where the answer would move an operator-verified `expected.*` field, which
+   is never done to match current behavior.
+2. **#521** and **#522** — the fitted rotation dropped from a conflicted
    result, and rotation fitting off for Galileo SSI. Both Essential, both
    small, both keep a wrong attitude out of a delivered kernel. #522 is
    configuration and documentation with no code change.
@@ -162,7 +159,7 @@ is what makes Group 1 worth starting today.
 ## 1. The library regression, and the deliberately-red set
 
 **Read this before trusting a library run.** In the local integration
-environment 52 of 74 sidecars disagree on `main` (#288). That is not the
+environment 23 of 75 sidecars disagree on `main` (#288). That is not the
 pinned set below; it is a broken regression instrument, and until it is
 reconciled the only gate a navigation-affecting branch can honestly clear is
 **no new failures against `main`** — run the suite on `main` first, then on
@@ -346,10 +343,7 @@ Independent review before done; all CI gates; one PR."
   reconstructed Cassini kernels, with an orphan branch behind it) and #468
   (the New Horizons pointing family) are operator decisions, not
   dispatchable work — Section 0.1.
-- **Navigation correctness, in order**: #503 first (the orchestrator swallows
-  model and technique exceptions, so an image reports `success` on silently
-  reduced evidence -- the only Critical issue open, and upstream of every
-  number Track A collects). Then #504 (RingEdgeNav's pooled inlier-fraction
+- **Navigation correctness, in order**: #504 (RingEdgeNav's pooled inlier-fraction
   veto discards correct ring fits on real B-ring scenes) and #476 (RingEdgeNav
   re-locks onto the wrong ring edge under a planted shift), which belong with
   #346 and #373 as one coarse-lock family. #521 and #522 are small, Essential,
@@ -417,12 +411,9 @@ with assignee rfrenchseti.
 
 **Evidence integrity (do first; everything else reads what these produce):**
 
-- **#503** the orchestrator's sandboxes swallow model and technique
-  exceptions, so an image reports `success` on silently reduced evidence and
-  the metadata records nothing — the only Critical issue open
-- **#288** 52 of 74 library sidecars disagree on `main` locally, so the
+- **#288** 23 of 75 library sidecars disagree on `main` locally, so the
   regression instrument cannot tell a regression from the standing state;
-  blocks #483 and #547
+  20 are one dependency defect and 3 are genuine; blocks #483 and #547
 - **#548** suite coverage is 79% against a stated 90% floor with nothing
   enforcing either (Section 0.1 decision)
 - **#547** the one place a built product is compared between the results tree
@@ -590,7 +581,6 @@ kernel set):**
 0.1b merge or close PR #484                                     (operator, minutes)
 0.2 adopt transfer watch (#334)                                 (operator, minutes)
 --- then, before Track A collects anything at scale ---
-#503 fatal orchestrator exceptions   (agent session; upstream of every number)
 #288 library regression reconcile    (agent session; unblocks #483 and #547)
 #521 / #522 kernel-facing rotation   (agent session; small, Essential)
 --- then ---

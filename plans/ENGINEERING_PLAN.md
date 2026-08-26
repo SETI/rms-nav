@@ -21,13 +21,7 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-Ordering within the track: **#503 first**, because it is the only Critical
-issue open and it is upstream of every other measurement here -- the
-orchestrator's per-model and per-technique sandboxes swallow exceptions, so
-an image whose model or technique raised reports `success` on silently
-reduced evidence, and nothing downstream can tell that apart from a
-technique that legitimately had nothing to say. Then the confidently-wrong
-defects (#346, #504, #476, #350), because the agreement study consumes
+Ordering within the track: the confidently-wrong defects (#346, #504, #476, #350), because the agreement study consumes
 ensemble output at scale and several curated library frames pin these as
 standing red regressions. Then the coarse-lock calibration (#373), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
@@ -87,45 +81,6 @@ geometric consensus offset the blob disputes, so an albedo-dichotomy-biased
 centroid no longer vetoes a star-confirmed limb fit. The residual that a wrong
 trusted star fix could itself corroborate a wrong geometry -- downgrading a safe
 `conflicted` to a confident-wrong `success` in that corner -- is tracked in #394.
-
-### #503 — the orchestrator swallows model and technique exceptions
-
-The only Critical issue open, and the one to do first. `NavOrchestrator`
-wraps every `NavModel` and `NavTechnique` call in a broad `except Exception`
-that logs a traceback and continues. Anything that is not a
-`NavContractError` is absorbed: the model or technique is dropped, navigation
-proceeds on whatever survived, and the image can still report
-`status=success` with an offset built from a silently reduced set of
-evidence. **Nothing about the failure reaches the metadata JSON**, so the
-results index, the PDS4 stage and the backplane stage — all of which read the
-document, not the log — cannot tell a fully-navigated image from a degraded
-one.
-
-Four sites, all in `src/spindoctor/nav_orchestrator/orchestrator.py`:
-`model.create_model()` (model dropped), `model.to_annotations(context)`
-(annotations skipped), `model.to_features(context)` (treated as zero
-features), and `technique.navigate(subset, context)` (treated as no result).
-
-It surfaced during a dependency benchmark: an `oops` regression cost
-`NavModelRings` an attribute, and across 22 images 5 lost their ring model
-while 4 of those 5 still reported `success` with plausible offsets. The
-current behavior is deliberate and documented — one misbehaving plugin should
-not take down a batch — but the implementation cannot separate the two cases
-it straddles. "This model legitimately finds nothing here" is a normal
-outcome the feature and gating path already models properly; "this model is
-broken, or its dependencies are" is a defect, and giving both the same
-`except Exception` converts a detectable failure into a quiet loss of
-accuracy.
-
-Fix direction: treat an unexpected exception as fatal to the image, with a
-status reason that names the failure, so a degraded navigation is
-distinguishable in every machine-readable artifact the pipeline writes.
-Acceptance: an image whose model or technique raised does not report
-`success`, and the document says which one raised.
-
-Sequencing: before Track A collects anything at scale. Every number the
-agreement study, the library cross-check and the confidence calibration read
-is drawn from runs that currently cannot make this distinction.
 
 ### #521 / #522 — the fitted rotation, and Galileo
 
@@ -301,7 +256,7 @@ and starts with a design document, not code.
   merge: `util/calibration/library_crosscheck.py` over the full library,
   every per-image delta accounted for; `sd_stats_report` over campaign
   outputs as the accuracy checkpoint. Note that the practice is currently
-  degraded: with 52 of 74 library frames red locally (#288), a cross-check
+  degraded: with 23 of 75 library frames red locally (#288), a cross-check
   can only be read as "no *new* deltas against `main`".
 
 ## Track D — Capability completion
@@ -688,7 +643,7 @@ asserts the generated half matches the registries.
   as one.
 - **#483** — re-ratchet the library pins the shift-equivariance fix (#447 /
   PR #484) moves. Gated on #288: pins cannot be re-ratcheted honestly
-  against a baseline that is itself 52/74 red.
+  against a baseline that is itself 23/75 red.
 - **#524** — consolidate `test_record_source.py` onto the shared
   results-index fixtures, which already exist and are built by the writer
   that makes real results trees.
