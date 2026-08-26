@@ -16,7 +16,7 @@ from spindoctor.nav_orchestrator.curator import (
 )
 from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
-from spindoctor.nav_orchestrator.nav_result import NavResult
+from spindoctor.nav_orchestrator.nav_result import NavInternalErrorRecord, NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.nav_technique.diagnostics import BodyLimbDiagnostics
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
@@ -459,3 +459,45 @@ def test_uncorrectable_result_still_records_its_times() -> None:
     """A solution with no corrected attitude still records the exposure times."""
     md = _json_round_trip(_result_with_pointing(corrected=False))
     assert md['times']['exposure_s'] == 0.18
+
+
+def _internal_error_result() -> NavResult:
+    """A result failed by a ring model that raised while building."""
+    return NavResult.failed(
+        status_reason=NavStatusReason.INTERNAL_ERROR,
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        internal_error=NavInternalErrorRecord(
+            component='rings:SATURN.create_model',
+            exception_type='AttributeError',
+        ),
+    )
+
+
+def test_an_internal_error_names_its_component_in_the_json() -> None:
+    """The document says which component raised, not only the per-image log.
+
+    Every consumer downstream of navigation -- the results index, the bundle
+    stage, the backplane stage -- reads the document.  A failure recorded
+    only in the log is a failure they cannot see.
+    """
+    md = _json_round_trip(_internal_error_result())
+    assert md['internal_error']['component'] == 'rings:SATURN.create_model'
+
+
+def test_an_internal_error_names_its_exception_type_in_the_json() -> None:
+    """The document says what class of exception was raised."""
+    md = _json_round_trip(_internal_error_result())
+    assert md['internal_error']['exception_type'] == 'AttributeError'
+
+
+def test_an_internal_error_document_carries_the_matching_status_reason() -> None:
+    """The block and the reason agree, so neither can be read without the other."""
+    md = _json_round_trip(_internal_error_result())
+    assert md['status_reason'] == 'internal_error'
+
+
+def test_a_result_with_no_internal_error_emits_no_block() -> None:
+    """An ordinary failure carries no internal_error key at all."""
+    md = _json_round_trip(_gated_titan_result())
+    assert 'internal_error' not in md

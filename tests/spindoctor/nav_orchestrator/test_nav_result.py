@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
-from spindoctor.nav_orchestrator.nav_result import NavResult
+from spindoctor.nav_orchestrator.nav_result import NavInternalErrorRecord, NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.support.status_reason import NavStatusReason
 
@@ -248,3 +248,108 @@ def test_navresult_keeps_an_infinite_unobservable_sigma() -> None:
     """
     result = _success(sigma_along_unobservable_px=math.inf)
     assert result.sigma_along_unobservable_px == math.inf
+
+
+def test_an_internal_error_reason_requires_the_record() -> None:
+    """A result claiming an internal error must say which component raised."""
+    with pytest.raises(ValueError, match='must be set together'):
+        NavResult.failed(
+            status_reason=NavStatusReason.INTERNAL_ERROR,
+            image_classifier=_classifier(),
+            provenance=_provenance(),
+        )
+
+
+def test_an_internal_error_record_requires_the_reason() -> None:
+    """A component that raised cannot be recorded under any other reason."""
+    with pytest.raises(ValueError, match='must be set together'):
+        NavResult.failed(
+            status_reason=NavStatusReason.NO_FEATURES_EXTRACTED,
+            image_classifier=_classifier(),
+            provenance=_provenance(),
+            internal_error=NavInternalErrorRecord(
+                component='NavModelStars.to_features',
+                exception_type='RuntimeError',
+            ),
+        )
+
+
+def test_an_internal_error_result_carries_both_halves() -> None:
+    """The two set together construct, and the record survives on the result."""
+    result = NavResult.failed(
+        status_reason=NavStatusReason.INTERNAL_ERROR,
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        internal_error=NavInternalErrorRecord(
+            component='NavModelStars.to_features',
+            exception_type='RuntimeError',
+        ),
+    )
+    assert result.internal_error == NavInternalErrorRecord(
+        component='NavModelStars.to_features',
+        exception_type='RuntimeError',
+    )
+
+
+def test_a_record_naming_no_component_is_refused() -> None:
+    """A record that says a component failed must say which one."""
+    with pytest.raises(ValueError, match='component must be a non-empty string'):
+        NavInternalErrorRecord(component='', exception_type='RuntimeError')
+
+
+def test_a_record_naming_no_exception_is_refused() -> None:
+    """A record must say what class of exception was raised."""
+    with pytest.raises(ValueError, match='exception_type must be a non-empty string'):
+        NavInternalErrorRecord(component='stars.to_features', exception_type='')
+
+
+def test_a_whitespace_only_component_is_refused() -> None:
+    """A component of blanks names nothing, and passes an emptiness check."""
+    with pytest.raises(ValueError, match='component must be a non-empty string'):
+        NavInternalErrorRecord(component='   ', exception_type='RuntimeError')
+
+
+def test_a_non_string_component_is_refused() -> None:
+    """An untyped caller cannot put a non-string into the document."""
+    with pytest.raises(TypeError, match='component must be str'):
+        NavInternalErrorRecord(
+            component=object(),  # type: ignore[arg-type]
+            exception_type='RuntimeError',
+        )
+
+
+def test_a_non_string_exception_type_is_refused() -> None:
+    """The exception class name is a string or the record is refused."""
+    with pytest.raises(TypeError, match='exception_type must be str'):
+        NavInternalErrorRecord(
+            component='stars.to_features',
+            exception_type=42,  # type: ignore[arg-type]
+        )
+
+
+def test_an_internal_error_cannot_be_reported_as_a_success() -> None:
+    """A hand-built success cannot carry the block that says navigation failed.
+
+    ``NavResult`` supports direct instantiation, so the two encodings of the
+    outcome are held in step here rather than only at the one construction
+    site that happens to build them together today.
+    """
+    with pytest.raises(ValueError, match='requires status=failed'):
+        NavResult(
+            status='success',
+            offset_px=(1.0, 2.0),
+            sigma_px=(0.1, 0.1),
+            sigma_along_unobservable_px=None,
+            confidence_rank='high',
+            confidence=0.9,
+            status_reason=NavStatusReason.INTERNAL_ERROR,
+            covariance_px2=None,
+            per_technique=[],
+            feature_inventory=[],
+            image_classifier=_classifier(),
+            provenance=_provenance(),
+            internal_error=NavInternalErrorRecord(
+                component='stars.to_features',
+                exception_type='RuntimeError',
+            ),
+        )

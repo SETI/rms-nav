@@ -86,4 +86,10 @@ STATUS_REASON_INFO_TEMPLATE: dict[NavStatusReason, list[str]] = {
         'Final: status=failed',
         'Internal contract violation (programming error); see the error log',
     ],
+    NavStatusReason.INTERNAL_ERROR: [
+        'Final: status=failed',
+        'A NavModel or NavTechnique raised; the image was not navigated as '
+        'designed. The failing component and exception class are in the '
+        'metadata document; the traceback is in the error log',
+    ],
 }

@@ -162,11 +162,16 @@ def _make_image_files(tmp_path: Path, *, camera: str | None = None) -> ImageFile
 
 
 def test_navigate_image_files_no_features_path(tmp_path: Path) -> None:
-    """A clean image with no registered models yields a status='failed' result.
+    """A clean image with no models selected yields a status='failed' result.
 
-    The fake observation class returns an empty NavModel set (no
-    real-scene models are registered), so the orchestrator reports
-    ``NO_FEATURES_EXTRACTED``.
+    ``nav_models='!*'`` selects no model, so nothing emits a feature and the
+    orchestrator reports ``NO_FEATURES_EXTRACTED``.  Selecting none is what
+    makes the premise true rather than merely stated: this fake observation
+    is not one the real scene models can read, and left unselected they build
+    against it and raise.  Until an unexpected exception became fatal that
+    raise was absorbed and the run reported ``no_features_extracted`` anyway
+    -- the same reason this test asserts, arrived at by an entirely different
+    route, which is the confusion the fatal path exists to remove.
     """
     obs_class = _make_fake_obs_class()
     image_files = _make_image_files(tmp_path)
@@ -174,6 +179,7 @@ def test_navigate_image_files_no_features_path(tmp_path: Path) -> None:
         obs_class,
         image_files,
         FCPath(str(tmp_path / 'results')),
+        nav_models=['!*'],
         write_output_files=False,
     )
     assert success is False
@@ -187,12 +193,8 @@ def test_navigate_image_files_no_features_path(tmp_path: Path) -> None:
     assert metadata['timing']['end_iso8601'].endswith('Z')
     assert 'navigation_result' in metadata
     nav_result = metadata['navigation_result']
-    # Without registered real-scene models the classifier still runs.
-    assert nav_result['status_reason'] in (
-        'no_features_extracted',
-        'no_signal_in_image',
-        'no_feasible_techniques',
-    )
+    assert nav_result['status_reason'] == 'no_features_extracted'
+    assert 'internal_error' not in nav_result
 
 
 def test_navigate_image_files_writes_metadata(tmp_path: Path) -> None:

@@ -64,6 +64,12 @@ class NavStatusReason(StrEnum):
     - ``CONTRACT_VIOLATION``: an internal navigation invariant was violated
       (``NavContractError``); a programming error upstream, not bad image
       data.  The full traceback is in the error log.
+    - ``INTERNAL_ERROR``: a NavModel or NavTechnique raised an exception
+      nothing anticipated (``NavInternalError``), so the image was not
+      navigated as designed and is failed rather than answered from the
+      evidence that survived.  The failing component and the exception class
+      are recorded on the result and in the metadata document; the full
+      traceback is in the error log.
     """
 
     OK = 'ok'
@@ -85,3 +91,4 @@ class NavStatusReason(StrEnum):
     FINAL_SIGMA_ABOVE_THRESHOLD = 'final_sigma_above_threshold'
     UNOBSERVABLE_OFFSET = 'unobservable_offset'
     CONTRACT_VIOLATION = 'contract_violation'
+    INTERNAL_ERROR = 'internal_error'
