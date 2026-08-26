@@ -468,7 +468,7 @@ def _internal_error_result() -> NavResult:
         image_classifier=_classifier(),
         provenance=_provenance(),
         internal_error=NavInternalErrorRecord(
-            component='NavModelRings.create_model',
+            component='rings:SATURN.create_model',
             exception_type='AttributeError',
         ),
     )
@@ -482,7 +482,7 @@ def test_an_internal_error_names_its_component_in_the_json() -> None:
     only in the log is a failure they cannot see.
     """
     md = _json_round_trip(_internal_error_result())
-    assert md['internal_error']['component'] == 'NavModelRings.create_model'
+    assert md['internal_error']['component'] == 'rings:SATURN.create_model'
 
 
 def test_an_internal_error_names_its_exception_type_in_the_json() -> None:

@@ -368,10 +368,10 @@ class NavOrchestrator(NavBase):
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.
 
-        Nothing raises through to the caller.  Every exception out of a
-        NavModel or a NavTechnique arrives here as one of two kinds and
-        becomes a failed ``NavResult``: a ``NavContractError`` (an internal
-        invariant violated by upstream code) as
+        No failure of a NavModel or a NavTechnique raises through to the
+        caller.  Every exception out of one arrives here as one of two kinds
+        and becomes a failed ``NavResult``: a ``NavContractError`` (an
+        internal invariant violated by upstream code) as
         ``NavStatusReason.CONTRACT_VIOLATION``, and anything else, wrapped as
         a ``NavInternalError`` naming the component, as
         ``NavStatusReason.INTERNAL_ERROR`` with that name and the exception's
@@ -383,14 +383,21 @@ class NavOrchestrator(NavBase):
         from one computed with every model and technique intact.  A batch
         driver sees an ordinary failed frame either way and continues.
 
-        A programming error inside :meth:`with_pointing`'s attitude
-        computation does propagate, by design: see that method.
+        The attitude computation is outside that guarantee: an unexpected
+        error inside :meth:`with_pointing` propagates, by design, so a
+        defect there fails the run on its first image rather than degrading
+        every image quietly.  See that method.
 
         Parameters:
             obs: The observation snapshot to navigate.
 
         Returns:
             A single ``NavResult`` summarizing the navigation outcome.
+
+        Raises:
+            Exception: Propagated from :meth:`with_pointing` when the
+                corrected-attitude computation hits anything other than the
+                ``NavPointingError`` it expects and absorbs.
         """
         provenance = self._make_provenance(obs)
         context, image_classifier = self._make_context(obs, provenance)

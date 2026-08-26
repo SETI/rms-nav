@@ -61,10 +61,15 @@ class NavInternalError(Exception):
     :class:`NavContractError` already does.
 
     Parameters:
-        component: What raised, as ``ClassName.method`` -- for example
-            ``NavModelRings.create_model``.  Named rather than derived so
-            the wrapper reports the plugin's registered name and not
-            whatever the traceback's innermost frame happens to be.
+        component: What raised, as ``<registered name>.<method>``.  The
+            registered name is the plugin's own, which for a model is the
+            instance name it was built under (``stars``,
+            ``rings:SATURN``) and for a technique is its class-level
+            ``name`` (``RingEdgeNav``) -- not the Python class in either
+            case.  It is passed in rather than derived so the wrapper
+            reports the name an operator sees in the log and the
+            configuration, not whatever the traceback's innermost frame
+            happens to be.
         cause: The exception the plugin raised.  Only its class name is
             kept; the traceback reaches the log through ``raise ... from``.
     """

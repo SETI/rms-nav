@@ -43,17 +43,32 @@ class NavInternalErrorRecord:
     nothing holds in step eventually disagree.
 
     Parameters:
-        component: What raised, as ``ClassName.method`` -- for example
-            ``NavModelRings.create_model``.
+        component: What raised, as ``<registered name>.<method>`` -- for a
+            model the instance name it was built under, as in
+            ``rings:SATURN.create_model``, and for a technique its
+            class-level name, as in ``RingEdgeNav.navigate``.
         exception_type: The class name of the exception raised, for example
             ``AttributeError``.  The message and traceback are deliberately
             not carried here: they can hold file paths and array contents,
             and the metadata document is an archive product.  The error log
             has both.
+
+    Raises:
+        ValueError: If either field is empty.  A record naming nothing is
+            worse than no record: it says a component failed and declines to
+            say which, and every consumer of the document then has a field
+            it must special-case.
     """
 
     component: str
     exception_type: str
+
+    def __post_init__(self) -> None:
+        """Refuse a record that names no component or no exception."""
+        if not self.component:
+            raise ValueError('component must be a non-empty string')
+        if not self.exception_type:
+            raise ValueError('exception_type must be a non-empty string')
 
 
 @dataclass(frozen=True, eq=False)
@@ -172,6 +187,15 @@ class NavResult:
             raise ValueError(
                 'status_reason=internal_error and internal_error must be set together; got '
                 f'status_reason={self.status_reason!r}, internal_error={self.internal_error!r}'
+            )
+        # An internal error is always fatal to the image, so the status says
+        # so too.  Direct instantiation is supported, and without this a
+        # hand-built result could report success while carrying the block
+        # that says navigation did not complete -- the curator would emit
+        # both, and a consumer would have to decide which half to believe.
+        if self.status_reason is NavStatusReason.INTERNAL_ERROR and self.status != 'failed':
+            raise ValueError(
+                f'status_reason=internal_error requires status=failed; got status={self.status!r}'
             )
         if self.confidence_rank == 'failed' and self.status != 'failed':
             raise ValueError('confidence_rank=failed requires status=failed')

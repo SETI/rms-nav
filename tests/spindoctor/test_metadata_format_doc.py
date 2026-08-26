@@ -331,7 +331,7 @@ def _internal_error_document() -> dict[str, Any]:
         image_classifier=_classifier(),
         provenance=_provenance(),
         internal_error=NavInternalErrorRecord(
-            component='NavModelRings.create_model',
+            component='rings:SATURN.create_model',
             exception_type='AttributeError',
         ),
     )

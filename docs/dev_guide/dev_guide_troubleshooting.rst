@@ -185,7 +185,8 @@ Technique- and ensemble-stage failures
     code checked for, against anything else a plugin threw.
 
     Read ``navigation_result.internal_error`` in the metadata document
-    first. It names the component (``NavModelRings.create_model``) and the
+    first. It names the component as ``<registered name>.<method>``
+    (``rings:SATURN.create_model``, ``RingEdgeNav.navigate``) and the
     exception class (``AttributeError``), which is usually enough to place
     the fault without opening the log; the log has the traceback.
 

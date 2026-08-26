@@ -289,3 +289,43 @@ def test_an_internal_error_result_carries_both_halves() -> None:
         component='NavModelStars.to_features',
         exception_type='RuntimeError',
     )
+
+
+def test_a_record_naming_no_component_is_refused() -> None:
+    """A record that says a component failed must say which one."""
+    with pytest.raises(ValueError, match='component must be a non-empty string'):
+        NavInternalErrorRecord(component='', exception_type='RuntimeError')
+
+
+def test_a_record_naming_no_exception_is_refused() -> None:
+    """A record must say what class of exception was raised."""
+    with pytest.raises(ValueError, match='exception_type must be a non-empty string'):
+        NavInternalErrorRecord(component='stars.to_features', exception_type='')
+
+
+def test_an_internal_error_cannot_be_reported_as_a_success() -> None:
+    """A hand-built success cannot carry the block that says navigation failed.
+
+    ``NavResult`` supports direct instantiation, so the two encodings of the
+    outcome are held in step here rather than only at the one construction
+    site that happens to build them together today.
+    """
+    with pytest.raises(ValueError, match='requires status=failed'):
+        NavResult(
+            status='success',
+            offset_px=(1.0, 2.0),
+            sigma_px=(0.1, 0.1),
+            sigma_along_unobservable_px=None,
+            confidence_rank='high',
+            confidence=0.9,
+            status_reason=NavStatusReason.INTERNAL_ERROR,
+            covariance_px2=None,
+            per_technique=[],
+            feature_inventory=[],
+            image_classifier=_classifier(),
+            provenance=_provenance(),
+            internal_error=NavInternalErrorRecord(
+                component='stars.to_features',
+                exception_type='RuntimeError',
+            ),
+        )

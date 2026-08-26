@@ -431,9 +431,9 @@ A result whose ``status_reason`` is ``internal_error`` carries an
 ``internal_error`` object, and no other result carries one. It says which
 component raised and what class of exception it raised, so a consumer
 reading the document -- rather than a person reading the log -- can tell a
-navigation that hit a defect from one that simply found nothing. A ring
-model that raised an ``AttributeError`` while building records
-``component`` as ``NavModelRings.create_model`` and ``exception_type`` as
+navigation that hit a defect from one that simply found nothing. A Saturn
+ring model that raised an ``AttributeError`` while building records
+``component`` as ``rings:SATURN.create_model`` and ``exception_type`` as
 ``AttributeError``.
 
 .. list-table::
@@ -443,8 +443,10 @@ model that raised an ``AttributeError`` while building records
    * - Key
      - Meaning
    * - ``component``
-     - What raised, as ``name.method`` -- the model or technique's
-       registered name and the method called on it.
+     - What raised, as ``<registered name>.<method>``. The registered name
+       is the model's instance name (``stars``, ``rings:SATURN``,
+       ``body:TITAN``) or the technique's name (``RingEdgeNav``), which is
+       the name the logs and the configuration use -- not the Python class.
    * - ``exception_type``
      - The class name of the exception raised.
 
