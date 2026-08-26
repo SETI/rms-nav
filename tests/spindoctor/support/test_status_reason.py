@@ -25,6 +25,7 @@ from spindoctor.support.status_reason import NavStatusReason
         'FINAL_SIGMA_ABOVE_THRESHOLD',
         'UNOBSERVABLE_OFFSET',
         'CONTRACT_VIOLATION',
+        'INTERNAL_ERROR',
     ],
 )
 def test_navstatusreason_has_value(name: str) -> None:
@@ -33,8 +34,8 @@ def test_navstatusreason_has_value(name: str) -> None:
 
 
 def test_navstatusreason_count_matches_plan() -> None:
-    """Exactly 19 values are defined; adding a value must update tests."""
-    assert len(list(NavStatusReason)) == 19
+    """Exactly 20 values are defined; adding a value must update tests."""
+    assert len(list(NavStatusReason)) == 20
 
 
 @pytest.mark.parametrize(
@@ -43,6 +44,7 @@ def test_navstatusreason_count_matches_plan() -> None:
         (NavStatusReason.OK, 'ok'),
         (NavStatusReason.RANK_1_ONLY, 'rank_1_only'),
         (NavStatusReason.UNOBSERVABLE_OFFSET, 'unobservable_offset'),
+        (NavStatusReason.INTERNAL_ERROR, 'internal_error'),
         (NavStatusReason.ALL_FEATURES_GATED, 'all_features_gated'),
     ],
 )

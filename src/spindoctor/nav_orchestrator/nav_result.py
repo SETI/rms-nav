@@ -21,7 +21,7 @@ from spindoctor.support.cmatrix import PointingSolution
 from spindoctor.support.status_reason import NavStatusReason
 from spindoctor.support.types import NDArrayFloatType
 
-__all__ = ['NavResult']
+__all__ = ['NavInternalErrorRecord', 'NavResult']
 
 
 Status = Literal['success', 'failed', 'conflicted']
@@ -29,6 +29,31 @@ Status = Literal['success', 'failed', 'conflicted']
 
 ConfidenceRank = Literal['high', 'medium', 'low', 'conflicted', 'failed']
 """Five-bucket confidence rank presented to downstream consumers."""
+
+
+@dataclass(frozen=True)
+class NavInternalErrorRecord:
+    """Which plugin raised, and what class of exception it raised.
+
+    Set on a result whose ``status_reason`` is
+    ``NavStatusReason.INTERNAL_ERROR``, and on no other, so that a document
+    saying the navigation hit an internal error always says which component
+    hit it.  The two travel together as one object rather than as two
+    optional fields for the same reason: two encodings of one fact that
+    nothing holds in step eventually disagree.
+
+    Parameters:
+        component: What raised, as ``ClassName.method`` -- for example
+            ``NavModelRings.create_model``.
+        exception_type: The class name of the exception raised, for example
+            ``AttributeError``.  The message and traceback are deliberately
+            not carried here: they can hold file paths and array contents,
+            and the metadata document is an archive product.  The error log
+            has both.
+    """
+
+    component: str
+    exception_type: str
 
 
 @dataclass(frozen=True, eq=False)
@@ -87,6 +112,9 @@ class NavResult:
             exposure times.  Stamped by the orchestrator once the
             observation is in hand; ``None`` for a host whose SPICE frames
             are unknown, or when the attitude could not be computed.
+        internal_error: Which NavModel or NavTechnique raised, and what it
+            raised.  Set when and only when ``status_reason`` is
+            ``NavStatusReason.INTERNAL_ERROR``.
     """
 
     status: Status
@@ -108,6 +136,7 @@ class NavResult:
     rotation_rad: float | None = None
     sigma_rotation_rad: float | None = None
     pointing: PointingSolution | None = None
+    internal_error: NavInternalErrorRecord | None = None
 
     def __post_init__(self) -> None:
         """Validate status against offset and reason, and the solution's finiteness."""
@@ -131,6 +160,18 @@ class NavResult:
         if self.sigma_rotation_rad is not None and not math.isfinite(self.sigma_rotation_rad):
             raise ValueError(
                 f'sigma_rotation_rad must be finite when set; got {self.sigma_rotation_rad!r}'
+            )
+        # The status reason and the record are two statements of one fact,
+        # so they are held in step here rather than left to each construction
+        # site to remember: a document reporting an internal error always
+        # says which component hit it, and no other document carries a
+        # component that never raised.
+        if (self.status_reason is NavStatusReason.INTERNAL_ERROR) != (
+            self.internal_error is not None
+        ):
+            raise ValueError(
+                'status_reason=internal_error and internal_error must be set together; got '
+                f'status_reason={self.status_reason!r}, internal_error={self.internal_error!r}'
             )
         if self.confidence_rank == 'failed' and self.status != 'failed':
             raise ValueError('confidence_rank=failed requires status=failed')
@@ -159,6 +200,7 @@ class NavResult:
         feature_inventory: list[NavFeatureSummary] | None = None,
         model_metadata: dict[str, dict[str, Any]] | None = None,
         annotations: Annotations | None = None,
+        internal_error: NavInternalErrorRecord | None = None,
     ) -> 'NavResult':
         """Construct a NavResult for a failed navigation.
 
@@ -172,6 +214,9 @@ class NavResult:
             model_metadata: Optional model metadata dict.
             annotations: Optional pre-built annotation collection
                 (typically empty on failure).
+            internal_error: Which component raised and what it raised.
+                Required when ``status_reason`` is
+                ``NavStatusReason.INTERNAL_ERROR``, and refused otherwise.
 
         Returns:
             NavResult with ``status='failed'``, ``confidence=0.0``,
@@ -192,6 +237,7 @@ class NavResult:
             provenance=provenance,
             model_metadata=model_metadata or {},
             annotations=annotations if annotations is not None else Annotations(),
+            internal_error=internal_error,
         )
 
     @classmethod

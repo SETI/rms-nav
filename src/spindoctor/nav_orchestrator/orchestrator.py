@@ -50,7 +50,7 @@ from spindoctor.nav_orchestrator.instrument_config import (
     instrument_settings_from_obs,
 )
 from spindoctor.nav_orchestrator.nav_context import NavContext
-from spindoctor.nav_orchestrator.nav_result import NavResult
+from spindoctor.nav_orchestrator.nav_result import NavInternalErrorRecord, NavResult
 from spindoctor.nav_orchestrator.provenance import (
     Provenance,
     collect_provenance_metadata,
@@ -64,7 +64,11 @@ from spindoctor.nav_technique.nav_technique import (
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.obs import obs_class_to_inst_name
 from spindoctor.support.cmatrix import compute_pointing
-from spindoctor.support.exceptions import NavContractError, NavPointingError
+from spindoctor.support.exceptions import (
+    NavContractError,
+    NavInternalError,
+    NavPointingError,
+)
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 from spindoctor.support.image_quality import cosmic_ray_mask, saturation_mask
 from spindoctor.support.nav_base import NavBase
@@ -318,6 +322,11 @@ class NavOrchestrator(NavBase):
         **not** short-circuited — the caller (manual-nav dialog,
         debugger) decides what to do on a blank or saturated frame.
 
+        A NavModel that raises propagates here rather than being converted:
+        this method returns artifacts, not a ``NavResult``, so it has nothing
+        to record a failure on.  Its callers are interactive, where an
+        exception surfacing is the right outcome.
+
         Parameters:
             obs: The observation snapshot to prepare.
             apply_gate: When ``True`` (the default) the reliability gate
@@ -359,11 +368,20 @@ class NavOrchestrator(NavBase):
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.
 
-        No image-data problem raises through to the caller: plugin failures
-        are sandboxed (see ``_extract_features`` / ``_run_pass``), and a
-        ``NavContractError`` (an internal invariant violated by upstream
-        code) is logged at error level and converted into a failed
-        ``NavResult`` with ``NavStatusReason.CONTRACT_VIOLATION``.
+        Nothing raises through to the caller.  Every exception out of a
+        NavModel or a NavTechnique arrives here as one of two kinds and
+        becomes a failed ``NavResult``: a ``NavContractError`` (an internal
+        invariant violated by upstream code) as
+        ``NavStatusReason.CONTRACT_VIOLATION``, and anything else, wrapped as
+        a ``NavInternalError`` naming the component, as
+        ``NavStatusReason.INTERNAL_ERROR`` with that name and the exception's
+        class recorded on the result.
+
+        Failing the image is the point.  The alternative -- continuing with
+        whatever evidence survived -- produces an offset that is plausible,
+        that reports ``success``, and that nothing downstream can tell apart
+        from one computed with every model and technique intact.  A batch
+        driver sees an ordinary failed frame either way and continues.
 
         A programming error inside :meth:`with_pointing`'s attitude
         computation does propagate, by design: see that method.
@@ -403,6 +421,26 @@ class NavOrchestrator(NavBase):
                 status_reason=NavStatusReason.CONTRACT_VIOLATION,
                 image_classifier=image_classifier,
                 provenance=provenance,
+            )
+        except NavInternalError as exc:
+            # error, not exception: the wrapper that raised this already
+            # logged the plugin's own traceback, which is the one worth
+            # reading.  Logging a second one here would print the re-raise
+            # chain under every internal error and bury the first.
+            self._logger.error(
+                'INTERNAL ERROR: %s; this image was not navigated as designed, '
+                'so it is failed rather than answered from the evidence that '
+                'survived; failing with status_reason=internal_error',
+                str(exc),
+            )
+            result = self._fail(
+                status_reason=NavStatusReason.INTERNAL_ERROR,
+                image_classifier=image_classifier,
+                provenance=provenance,
+                internal_error=NavInternalErrorRecord(
+                    component=exc.component,
+                    exception_type=exc.exception_type,
+                ),
             )
         return self.with_pointing(result, obs)
 
@@ -499,10 +537,10 @@ class NavOrchestrator(NavBase):
     ) -> NavResult:
         """Run the model / feature / technique / ensemble pipeline.
 
-        Called by :meth:`navigate` after the hard-failure short-circuit;
-        a ``NavContractError`` raised anywhere in here (including one
-        re-raised by a plugin sandbox) propagates to :meth:`navigate`,
-        which converts it into a failed ``NavResult``.
+        Called by :meth:`navigate` after the hard-failure short-circuit.
+        A ``NavContractError`` or ``NavInternalError`` raised anywhere in
+        here -- including one raised by a plugin wrapper -- propagates to
+        :meth:`navigate`, which converts it into a failed ``NavResult``.
 
         Parameters:
             context: Per-image NavContext.
@@ -690,11 +728,23 @@ class NavOrchestrator(NavBase):
     def _build_models(self) -> list[NavModel]:
         """Call ``create_model`` on every registered NavModel.
 
-        Wrapped so :meth:`prepare` and :meth:`navigate` share the same
-        log line and exception-sandbox behavior.  Models whose
-        ``create_model`` raises are dropped from the returned list so
-        downstream feature / annotation / metadata collection skips
-        them entirely (rather than processing partially-built state).
+        Wrapped so :meth:`prepare` and :meth:`navigate` share the same log
+        line and the same treatment of a model that raises: the exception is
+        logged with its traceback and re-raised as a ``NavInternalError``
+        naming the model, which fails the image.  A model that cannot build
+        is not a model that found nothing -- the returned list would be short
+        by a whole source of evidence, and every number computed from what
+        remained would be indistinguishable from one computed from all of it.
+
+        Returns:
+            Every registered model, built.  A partial list is never returned:
+            either all of them built or this raises.
+
+        Raises:
+            NavContractError: Propagated from a model that violated an
+                internal invariant, for :meth:`navigate` to convert.
+            NavInternalError: Raised for any other exception out of
+                ``create_model``, for :meth:`navigate` to convert.
         """
         self._logger.info(
             'Building %d NavModel(s): %s',
@@ -711,12 +761,14 @@ class NavOrchestrator(NavBase):
                     model.name,
                 )
                 raise
-            except Exception:  # plugin sandbox; mirrors _extract_features
+            except Exception as exc:
+                component = f'{model.name}.create_model'
                 self._logger.exception(
-                    'NavModel %s.create_model raised; skipping its features and annotations',
-                    model.name,
+                    'INTERNAL ERROR: %s raised; failing this image with '
+                    'status_reason=internal_error',
+                    component,
                 )
-                continue
+                raise NavInternalError(component, exc) from exc
             built_models.append(model)
         return built_models
 
@@ -760,6 +812,7 @@ class NavOrchestrator(NavBase):
         feature_inventory: list[NavFeatureSummary] | None = None,
         model_metadata: dict[str, dict[str, Any]] | None = None,
         annotations: Annotations | None = None,
+        internal_error: NavInternalErrorRecord | None = None,
     ) -> NavResult:
         """Emit the operator-readable INFO lines and return a failed NavResult.
 
@@ -775,6 +828,7 @@ class NavOrchestrator(NavBase):
             feature_inventory=feature_inventory or [],
             model_metadata=model_metadata or {},
             annotations=annotations or Annotations(),
+            internal_error=internal_error,
         )
 
     def _log_status_reason(self, status_reason: NavStatusReason) -> None:
@@ -792,9 +846,22 @@ class NavOrchestrator(NavBase):
     def _collect_annotations(self, context: NavContext, models: list[NavModel]) -> Annotations:
         """Merge per-NavModel annotation collections into one.
 
-        Each model's ``to_annotations`` is invoked; failures are logged and
-        treated as if the model emitted an empty collection so a misbehaving
-        model never blocks the rest of the pipeline.
+        Each model's ``to_annotations`` is invoked; one that raises is logged
+        with its traceback and re-raised as a ``NavInternalError`` naming the
+        model, which fails the image.  Annotations are only the summary PNG's
+        input, so failing the whole image for them may look severe -- but a
+        model that cannot describe what it found is a model in a state nobody
+        planned for, and this pipeline's rule is that no exception is
+        invisible and no image reports an outcome after one was raised.
+
+        Returns:
+            One collection merging every model's annotations.
+
+        Raises:
+            NavContractError: Propagated from a model that violated an
+                internal invariant, for :meth:`navigate` to convert.
+            NavInternalError: Raised for any other exception out of
+                ``to_annotations``, for :meth:`navigate` to convert.
         """
         merged = Annotations()
         for model in models:
@@ -806,27 +873,50 @@ class NavOrchestrator(NavBase):
                     model.name,
                 )
                 raise
-            except Exception:  # plugin sandbox; mirrors _extract_features
+            except Exception as exc:
+                component = f'{model.name}.to_annotations'
                 self._logger.exception(
-                    'NavModel %s.to_annotations raised; skipping its annotations',
-                    model.name,
+                    'INTERNAL ERROR: %s raised; failing this image with '
+                    'status_reason=internal_error',
+                    component,
                 )
-                continue
+                raise NavInternalError(component, exc) from exc
             merged.add_annotations(model_annotations)
         return merged
 
     def _extract_features(self, context: NavContext, models: list[NavModel]) -> list[NavFeature]:
         """Iterate built models and gather their features.
 
-        A misbehaving NavModel is logged with a full traceback and treated
-        as if it emitted zero features.  Catching every exception is
-        intentional: the orchestrator must never raise through to its
-        caller — failures surface on the returned ``NavResult`` instead.
-        Specific exceptions cannot be enumerated because every NavModel
-        plugin has its own failure modes.  The one exemption is
-        ``NavContractError``: a contract violation is a programming error,
-        not a plugin failure, so it is logged at error level and re-raised
-        for :meth:`navigate` to convert into a failed ``NavResult``.
+        A model that raises is logged with a full traceback and re-raised as
+        a ``NavInternalError`` naming it, which :meth:`navigate` converts
+        into a failed ``NavResult``.  Catching every exception is still
+        intentional and for the original reason -- the orchestrator must
+        never raise through to its caller, and specific exceptions cannot be
+        enumerated because every plugin has its own failure modes -- but
+        catching is no longer the same as continuing.  Failing the image is
+        not raising through to the caller: the result carries the failure and
+        the batch driver moves to the next frame as it does for any other
+        failed image.
+
+        A model that emitted zero features because there was nothing to find
+        is a different thing entirely, and reaches this method as an empty
+        list rather than as an exception; the feature and gating path already
+        models that outcome properly.  Conflating the two is what let an
+        image report ``success`` on evidence an exception had quietly
+        removed.
+
+        ``NavContractError`` keeps its own clause: it is a violated invariant
+        rather than an unanticipated failure, and stays classified as
+        ``CONTRACT_VIOLATION`` rather than ``INTERNAL_ERROR``.
+
+        Returns:
+            Every feature every model emitted, in model order.
+
+        Raises:
+            NavContractError: Propagated from a model that violated an
+                internal invariant, for :meth:`navigate` to convert.
+            NavInternalError: Raised for any other exception out of
+                ``to_features``, for :meth:`navigate` to convert.
         """
         all_features: list[NavFeature] = []
         for model in models:
@@ -838,12 +928,14 @@ class NavOrchestrator(NavBase):
                     model.name,
                 )
                 raise
-            except Exception:  # plugin sandbox; see docstring
+            except Exception as exc:
+                component = f'{model.name}.to_features'
                 self._logger.exception(
-                    'NavModel %s.to_features raised; treating as no features',
-                    model.name,
+                    'INTERNAL ERROR: %s raised; failing this image with '
+                    'status_reason=internal_error',
+                    component,
                 )
-                emitted = []
+                raise NavInternalError(component, exc) from exc
             all_features.extend(emitted)
         return all_features
 
@@ -885,24 +977,31 @@ class NavOrchestrator(NavBase):
         feasibility breakdown an engineer needs to answer "why didn't
         technique X run on image Y" from the log alone.
 
-        A misbehaving NavTechnique is logged with a full traceback and
-        omitted from the returned list, exactly as if it had produced no
-        result; the other techniques still contribute, so the navigation
-        can still succeed on their evidence.  Catching every exception is
-        intentional for the same reason as ``_extract_features``: one
-        technique's defect must not fail the image.  ``NavContractError``
-        is exempt (see ``_extract_features``): it is logged at error level
-        and re-raised for :meth:`navigate` to convert into a failed
-        ``NavResult``.
+        A NavTechnique that raises is logged with a full traceback and
+        re-raised as a ``NavInternalError`` naming it, which fails the image.
+        A technique failing among several is closer to a normal outcome than
+        a model failing to build, and treating it as one was considered; the
+        reason it is not exempted is that the pipeline has no way to record
+        the exemption honestly.  A technique with nothing to contribute
+        already has two ways to say so -- ``is_feasible`` returning false,
+        and a result marked spurious -- and both leave a trace in the
+        per-technique inventory.  An exception leaves none, so an exempted
+        technique failure would be a silently smaller ensemble, and the
+        ensemble's confidence is a function of how many witnesses agreed.
+
+        ``NavContractError`` keeps its own clause and stays classified as
+        ``CONTRACT_VIOLATION`` (see ``_extract_features``).
 
         Returns:
             One entry per technique that ran and produced a result, in
-            registry order.  A skipped, infeasible, or failed technique
-            contributes no entry, so the list may be empty.
+            registry order.  A skipped or infeasible technique contributes
+            no entry, so the list may be empty.
 
         Raises:
             NavContractError: Propagated from a technique that violated an
                 internal invariant, for :meth:`navigate` to convert.
+            NavInternalError: Raised for any other exception out of a
+                technique, for :meth:`navigate` to convert.
         """
         results: list[NavTechniqueResult] = []
         names = [
@@ -978,11 +1077,14 @@ class NavOrchestrator(NavBase):
                     cls.name,
                 )
                 raise
-            except Exception:  # plugin sandbox; see docstring
+            except Exception as exc:
+                component = f'{cls.name}.navigate'
                 self._logger.exception(
-                    'NavTechnique %s.navigate raised; treating as no result',
-                    cls.name,
+                    'INTERNAL ERROR: %s raised; failing this image with '
+                    'status_reason=internal_error',
+                    component,
                 )
+                raise NavInternalError(component, exc) from exc
         return results
 
     def _make_context(

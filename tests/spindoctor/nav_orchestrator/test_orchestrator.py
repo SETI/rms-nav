@@ -226,10 +226,16 @@ def _register_fakes() -> Iterator[None]:
     name-resolvable (``only_techniques=['_FakeStarTechnique']``) inside
     this module's tests only, and guarantees no other test in the same
     process ever sees them.
+
+    ``_RaisingTechnique`` is deliberately not among them and is registered by
+    its own fixture instead.  A technique that raises now fails the image it
+    raised on, so a module-wide registration would fail every test in this
+    file whose scene offers a STAR feature -- and would fail them with a
+    status reason describing the fake rather than whatever each test is
+    about.
     """
     fakes: list[type[NavTechnique]] = [
         _FakeStarTechnique,
-        _RaisingTechnique,
         _PassTwoTechnique,
         _InfeasibleTechnique,
         _FakeBodyPrimary,
@@ -440,7 +446,6 @@ def test_orchestrator_only_techniques_filter_drops_techniques(
         [model],
         only_techniques=[
             '!_FakeStarTechnique',
-            '!_RaisingTechnique',
             '!Star*',
         ],
     )
@@ -602,32 +607,112 @@ class _InfeasibleTechnique(NavTechnique):
         raise AssertionError('an infeasible technique must never be navigated')
 
 
-def test_orchestrator_logs_when_to_features_raises(
+@pytest.fixture
+def _register_raising_technique() -> Iterator[None]:
+    """Make ``_RaisingTechnique`` name-resolvable for one test.
+
+    Scoped to the tests that want it because a technique that raises fails
+    the image, so a module-wide registration would fail every star-bearing
+    scene in this file.
+    """
+    NavTechnique._registry.append(_RaisingTechnique)
+    try:
+        yield
+    finally:
+        NavTechnique._registry.remove(_RaisingTechnique)
+
+
+def test_a_raising_to_features_fails_the_image(
     fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A misbehaving NavModel.to_features is logged and treated as zero features."""
+    """A NavModel.to_features that raises fails the image as internal_error."""
     obs = fake_obs
     model = _RaisingModel(obs)
     orch = NavOrchestrator([model])
     result = orch.navigate(obs)  # type: ignore[arg-type]
     captured = capsys.readouterr()
-    assert result.status_reason == NavStatusReason.NO_FEATURES_EXTRACTED
-    assert 'to_features raised' in captured.out
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.INTERNAL_ERROR
+    assert result.internal_error is not None
+    assert result.internal_error.component == 'raising.to_features'
+    assert result.internal_error.exception_type == 'RuntimeError'
     assert 'synthetic to_features failure' in captured.out
 
 
-def test_orchestrator_logs_when_technique_raises(
+def test_a_raising_create_model_fails_the_image(fake_obs: _FakeObs) -> None:
+    """A NavModel.create_model that raises fails the image as internal_error."""
+    obs = fake_obs
+
+    class _BadBuildModel(_FakeStarModel):
+        """Star model whose ``create_model`` raises."""
+
+        def create_model(self) -> None:
+            """Raise instead of building."""
+            raise ValueError('synthetic create_model failure')
+
+    orch = NavOrchestrator([_BadBuildModel(obs, feature_count=2)])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.INTERNAL_ERROR
+    assert result.internal_error is not None
+    assert result.internal_error.component == 'stars.create_model'
+    assert result.internal_error.exception_type == 'ValueError'
+
+
+@pytest.mark.usefixtures('_register_raising_technique')
+def test_a_raising_technique_fails_the_image(
     fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A misbehaving NavTechnique.navigate is logged and treated as no result."""
+    """A NavTechnique.navigate that raises fails the image as internal_error."""
     obs = fake_obs
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model], only_techniques='_RaisingTechnique')
     result = orch.navigate(obs)  # type: ignore[arg-type]
     captured = capsys.readouterr()
-    assert result.status_reason == NavStatusReason.NO_FEASIBLE_TECHNIQUES
-    assert 'navigate raised' in captured.out
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.INTERNAL_ERROR
+    assert result.internal_error is not None
+    assert result.internal_error.component == '_RaisingTechnique.navigate'
+    assert result.internal_error.exception_type == 'RuntimeError'
     assert 'synthetic navigate failure' in captured.out
+
+
+@pytest.mark.usefixtures('_register_raising_technique')
+def test_a_raising_technique_is_not_answered_from_the_survivors(
+    fake_obs: _FakeObs,
+) -> None:
+    """One technique raising fails the image although another one succeeded.
+
+    This is the property the whole change exists for: before it, the working
+    technique's offset was reported as a success and nothing downstream could
+    tell that answer apart from one computed with every technique intact.
+    """
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique', '_RaisingTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.INTERNAL_ERROR
+    assert result.offset_px is None
+
+
+def test_a_contract_violation_is_not_reclassified_as_an_internal_error(
+    fake_obs: _FakeObs,
+) -> None:
+    """A NavContractError still reports contract_violation, carrying no record."""
+    obs = fake_obs
+
+    class _ContractBreakingModel(_FakeStarModel):
+        """Star model whose ``to_features`` violates an internal contract."""
+
+        def to_features(self, context: NavContext) -> list[NavFeature]:
+            """Raise the contract error."""
+            raise NavContractError('synthetic contract violation')
+
+    orch = NavOrchestrator([_ContractBreakingModel(obs, feature_count=2)])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status_reason == NavStatusReason.CONTRACT_VIOLATION
+    assert result.internal_error is None
 
 
 def test_orchestrator_ensemble_contract_violation_yields_failed_result(
@@ -735,11 +820,17 @@ def test_orchestrator_records_model_metadata(fake_obs: _FakeObs) -> None:
 
 
 def test_orchestrator_records_annotations(fake_obs: _FakeObs) -> None:
-    """Annotations from every NavModel are merged into NavResult.annotations."""
+    """Annotations from every NavModel are merged into NavResult.annotations.
+
+    The navigation is asserted to have reached the merge, because a failed
+    result carries an empty ``Annotations`` too: checking only the type
+    passes on a run that never called ``to_annotations`` at all.
+    """
     obs = fake_obs
     model = _FakeStarModel(obs, feature_count=2)
     orch = NavOrchestrator([model])
     result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status_reason != NavStatusReason.INTERNAL_ERROR
     assert isinstance(result.annotations, Annotations)
 
 
@@ -757,17 +848,27 @@ def test_orchestrator_low_reliability_features_all_gated(fake_obs: _FakeObs) -> 
     assert result.status_reason == NavStatusReason.ALL_FEATURES_GATED
 
 
-def test_collect_annotations_skips_failing_model(
+def test_a_raising_to_annotations_fails_the_image(
     fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A failing to_annotations doesn't break the rest of the pipeline."""
+    """A failing to_annotations fails the image, though a sibling model worked.
+
+    Annotations only feed the summary PNG, so failing the whole image for one
+    is the severest reading of the rule.  It is the rule all the same: a model
+    that cannot describe what it found is in a state nobody planned for, and
+    an offset reported from a run that hit one would be indistinguishable from
+    an offset reported from a run that did not.
+    """
     obs = fake_obs
 
     class _GoodModel(_FakeStarModel):
-        pass
+        """Star model that annotates normally."""
 
     class _BadAnnotationModel(_FakeStarModel):
+        """Star model whose ``to_annotations`` raises."""
+
         def to_annotations(self, context: NavContext) -> Annotations:
+            """Raise instead of annotating."""
             raise RuntimeError('synthetic to_annotations failure')
 
     bad = _BadAnnotationModel(obs, feature_count=2)
@@ -775,8 +876,10 @@ def test_collect_annotations_skips_failing_model(
     orch = NavOrchestrator([bad, good], only_techniques=['_FakeStarTechnique'])
     result = orch.navigate(obs)  # type: ignore[arg-type]
     captured = capsys.readouterr()
-    assert result.status == 'success'
-    assert 'to_annotations raised' in captured.out
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.INTERNAL_ERROR
+    assert result.internal_error is not None
+    assert result.internal_error.component == 'stars.to_annotations'
     assert 'synthetic to_annotations failure' in captured.out
 
 
@@ -1188,7 +1291,6 @@ def test_no_feasible_techniques_emits_status_reason_info(
         [model],
         only_techniques=[
             '!_FakeStarTechnique',
-            '!_RaisingTechnique',
             '!_InfeasibleTechnique',
             '!Star*',
         ],

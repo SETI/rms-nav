@@ -36,7 +36,7 @@ from spindoctor.feature.feature import NavReliabilityBreakdown
 from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.nav_orchestrator.feature_summary import NavFeatureSummary
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
-from spindoctor.nav_orchestrator.nav_result import NavResult
+from spindoctor.nav_orchestrator.nav_result import NavInternalErrorRecord, NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.nav_technique.diagnostics import BodyLimbDiagnostics
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
@@ -319,6 +319,25 @@ def _failed_document() -> dict[str, Any]:
     return _document(_with_pointing(result, corrected=False), shutter_mode=None)
 
 
+def _internal_error_document() -> dict[str, Any]:
+    """The written document for a navigation a plugin's exception failed.
+
+    Carried by the writer-to-chapter guard because its ``internal_error``
+    block appears on no other document shape: without it the chapter could
+    stop documenting the block and every check here would still pass.
+    """
+    result = NavResult.failed(
+        status_reason=NavStatusReason.INTERNAL_ERROR,
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        internal_error=NavInternalErrorRecord(
+            component='NavModelRings.create_model',
+            exception_type='AttributeError',
+        ),
+    )
+    return _document(_with_pointing(result, corrected=False), shutter_mode=None)
+
+
 class _LoadErrorObsClass:
     """Observation class whose load always fails with a SPICE coverage error."""
 
@@ -384,6 +403,7 @@ def test_every_writer_key_is_documented(tmp_path: Path) -> None:
     emitted |= _leaf_key_names(_success_document())
     emitted |= _leaf_key_names(_rotation_document())
     emitted |= _leaf_key_names(_failed_document())
+    emitted |= _leaf_key_names(_internal_error_document())
     emitted |= _leaf_key_names(_load_error_document(tmp_path))
     emitted |= _leaf_key_names(_early_return_document(tmp_path))
     missing = emitted - _documented_key_literals()

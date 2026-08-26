@@ -177,6 +177,27 @@ Technique- and ensemble-stage failures
     image data. The full traceback is in the error log; file it as a
     defect rather than re-running with different settings.
 
+``internal_error``
+    A navigation model or technique raised an exception nothing anticipated,
+    so the image was not navigated as designed. Like ``contract_violation``
+    this is a defect rather than a setting to change, and the difference
+    between them is only where it came from: a violated invariant that core
+    code checked for, against anything else a plugin threw.
+
+    Read ``navigation_result.internal_error`` in the metadata document
+    first. It names the component (``NavModelRings.create_model``) and the
+    exception class (``AttributeError``), which is usually enough to place
+    the fault without opening the log; the log has the traceback.
+
+    An exception raised by one model or technique fails the whole image even
+    when others succeeded, and that is deliberate. Continuing on the
+    survivors produces an offset that looks exactly like a whole one, and a
+    frame silently navigated on less evidence than it should have been is
+    worse than a frame reported failed -- especially at campaign scale,
+    where nobody reads the logs. A dependency regression that costs one
+    model its output shows up as a batch of failures rather than as a
+    quiet, unmeasurable loss of accuracy.
+
 Conflicted results
 ==================
 

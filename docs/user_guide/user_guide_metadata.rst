@@ -417,6 +417,40 @@ accompanies ``failed``.
      - An internal navigation invariant was violated -- a programming
        error upstream, not bad image data. The full traceback is in the
        error log.
+   * - ``internal_error``
+     - A navigation model or technique raised an exception nothing
+       anticipated, so the image was not navigated as designed and is
+       reported failed rather than answered from the evidence that
+       survived. The ``internal_error`` block below names the component and
+       the exception class; the full traceback is in the error log.
+
+The internal-error block
+------------------------
+
+A result whose ``status_reason`` is ``internal_error`` carries an
+``internal_error`` object, and no other result carries one. It says which
+component raised and what class of exception it raised, so a consumer
+reading the document -- rather than a person reading the log -- can tell a
+navigation that hit a defect from one that simply found nothing. A ring
+model that raised an ``AttributeError`` while building records
+``component`` as ``NavModelRings.create_model`` and ``exception_type`` as
+``AttributeError``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Key
+     - Meaning
+   * - ``component``
+     - What raised, as ``name.method`` -- the model or technique's
+       registered name and the method called on it.
+   * - ``exception_type``
+     - The class name of the exception raised.
+
+The exception's message and traceback are deliberately not recorded here.
+They can carry local file paths and array contents, and this document is an
+archive product; the per-image error log holds both.
 
 Per-technique entries
 ---------------------

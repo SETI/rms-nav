@@ -342,6 +342,14 @@ def build_metadata_dict(result: NavResult) -> dict[str, Any]:
         out['sigma_rotation_deg'] = _round_float(
             math.degrees(result.sigma_rotation_rad), CONFIDENCE_DECIMALS
         )
+    if result.internal_error is not None:
+        # Present when and only when status_reason is internal_error, which
+        # NavResult holds in step, so a consumer that sees the reason can
+        # read the component without checking for the key's absence first.
+        out['internal_error'] = {
+            'component': result.internal_error.component,
+            'exception_type': result.internal_error.exception_type,
+        }
     if result.pointing is not None:
         out['pointing'] = _curate_pointing(result.pointing)
         out['times'] = _curate_times(result.pointing.baseline)

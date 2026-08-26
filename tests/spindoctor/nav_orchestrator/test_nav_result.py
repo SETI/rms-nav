@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from spindoctor.nav_orchestrator.image_classifier_result import NavImageClassifierResult
-from spindoctor.nav_orchestrator.nav_result import NavResult
+from spindoctor.nav_orchestrator.nav_result import NavInternalErrorRecord, NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.support.status_reason import NavStatusReason
 
@@ -248,3 +248,44 @@ def test_navresult_keeps_an_infinite_unobservable_sigma() -> None:
     """
     result = _success(sigma_along_unobservable_px=math.inf)
     assert result.sigma_along_unobservable_px == math.inf
+
+
+def test_an_internal_error_reason_requires_the_record() -> None:
+    """A result claiming an internal error must say which component raised."""
+    with pytest.raises(ValueError, match='must be set together'):
+        NavResult.failed(
+            status_reason=NavStatusReason.INTERNAL_ERROR,
+            image_classifier=_classifier(),
+            provenance=_provenance(),
+        )
+
+
+def test_an_internal_error_record_requires_the_reason() -> None:
+    """A component that raised cannot be recorded under any other reason."""
+    with pytest.raises(ValueError, match='must be set together'):
+        NavResult.failed(
+            status_reason=NavStatusReason.NO_FEATURES_EXTRACTED,
+            image_classifier=_classifier(),
+            provenance=_provenance(),
+            internal_error=NavInternalErrorRecord(
+                component='NavModelStars.to_features',
+                exception_type='RuntimeError',
+            ),
+        )
+
+
+def test_an_internal_error_result_carries_both_halves() -> None:
+    """The two set together construct, and the record survives on the result."""
+    result = NavResult.failed(
+        status_reason=NavStatusReason.INTERNAL_ERROR,
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        internal_error=NavInternalErrorRecord(
+            component='NavModelStars.to_features',
+            exception_type='RuntimeError',
+        ),
+    )
+    assert result.internal_error == NavInternalErrorRecord(
+        component='NavModelStars.to_features',
+        exception_type='RuntimeError',
+    )
