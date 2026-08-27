@@ -66,7 +66,7 @@ on that baseline; each has a tracking issue (cross-map below).
 rather than methodology, and it silently corrupts what every workstream below
 reads:
 
-- **#288** — 23 of 75 curated library sidecars disagree in the local
+- **#288** — 10 of 75 curated library sidecars disagree in the local
   integration environment, so the regression instrument that is supposed to
   detect a navigation change cannot currently do so. Until it is reconciled,
   a navigation-affecting change can only be gated on *no new failures against
@@ -103,7 +103,7 @@ carry the methodology and acceptance criteria):
 | WS-1b | #226 | Reprojection consistency. |
 | WS-2 | #227 (+ #223, #309, #341, #377, #409) | De-circularization done; #227 open only for the realism residual (realism-anchored calibration #309, terminator verdict #223, sim-fidelity gaps, and the scene-coordinate convention split #409 where stars are the outlier). |
 | WS-17 | #355 | Distortion measured from star fields; residual is the per-camera Voyager sim split. |
-| WS-3 | #172, #174, #235, #288 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. #288 is the standing regression: 23 of 75 sidecars disagree locally, so the library's tiers are not currently verified expectations. |
+| WS-3 | #172, #174, #235, #288 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. #288 is the standing regression: 10 of 75 sidecars disagree locally, so the library's tiers are not currently verified expectations. |
 | WS-4 | #229, #426, #324, #336, #335, #340 | CI integration tiers, plus what does not run in Actions today: the agreement-estimator tests (#324), the data-independent simulator suites (#336), the committed sim baselines that have no canonical environment (#335), and the cross-check's yes/no primary-technique flag (#340). |
 | WS-5 | #230, #176 | Real-anchored recalibration once WS-1 anchors exist. |
 | WS-6 | #231 | Capability matrix. |

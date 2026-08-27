@@ -61,7 +61,7 @@ validation.
 Two facts about the evidence behind that health are worth stating plainly,
 because both are load-bearing and neither is comfortable. Suite coverage is
 79%, not the 90% two shipped plans' acceptance criteria claim, and nothing
-enforces any floor (#548). And 23 of 75 curated library frames disagree with
+enforces any floor (#548). And 10 of 75 curated library frames disagree with
 their sidecars in the local integration environment (#288), so the regression
 instrument that is supposed to catch a navigation change is itself red; until
 it is reconciled, "no new failures against `main`" is the only gate a
@@ -286,8 +286,6 @@ The known open defects:
 - **#400** — the ensemble merge and tier logic have never been exercised on
   a strongly anisotropic covariance; the haze fit reports a 0.36 px by
   1.02 px oblique ellipse whose orientation varies with the sun direction.
-- **#406** — two pre-existing library reds (N1487595731_1, N1633925572_1)
-  that fail identically on main and were not in the pinned-red table.
 - **#447** — body techniques do not return the shift they are given, which is
   the round-trip residual every corrected-pointing consumer inherits. This is
   the one piece of open work in flight: PR #484 fixes both body-side causes
@@ -428,7 +426,7 @@ cannot follow.
 - Summary-PNG unit tests (#177).
 - The image-library regression reconciliation (#288). In the local
   integration environment it is not reduced to the deliberately-red pins:
-  23 of 75 frames disagree, which is the state Track A's evidence has to be
+  10 of 75 frames disagree, which is the state Track A's evidence has to be
   read against, and it is what blocks the only place a built product is
   compared between the results tree and the index (#547).
 - Suite coverage is 79% and unenforced against a stated 90% (#548). The
@@ -567,14 +565,14 @@ from a current one at a glance.
 | Track | Count | Issues |
 |---|---|---|
 | A — validation & calibration | 51 | #84, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407, #409, #426, #561 |
-| B — navigation correctness | 25 | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #406, #447, #476, #482, #504, #521, #557, #558 |
+| B — navigation correctness | 24 | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #447, #476, #482, #504, #521, #557, #558 |
 | C — statistics & QA | 4 | #240, #340, #533, #535 (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | 73 | #28, #30, #47, #53, #54, #55, #57, #63, #66, #67, #69, #71, #72, #73, #74, #75, #76, #77, #79, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #433, #434, #435, #436, #437, #440, #444, #448, #455, #459, #462, #464, #465, #466, #467, #468, #472, #486, #493, #495, #496, #497, #501, #512, #513, #514, #515, #519, #520, #528, #531, #534, #536, #538, #540, #541, #542 |
-| E — test & docs debt | 26 | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446, #470, #471, #473, #483, #516, #524, #525, #530, #545, #547, #548, #549, #554 |
+| E — test & docs debt | 27 | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446, #470, #471, #473, #483, #516, #524, #525, #530, #545, #547, #548, #549, #554, #562 |
 | F — instruments, features, hardening | 62 | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428, #494, #518, #552 |
 
-Priority census across all six tracks: no Critical, 21 Essential, 66
-Important, 107 Useful, 35 Minor, 12 Defer. Every open issue carries exactly
+Priority census across all six tracks: no Critical, 21 Essential, 65
+Important, 108 Useful, 35 Minor, 12 Defer. Every open issue carries exactly
 one Priority and one Effort label and at least one each of A-type and
 B-location.
 

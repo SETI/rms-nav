@@ -111,12 +111,15 @@ instrument.
 
 **Group 1 — evidence integrity.** Nothing above this in the whole project.
 
-1. **#288 resolution** — the library reds are attributed: 20 of the 23 are
-   one dependency defect (a ring backplane's key no longer survives a
-   polymath clone, so `rings:SATURN.create_model` raises), and 3 are genuine
-   navigation disagreements. The defect has a fix; the 3 need you, and only
-   where the answer would move an operator-verified `expected.*` field, which
-   is never done to match current behavior.
+1. **#288 resolution** — every one of the 10 reds is attributed and owned.
+   Four are the coarse-lock family (#346's three, plus `N1633925572_1` whose
+   tier the wrong ring lock moves); two are the Galileo star fields whose
+   ground truth was captured under three degrees of freedom and no longer
+   describes a two-DoF fit; one is the standing #24 exclusion; one is a real
+   limb bias deliberately pinned red; and
+   two are stale or wrong `primary_technique` pins batched onto #483. Nothing
+   is unattributed, and no `expected.*` field is moved to match current
+   behaviour.
 2. **#557** — decide where the combined confidence should saturate. It caps
    at 0.99 whenever two techniques agree at a mean of 0.66, which is the
    ordinary good case, so the scale carries no information above the cap and
@@ -163,7 +166,7 @@ is what makes Group 1 worth starting today.
 ## 1. The library regression, and the deliberately-red set
 
 **Read this before trusting a library run.** In the local integration
-environment 23 of 75 sidecars disagree on `main` (#288). That is not the
+environment 10 of 75 sidecars disagree on `main` (#288). That is not the
 pinned set below; it is a broken regression instrument, and until it is
 reconciled the only gate a navigation-affecting branch can honestly clear is
 **no new failures against `main`** — run the suite on `main` first, then on
@@ -185,8 +188,8 @@ closes.
 | N1492091163, N1867601758, N1867602424 (wrong ring-feature locks) | #346 |
 | N1853392805 (highly-irregular exclusion discards the terminator fit) | #338 |
 | N1484593951, N1686349893 (resolved-body ~2 px offset misses) | #350 |
-| N1487595731_1 (multi_body: expects BodyDiscCorrelateNav primary, gets BodyLimbNav) | #406 |
-| N1633925572_1 (ring_plus_body: expects the medium tier, gets low) | #406 |
+| N1487595731_1 (multi_body: expects BodyDiscCorrelateNav primary, gets BodyLimbNav) | #483 |
+| N1633925572_1 (ring_plus_body: expects the medium tier, gets low) | #504 / #476 |
 
 **After any navigation-affecting merge, compare against `main` rather than
 against the table:**
@@ -421,7 +424,7 @@ with assignee rfrenchseti.
 
 **Evidence integrity (do first; everything else reads what these produce):**
 
-- **#288** 23 of 75 library sidecars disagree on `main` locally, so the
+- **#288** 10 of 75 library sidecars disagree on `main` locally, so the
   regression instrument cannot tell a regression from the standing state;
   20 are one dependency defect and 3 are genuine; blocks #483 and #547
 - **#548** suite coverage is 79% against a stated 90% floor with nothing
@@ -537,9 +540,6 @@ deferred until an instrument fits rotation again; a test fails if one does.
   on N1853392805 (decision)
 - **#350** two resolved-body frames miss offset tolerance by ~2 px
   (N1484593951, N1686349893)
-- **#406** two pre-existing reds (N1487595731_1, N1633925572_1) that fail
-  identically on `main` and were not in the pinned table
-
 **Agreement estimator real-frame follow-ups (sequence with #225/WS-1 and
 #230/WS-5):**
 

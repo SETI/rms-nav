@@ -254,9 +254,7 @@ and starts with a design document, not code.
   cap that behaves as a size-dependent gate (#404), the uncharacterized
   extreme-phase edge (#401), and opaque-ring masking that refuses frames
   visible through the C ring or the gaps (#402). The ensemble has never been
-  exercised on the oblique covariance the fit reports (#400), and two
-  pre-existing library reds found while attributing its cross-check need an
-  owner (#406).
+  exercised on the oblique covariance the fit reports (#400).
 
 ## Track C — Statistics and QA
 
@@ -282,7 +280,7 @@ and starts with a design document, not code.
   merge: `util/calibration/library_crosscheck.py` over the full library,
   every per-image delta accounted for; `sd_stats_report` over campaign
   outputs as the accuracy checkpoint. Note that the practice is currently
-  degraded: with 23 of 75 library frames red locally (#288), a cross-check
+  degraded: with 10 of 75 library frames red locally (#288), a cross-check
   can only be read as "no *new* deltas against `main`".
 
 ## Track D — Capability completion
@@ -668,7 +666,7 @@ asserts the generated half matches the registries.
   as one.
 - **#483** — re-ratchet the library pins the shift-equivariance fix (#447 /
   PR #484) moves. Gated on #288: pins cannot be re-ratcheted honestly
-  against a baseline that is itself 23/75 red.
+  against a baseline that is itself 10/75 red.
 - **#524** — consolidate `test_record_source.py` onto the shared
   results-index fixtures, which already exist and are built by the writer
   that makes real results trees.
