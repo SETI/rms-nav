@@ -136,11 +136,13 @@ Examples
     )
 
 **Galileo SSI.**  ``config_410_inst_gossi.yaml`` declares a flat block rather
-than a per-camera one, so the resolution reads ``config.category('galileo_ssi')``
-directly. Everything downstream is unchanged: the orchestrator's per-image
-:class:`~spindoctor.nav_orchestrator.nav_context.NavContext` inherits
+than a per-camera one, so the resolution calls
+:meth:`~spindoctor.config.config.Config.category` with ``'galileo_ssi'`` and
+reads the block directly. Resolution is otherwise identical: the orchestrator's
+per-image :class:`~spindoctor.nav_orchestrator.nav_context.NavContext` inherits
 ``fit_camera_rotation`` and ``max_rotation_deg`` from that block exactly as it
-does from a per-camera one.
+does from a per-camera one, and what those values then decide is unchanged by
+where they were read from.
 
 **Cassini ISS CALIB pipeline.**  When the operator runs the calibrated-IF pipeline,
 ``data_units: calibrated_if``, ``noise.saturation_dn: null``, and
