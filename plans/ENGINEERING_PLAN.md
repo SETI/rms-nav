@@ -100,7 +100,7 @@ so no result carries a rotation to drop. What re-opens it is any instrument
 setting `fit_camera_rotation: true`, which
 `test_no_shipped_instrument_fits_camera_rotation` fails on, naming this
 precondition. It is not worth doing alone: fitting every technique about the
-FOV centre (#434) removes the per-technique pivot entirely and needs no pivot
+FOV center (#434) removes the per-technique pivot entirely and needs no pivot
 field, so the conflicted path's rotation parameters should be designed with
 that rather than bolted onto the present scheme. When it is picked up, 35
 test sites already build a `NavContext` with `fit_camera_rotation=True`, so a
@@ -168,8 +168,8 @@ the old code reported a pinned +-0.5 px.
 
 The PR is green, mergeable, and fifty commits behind `main`. What it filed
 rather than fixed: RingEdgeNav is not shift-equivariant either and a planted
-shift re-locks it onto the wrong ring edge (#476, same family as #346 and
-#373 seen from the round-trip side); `BodyDiscCorrelateNav` still misses by
+shift re-locks it onto the wrong ring edge (#476, same family as #346
+and #373 seen from the round-trip side); `BodyDiscCorrelateNav` still misses by
 up to ~1 px on a weakly-constrained axis (#482); and the library pins the fix
 moves need re-ratcheting (#483, which cannot be done honestly until #288 is
 reconciled).
@@ -553,8 +553,8 @@ asserts the generated half matches the registries.
   fix the dropped `extra_params` and the ImageFiles cardinality
   disagreement.
 - **#493** — `sd_mosaic` reports a lost results index as N failed images
-  rather than as one run-level condition. Same shape of defect as #418 and
-  #496 and worth fixing with them: a run-level fault reported per image
+  rather than as one run-level condition. Same shape of defect as #418
+  and #496 and worth fixing with them: a run-level fault reported per image
   reads to an operator as N unrelated failures.
 - **#515 / #516** — a cloud-share ingest can write another root's document
   into this root's rows, because `_share_from_task` reads the stub straight
@@ -591,15 +591,15 @@ asserts the generated half matches the registries.
   the broader sd_*-driver test effort. The backplane suite carries strict
   xfails for #251, #252, #253, ready to flip when each fix lands.
 - **#288** — image-library regression reconciliation, and the piece of test
-  debt with the widest blast radius. In the local integration environment 52
-  of 74 sidecars disagree, which is far more than the deliberately-pinned
-  set below and means the regression instrument cannot currently distinguish
-  a navigation regression from the standing state. Two consequences to hold
+  debt with the widest blast radius. In the local integration environment 10
+  of 75 sidecars disagree, each one attributed and owned, but the set is
+  still wider than the deliberately-pinned one below, so the regression
+  instrument cannot yet be read as clean. Two consequences to hold
   onto: a navigation-affecting branch can only be gated on *no new failures
   against `main`*, and #547 (the one place a built product is compared
   between the results tree and the results index) is blocked because the
-  frame it needs no longer navigates. Reconciling this is prerequisite to
-  #483's re-ratchet and to reading the Track A cohorts with confidence.
+  frame it needs no longer navigates. Reconciling this is prerequisite
+  to #483's re-ratchet and to reading the Track A cohorts with confidence.
 
   The intended steady state, and what the pins mean when it is reached: the
   standing red set reduced to the deliberately-pinned frames, each owned by

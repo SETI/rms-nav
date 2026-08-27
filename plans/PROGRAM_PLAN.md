@@ -293,7 +293,10 @@ The known open defects:
   saturated refinement) and files the rest as #476, #482 and #483. It is
   mergeable and green, and it is fifty commits behind `main`.
 
-**Parallelism:** fully parallel with Track A.
+**Parallelism:** parallel with Track A, except that the coarse-lock family
+(#346, #476, #504) gates the agreement study -- a technique that reports a
+confidently wrong answer moves the cross-technique disagreement WS-1 measures
+-- and #288 gates reading any Track A cohort with confidence.
 
 ### Track C — Statistics, QA, and the accuracy checkpoint
 
@@ -370,14 +373,14 @@ and one enumerated list of where the two storages answer differently. The
 design is archived at `plans/archive/RESULTS_INDEX_PLAN_2026-08-04.md`;
 current behavior is `docs/user_guide/user_guide_results_index.rst` and its
 dev-guide companion. Its follow-ups divide into three groups: capability
-extensions nobody is blocked on (a document column for bundle generation
-#464, a schema wide enough for the curation triage tool #465, a `--since`
-selector #467, `sd_offset` writing its own rows #486, a pruned-rows question
-#542), operational questions with a decision in them (a documented workflow
+extensions nobody is blocked on (a document column for bundle
+generation #464, a schema wide enough for the curation triage tool #465, a `--since`
+selector #467, `sd_offset` writing its own rows #486, a pruned-rows
+question #542), operational questions with a decision in them (a documented workflow
 for getting the index to cloud workers #466, the consumer open that takes a
-write lock it never needs #462), and correctness or hygiene items (#472,
-#493, #496, #497, #501, #512, #514, #515, #516, #528, #531, #533, #534,
-#536, #538, #540, #541).
+write lock it never needs #462), and correctness or hygiene items
+(#472, #493, #496, #497, #501, #512, #514, #515, #516, #528,
+and #531, #533, #534, #536, #538, #540, #541).
 
 Some items start with an operator decision, because each is a scope
 commitment:
@@ -433,8 +436,8 @@ cannot follow.
   shortfall is almost entirely PyQt6 widget code. This is an operator call
   before it is an implementer's: raise the number, or ratify a lower floor
   and gate on that one.
-- Tests that cannot fail, which this project has now hit repeatedly:
-  #516 asserts on the row a root-blind write would keep, and re-ratcheting
+- Tests that cannot fail, which this project has now hit
+  repeatedly: #516 asserts on the row a root-blind write would keep, and re-ratcheting
   the library pins the shift-equivariance fix moves is #483.
 - Test-suite hygiene: seventeen test modules over the 1000-line cap (#525),
   POSIX-only constructs behind a Windows-support claim (#473), fixture clock
@@ -492,8 +495,11 @@ star-navigation bug fixes (#19, #18) can start any time.
    is green and fifty commits behind `main`.
 1. **Then, in parallel:** Track A items 1-4 (library growth, sim
    realism campaign, agreement-estimator real-frame follow-ups, distortion
-   feed-in). The operator decisions in section 6 go across as a batch — they
-   cost nothing to decide early and unblock scoping.
+   feed-in), with the gates above respected -- the coarse-lock family before
+   the agreement study collects, and #288 before any cohort is read as
+   evidence rather than as a comparison against `main`. The operator
+   decisions in section 6 go across as a batch — they cost nothing to decide
+   early and unblock scoping.
 2. **Next:** Track A item 5 (agreement study, bulk layer first), with
    Track E test-debt and Track B remainder as parallel fill.
 3. **Then:** Track A items 6-8 (CI tiers, real-anchored recalibration,
@@ -579,8 +585,8 @@ B-location.
 Cross-listed items (listed once above, noted here): #150/#128 sit in Track B
 and also serve Track A's limb-bias workstream (WS-10); the confident-wrong
 ring-lock family (#346, #476, #504) sits in Track B but gates the Track A
-study; #103/#134/#126 serve both Track D performance and Track F hardening;
-#513 and #520 are results-index work in Track D that lands in the kernel
+study; #103/#134/#126 serve both Track D performance and Track F
+hardening; #513 and #520 are results-index work in Track D that lands in the kernel
 writer and the reprojection package respectively; #521 is a kernel-facing
 defect owned by Track B because the fix is in the navigator; the
 per-instrument guide chapters exist and each Track F instrument workstream

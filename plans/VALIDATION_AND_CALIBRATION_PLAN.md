@@ -484,8 +484,8 @@ need.
 **The anchor must not be contaminated before it is measured (#558).** This
 workstream's product is cross-technique *disagreement*, and a technique that
 reports a confidently wrong answer contributes a disagreement that is a property of
-the defect rather than of the scene. The confidently-wrong ring locks (#346, #476,
-#504) are the known case: on `N1633925572_1_CALIB`, measured 2026-08-26, a body fit
+the defect rather than of the scene. The confidently-wrong ring locks
+(#346, #476, #504) are the known case: on `N1633925572_1_CALIB`, measured 2026-08-26, a body fit
 and a star fit agree to 0.08 px while `RingEdgeNav` converges 39 px away on 452 of
 6786 inliers, is not flagged spurious, and enters the combine. Feeding that frame to
 this workstream does not merely add noise -- it moves the anchor WS-5 then
@@ -812,8 +812,8 @@ than fitted through it. And the anchor is only as good as the techniques feeding
 confidently-wrong contributor moves the cross-technique disagreement this workstream
 calibrates against (#558).
 
-**Dependencies:** WS-0 (which bins yield per-technique σ), WS-1 (anchor, and see
-#558 on keeping it uncontaminated), WS-2 (single-technique regimes). **Risk:**
+**Dependencies:** WS-0 (which bins yield per-technique σ), WS-1 (anchor, and
+see #558 on keeping it uncontaminated), WS-2 (single-technique regimes). **Risk:**
 medium — may reveal that some techniques' covariances are mis-scaled (feeds WS-9),
 and the confidence axis may prove too censored to calibrate above the cap (#557).
 
@@ -991,9 +991,11 @@ calibration).
 - **Decide where the confidence scale should saturate** (#557). The two caps above
  censor the combined confidence from above, and they bind far earlier than
  "exceptionally confident": the agreement factor `1 + 0.5*log2(n_significant)`
- already equals its own cap at `n_significant = 2`, so any two corroborating
- techniques whose precision-weighted mean confidence reaches 0.66 report exactly
- 0.99. Four distinct library frames measured 2026-08-26 report that one value.
+ already equals its own cap at `n_significant = 2`, so two significant
+ corroborating techniques whose precision-weighted mean confidence reaches 0.66
+ report exactly 0.99 unless a second agreement group applies the disagreement
+ penalty, which is applied after the cap. Four distinct library frames measured
+ 2026-08-26 report that one value.
  Refusing to emit 1.0 is defensible -- confidence is a proxy, not a probability --
  but a scale that saturates on the ordinary good case carries no information above
  the cap, and gives no credit for a third or fourth corroborating technique.

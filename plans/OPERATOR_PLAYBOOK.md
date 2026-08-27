@@ -78,7 +78,7 @@ merge it, or say what it is waiting on. Nothing else is in flight.
 
 ### 0.1c Labels and assignees: check five inferred priorities
 
-The tracker is fully labelled. Every open issue carries exactly one Priority
+The tracker is fully labeled. Every open issue carries exactly one Priority
 and one Effort label, at least one each of A-type and B-location, and
 `rfrenchseti` as an assignee. The `Priority TBD` label is unused and can be
 deleted from the repository if you want it gone.
@@ -119,9 +119,11 @@ instrument.
    limb bias deliberately pinned red; and
    two are stale or wrong `primary_technique` pins batched onto #483. Nothing
    is unattributed, and no `expected.*` field is moved to match current
-   behaviour.
+   behavior.
 2. **#557** — decide where the combined confidence should saturate. It caps
-   at 0.99 whenever two techniques agree at a mean of 0.66, which is the
+   at 0.99 when two significant corroborating techniques agree at a
+   precision-weighted mean of 0.66 and no second agreement group applies the
+   post-cap disagreement penalty, which is the
    ordinary good case, so the scale carries no information above the cap and
    gives no credit for a third or fourth corroborating technique. WS-5's
    calibration map is monotonic and cannot separate what the cap has already
@@ -137,30 +139,30 @@ output at scale.
 **Group 3 — parallel fill, any order, any number at once.**
 
 - **Results index:** #515 with #516 (the root-blind share write and the test
-  that cannot catch it); #501, #512, #514, #536 as one seam-cleanup batch;
-  #528 with #531 as a metadata-provenance pair; #493 and #496 (run-level
-  conditions reported per image); then the tail #472, #497, #524, #533,
-  #534, #535, #538, #540, #541.
+  that cannot catch it); #501, #512, #514, #536 as one seam-cleanup
+  batch; #528 with #531 as a metadata-provenance pair; #493 and #496 (run-level
+  conditions reported per image); then the tail #472, #497, #524,
+  and #533, #534, #535, #538, #540, #541.
 - **Test debt:** #241 and #242 first, because the plan wants tested ground
-  under any serious PDS4 or backplane work; then #243, #177, #524, #525,
-  #530, #473.
+  under any serious PDS4 or backplane work; then #243, #177, #524,
+  #525, #530, #473.
 - **CI:** #324, #336 and #426 — the agreement-estimator tests, the
   data-independent simulator suites and the stale committed render, none of
   which run in Actions today. #391 pins the lint tools so a release cannot
   turn `main` red on its own.
 - **Products:** #265 then #519 (swallowed label-write errors, then the empty
-  `START_DATE_TIME` / `STOP_DATE_TIME` / `IMAGE_MID_TIME` those errors hide);
-  #520 (move the pointing selection out of the reprojection CLI package);
-  #495 (raw-product dataset names for Cassini ISS).
+  `START_DATE_TIME` / `STOP_DATE_TIME` / `IMAGE_MID_TIME` those errors
+  hide); #520 (move the pointing selection out of the reprojection CLI
+  package); #495 (raw-product dataset names for Cassini ISS).
 - **Docs and cleanup:** #545, #549, #470, #471, #494, #518.
 
 **What looks dispatchable and is not.** #483 and #547 wait on #288. #129
 (Sphinx nitpicky-clean) wants #443 settled first, since that decides whether
 `spindoctor.cli` subpackages get autodoc pages at all. #418 is a policy
-question before it is a coding one. #464's affordability depends on #466.
-#552 waits on an upstream oops fix. #239's cohort scan is agent work but the
-sidecars it produces need your votes. And the two largest Track A items,
-#225 and #172/#235, are gated on your frame approvals and batch votes, which
+question before it is a coding one. #464's affordability depends
+on #466. #552 waits on an upstream oops fix. #239's cohort scan is agent work but the
+sidecars it produces need your votes. And the two largest Track A
+items, #225 and #172/#235, are gated on your frame approvals and batch votes, which
 is what makes Group 1 worth starting today.
 
 ## 1. The library regression, and the deliberately-red set
@@ -347,8 +349,8 @@ Independent review before done; all CI gates; one PR."
   image-origin one are not comparable, so #561 (the distortion cohorts sample
   a single sequence for some instruments) and any decision to fit rotation
   again both wait on it. #521 waits on fitting being enabled at all.
-- **CK kernel follow-ups**: the kernel-side follow-ups (#433, #434, #437,
-  #440/#444/#455, #446, #513) are independent of each other; #435/#436 are a
+- **CK kernel follow-ups**: the kernel-side follow-ups (#433, #434,
+  #437, #440/#444/#455, #446, #513) are independent of each other; #435/#436 are a
   pair and #436 waits on #435. #448 (locate C-kernel inputs through
   `spyceman` instead of a kernel directory tree) has a practical face worth
   weighing when scheduling it: running `sd_create_ck` today takes several
@@ -358,8 +360,8 @@ Independent review before done; all CI gates; one PR."
   dispatchable work — Section 0.1.
 - **Navigation correctness, in order**: #504 (RingEdgeNav's pooled inlier-fraction
   veto discards correct ring fits on real B-ring scenes) and #476 (RingEdgeNav
-  re-locks onto the wrong ring edge under a planted shift), which belong with
-  #346 and #373 as one coarse-lock family. `N1633925572_1_CALIB` is the
+  re-locks onto the wrong ring edge under a planted shift), which belong
+  with #346 and #373 as one coarse-lock family. `N1633925572_1_CALIB` is the
   cleanest reproducer in the library: two techniques agree to 0.08 px while
   RingEdgeNav lands 39 px away on 6.7% of its points, so a fix is verifiable
   without operator adjudication and the frame's tier returns on its own.
@@ -587,8 +589,8 @@ deferred until an instrument fits rotation again; a test fails if one does.
 0.1 decisions (#316, #407, #338, #548, #547, #459, #468, #466)  (operator, minutes)
 0.1b merge or close PR #484                                     (operator, minutes)
 0.2 adopt transfer watch (#334)                                 (operator, minutes)
---- then, before Track A collects anything at scale ---
-#288 library regression reconcile    (agent session; unblocks #483 and #547)
+--- then, before Track A collects anything at scale
+--- #288 library regression reconcile    (agent session; unblocks #483 and #547)
 --- then ---
 2.1 library growth (batch-006 + continued)   (agent session; your votes gate it)
 2.2 agreement study bulk   (after 2.1 cohorts; you approve frames)
