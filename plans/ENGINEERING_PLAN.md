@@ -27,11 +27,11 @@ standing red regressions. Then the coarse-lock calibration (#373), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
 (#130, #239, #338) as fill.
 
-Two Essential items sit outside that ordering because they are small and
-they corrupt a delivered product rather than a measurement: a conflicted
-result drops its fitted camera rotation and is then given a C-matrix that
-ignores it (#521), and rotation fitting should be off for Galileo SSI
-(#522). Do them whenever; do them before publishing a kernel set.
+The rotation work sits outside that ordering and has its own sequence: one
+convention about the image center first (#434), then wider distortion cohorts
+(#561), and only then any decision to fit rotation again. A conflicted result
+dropping its fitted rotation (#521) waits on the same convention and cannot
+fire until fitting is enabled somewhere.
 
 The ensemble-independence family (#222 seeded single-star refine, #317 two
 ring techniques on one catalog, #339 scattered-light disc/limb) is closed by
@@ -82,48 +82,74 @@ centroid no longer vetoes a star-confirmed limb fit. The residual that a wrong
 trusted star fix could itself corroborate a wrong geometry -- downgrading a safe
 `conflicted` to a confident-wrong `success` in that corner -- is tracked in #394.
 
-### #521 / #522 — the fitted rotation, and Galileo
+### #521 — the fitted rotation a conflicted result drops (deferred)
 
-Two small Essential items that corrupt a delivered product rather than a
-measurement.
+`NavResult.conflicted` declares no `rotation_rad`, so a conflicted result on
+a rotation-fitting instrument drops the twist its own ensemble measured, and
+everything downstream reads it as 2-DoF: `rotation_fitted` computes `False`,
+a corrected `cmatrix` is built from the translation alone, and the image is
+eligible for a segment. The outcomes invert with respect to trust — a
+*success* result is refused a segment as `rotation_unsupported` while a
+*conflicted* one is written into the kernel with an attitude wrong by exactly
+the twist thrown away. The document is internally inconsistent too: a 3x3
+`covariance_px2` with no `rotation_deg`, where the metadata chapter documents
+matrix shape as the signal for degrees of freedom.
 
-**#521.** `NavResult.conflicted` declares no `rotation_rad`, so a conflicted
-result on a rotation-fitting instrument drops the twist its own ensemble
-measured. Everything downstream then reads it as 2-DoF and each step is
-locally correct: `rotation_fitted` computes `False`, a corrected `cmatrix` is
-built from the translation alone, and the image is eligible for a C-kernel
-segment. The outcomes end up inverted with respect to trust — a *success*
-result on that instrument is refused a segment as `rotation_unsupported`,
-while a *conflicted* result from the same ensemble with the same unrecorded
-pivot is written into the kernel with an offset-only attitude that is wrong
-by exactly the twist thrown away. The document is internally inconsistent
-too: a 3x3 `covariance_px2` with no `rotation_deg`, where the metadata
-chapter documents matrix shape as the signal for degrees of freedom. Narrow
-fix: give `conflicted` the same rotation parameters `success` has and pass
-the combined rotation from both `ensemble.py` call sites. Worth deciding at
-the same time whether covariance shape and the presence of `rotation_deg`
-should be checked against each other anywhere, since nothing holds the two
-encodings of one fact in step. The missing test is the conflicted
-counterpart of `test_a_fitted_rotation_of_zero_is_still_a_fitted_rotation`.
+**Unreachable, and deferred until it is not.** No instrument fits rotation,
+so no result carries a rotation to drop. What re-opens it is any instrument
+setting `fit_camera_rotation: true`, which
+`test_no_shipped_instrument_fits_camera_rotation` fails on, naming this
+precondition. It is not worth doing alone: fitting every technique about the
+FOV centre (#434) removes the per-technique pivot entirely and needs no pivot
+field, so the conflicted path's rotation parameters should be designed with
+that rather than bolted onto the present scheme. When it is picked up, 35
+test sites already build a `NavContext` with `fit_camera_rotation=True`, so a
+regression test needs no configuration change, and the missing case is the
+conflicted counterpart of
+`test_a_fitted_rotation_of_zero_is_still_a_fitted_rotation`.
 
-**#522.** Set `fit_camera_rotation: false` for Galileo SSI. It is the only
-instrument shipping with fitting on, and nothing in the system can use what
-it fits: no consumer applies a fitted rotation to an observation, and a
-fitted rotation suppresses the corrected C-matrix, so every otherwise
-eligible Galileo image is omitted as `rotation_unsupported` and the mission
-gets no corrected kernels at all. There is a second reason that makes fitting
-actively wrong rather than merely useless: techniques rotate about different
-pivots, and a rigid rotation by theta about pivot P versus Q differs by the
-pure translation `(I - R(theta))(P - Q)`, so two techniques describing the
-same physical motion report different translations and the ensemble fuses
-them as comparable. At a fraction of a degree and a couple of hundred pixels
-between pivots that is of order a pixel. No code changes; the rotation
-machinery stays exactly as it is, and fitting returns when a rotation can be
-expressed as an attitude (#434). The documentation pass is the bulk of the
-work — every sentence asserting that this is Galileo's situation today goes,
-while the general statements stay. The archived C-kernel plans name the
-Galileo cost ("costs only Galileo today"); they are frozen records and are
-not edited for this.
+### #434 — one rotation convention, about the image center
+
+Rotation is fitted per technique, and each technique picks its own center: a
+vertex centroid for the distance-transform family, a composite template
+centroid for the disc, and for the star family the *image origin* -- pixel
+(0, 0). `_star_helpers` records a `pivot_vu` of the weighted catalog centroid
+but returns `translation = det_c - R * cat_c`, which is a rotation about the
+origin, and `nav_technique_star_field` takes that value as the offset. The
+recorded pivot is not the pivot the reported translation uses.
+
+Because theta is pivot-invariant, this never shows in the angle. It shows in
+the translation, which is what the ensemble fuses and what the metadata
+reports. Measured on two Galileo star fields, turning fitting off moved the
+reported offset by 5.90 and 5.65 px -- `(I - R) * cat_c` for a centroid some
+780 px from the origin on an 800x800 frame. So **`offset` means a different
+quantity depending on whether a rotation was fitted**, by several pixels, and
+any expectation recorded under one convention cannot judge a result measured
+under the other.
+
+The design is in the issue: every technique reports its rotation about one
+common center, the center of the field of view, converting at the technique
+boundary. No pivot field is needed and no fit has to change. What has to be
+decided is which point that center is -- the FOV center and the boresight
+differ, and the distortion models make the difference real -- and then the
+conversion has to be applied and tested per solver.
+
+**This is upstream of the rest of the rotation work.** While the field-of-view
+distortion study pivots at the optical center and navigation pivots at the
+image origin, the two cannot be compared, so neither a wider distortion cohort
+(#561) nor any decision to enable fitting again rests on solid ground. Do the
+convention first.
+
+### #561 — the distortion cohorts sample too little
+
+Per-instrument twist verdicts come from cohorts that vary from 225 images over
+10 sequences down to 18 images over one, and one instrument's is a single
+frame. Running the same tool on a second Galileo sequence returns the opposite
+sign, three times the magnitude, and the opposite recommendation. The verdicts
+that recommend a static kernel correction versus per-frame fitting therefore
+rest on samples too narrow to carry them. Widen the cohorts, and state each
+verdict's sampling in the report so a mission-wide result is distinguishable
+from a single-sequence one. Gated on #434 for the reason above.
 
 ### #447 — the round-trip residual (PR #484 open)
 
@@ -388,12 +414,11 @@ carried by the correlation and distance-transform body techniques (#447).
 PR #484 fixes both body-side causes and is open.
 
 Two of the plan's follow-ups turned out to be navigator defects rather than
-kernel work, and both are Essential: a conflicted result drops its fitted
-camera rotation and is then given a C-matrix that ignores it (#521), and
-rotation fitting should be turned off for Galileo SSI (#522), which is the
-instrument the fitted-rotation omission costs today. Fix these before
-generating any kernel set that will be published, because a wrong attitude
-in a delivered kernel is worse than an omitted one.
+kernel work. Rotation fitting is now off for Galileo SSI, so no instrument
+fits rotation, the fitted-rotation omission costs nothing, and Galileo gets
+the corrected kernels it previously got none of. The conflicted result that
+drops its fitted rotation (#521) is thereby unreachable and is deferred until
+an instrument fits rotation again.
 
 The rest of the plan's follow-ups are filed and none blocks use of the
 kernels: the oops API replacing the hand-derived derivation (#433),

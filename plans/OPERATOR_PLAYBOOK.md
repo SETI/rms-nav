@@ -115,10 +115,12 @@ instrument.
    navigation disagreements. The defect has a fix; the 3 need you, and only
    where the answer would move an operator-verified `expected.*` field, which
    is never done to match current behavior.
-2. **#521** and **#522** — the fitted rotation dropped from a conflicted
-   result, and rotation fitting off for Galileo SSI. Both Essential, both
-   small, both keep a wrong attitude out of a delivered kernel. #522 is
-   configuration and documentation with no code change.
+2. **#557** — decide where the combined confidence should saturate. It caps
+   at 0.99 whenever two techniques agree at a mean of 0.66, which is the
+   ordinary good case, so the scale carries no information above the cap and
+   gives no credit for a third or fourth corroborating technique. WS-5's
+   calibration map is monotonic and cannot separate what the cap has already
+   collapsed, so this is a decision the calibration cannot make for you.
 
 **Group 2 — the coarse-lock family.** One family, best done as one campaign:
 **#504** (the pooled inlier veto discarding correct B-ring fits), **#476**
@@ -334,6 +336,12 @@ Independent review before done; all CI gates; one PR."
   star fix agrees with the geometric consensus, which leaves the corner
   where the star fix is itself wrong-locked — a safe `conflicted` becomes a
   confident-wrong `success`. Sequence with #230/WS-5.
+- **Rotation, in order**: #434 first (every technique reports its rotation
+  about the image center, converting at the technique boundary). Until that
+  lands, the distortion study's optical-center convention and navigation's
+  image-origin one are not comparable, so #561 (the distortion cohorts sample
+  a single sequence for some instruments) and any decision to fit rotation
+  again both wait on it. #521 waits on fitting being enabled at all.
 - **CK kernel follow-ups**: the kernel-side follow-ups (#433, #434, #437,
   #440/#444/#455, #446, #513) are independent of each other; #435/#436 are a
   pair and #436 waits on #435. #448 (locate C-kernel inputs through
@@ -346,10 +354,10 @@ Independent review before done; all CI gates; one PR."
 - **Navigation correctness, in order**: #504 (RingEdgeNav's pooled inlier-fraction
   veto discards correct ring fits on real B-ring scenes) and #476 (RingEdgeNav
   re-locks onto the wrong ring edge under a planted shift), which belong with
-  #346 and #373 as one coarse-lock family. #521 and #522 are small, Essential,
-  and independent of all of that: a conflicted result drops its fitted camera
-  rotation and gets a C-matrix that ignores it, and rotation fitting should
-  be off for Galileo SSI. Do #521/#522 before publishing any kernel set.
+  #346 and #373 as one coarse-lock family. `N1633925572_1_CALIB` is the
+  cleanest reproducer in the library: two techniques agree to 0.08 px while
+  RingEdgeNav lands 39 px away on 6.7% of its points, so a fix is verifiable
+  without operator adjudication and the frame's tier returns on its own.
 - **Results-index follow-ups** (the index shipped 2026-08-25; none of these
   blocks anything): #515 and #516 together (a cloud-share ingest can write
   another root's document into this root's rows, and the test that should
@@ -419,14 +427,11 @@ with assignee rfrenchseti.
 - **#547** the one place a built product is compared between the results tree
   and the results index runs against a frame that no longer navigates
 
-**Kernel-facing navigation defects (small, Essential, before publishing a
-kernel set):**
-
-- **#521** a conflicted result drops its fitted camera rotation and is given
-  a C-matrix that ignores it, so the less trustworthy outcome is the one
-  that produces a corrected kernel
-- **#522** turn off rotation fitting for Galileo SSI — configuration and
-  documentation only, no code change
+**Kernel-facing navigation defects:** none open. Rotation fitting is off for
+every instrument, so the fitted-rotation omission costs nothing and Galileo
+gets the corrected kernels it previously got none of. #521 — a conflicted
+result dropping its fitted rotation — cannot fire while that holds, and is
+deferred until an instrument fits rotation again; a test fails if one does.
 
 **Results index (shipped 2026-08-25; none blocking):**
 
@@ -582,7 +587,6 @@ kernel set):**
 0.2 adopt transfer watch (#334)                                 (operator, minutes)
 --- then, before Track A collects anything at scale ---
 #288 library regression reconcile    (agent session; unblocks #483 and #547)
-#521 / #522 kernel-facing rotation   (agent session; small, Essential)
 --- then ---
 2.1 library growth (batch-006 + continued)   (agent session; your votes gate it)
 2.2 agreement study bulk   (after 2.1 cohorts; you approve frames)
