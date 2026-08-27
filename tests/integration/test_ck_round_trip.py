@@ -199,6 +199,17 @@ def _run_step(step: str, image_id: str, work: Path) -> None:
     Raises:
         AssertionError: if the step fails, quoting the end of its output.
     """
+    # The step imports spindoctor in a process of its own, where an editable
+    # install resolves the package through a finder that outranks the working
+    # directory.  Run from a worktree, it would therefore navigate with the
+    # source the install points at rather than the source under test, and every
+    # assertion below would describe the wrong tree.  Naming this checkout's
+    # src first is what keeps the subprocess measuring the code the test was
+    # collected from.
+    env = dict(os.environ)
+    src = str(_REPO_ROOT / 'src')
+    existing = env.get('PYTHONPATH')
+    env['PYTHONPATH'] = f'{src}{os.pathsep}{existing}' if existing else src
     completed = subprocess.run(
         [sys.executable, '-m', 'tests.integration.ck_round_trip', step, image_id, str(work)],
         cwd=str(_REPO_ROOT),
@@ -206,6 +217,7 @@ def _run_step(step: str, image_id: str, work: Path) -> None:
         text=True,
         check=False,
         timeout=_STEP_TIMEOUT_S,
+        env=env,
     )
     if completed.returncode != 0:
         raise AssertionError(
