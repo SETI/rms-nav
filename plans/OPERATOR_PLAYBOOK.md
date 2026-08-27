@@ -70,6 +70,17 @@ gh issue comment 468 --body "Decision: <declare reconstructed | leave UNCLASSIFI
 gh issue comment 466 --body "Decision: <ship the SQLite file | run PostgreSQL>"
 ```
 
+- **#557 where the confidence scale should saturate**: the combined
+  confidence caps at 0.99 once two significant corroborating techniques agree
+  at a precision-weighted mean of 0.66 with no post-cap disagreement penalty,
+  which is the ordinary good case rather than an exceptional one. Above that
+  the scale carries no information, and a third or fourth corroborating
+  technique earns nothing. WS-5 fits a monotonic calibration map, which cannot
+  separate values the cap has already collapsed onto one number, so this is
+  not something calibration settles later. An agent can measure where the cap
+  binds across the cohort and what the tiers would look like at other
+  saturation points; choosing the point is yours.
+
 ### 0.1b Merge or close the one open pull request
 
 PR #484 (#447, the round-trip residual) has been open since 2026-08-09,
@@ -116,18 +127,9 @@ instrument.
    tier the wrong ring lock moves); two are the Galileo star fields whose
    ground truth was captured under three degrees of freedom and no longer
    describes a two-DoF fit; one is the standing #24 exclusion; one is a real
-   limb bias deliberately pinned red; and
-   two are stale or wrong `primary_technique` pins batched onto #483. Nothing
-   is unattributed, and no `expected.*` field is moved to match current
-   behavior.
-2. **#557** — decide where the combined confidence should saturate. It caps
-   at 0.99 when two significant corroborating techniques agree at a
-   precision-weighted mean of 0.66 and no second agreement group applies the
-   post-cap disagreement penalty, which is the
-   ordinary good case, so the scale carries no information above the cap and
-   gives no credit for a third or fourth corroborating technique. WS-5's
-   calibration map is monotonic and cannot separate what the cap has already
-   collapsed, so this is a decision the calibration cannot make for you.
+   limb bias deliberately pinned red; and two are stale or wrong
+   `primary_technique` pins batched onto #483. Nothing is unattributed, and
+   no `expected.*` field is moved to match current behavior.
 
 **Group 2 — the coarse-lock family.** One family, best done as one campaign:
 **#504** (the pooled inlier veto discarding correct B-ring fits), **#476**
@@ -586,7 +588,7 @@ deferred until an instrument fits rotation again; a test fails if one does.
 ## 5. Sequencing summary
 
 ```text
-0.1 decisions (#316, #407, #338, #548, #547, #459, #468, #466)  (operator, minutes)
+0.1 decisions (#316, #407, #338, #548, #547, #459, #468, #466, #557)  (operator, minutes)
 0.1b merge or close PR #484                                     (operator, minutes)
 0.2 adopt transfer watch (#334)                                 (operator, minutes)
 --- then, before Track A collects anything at scale

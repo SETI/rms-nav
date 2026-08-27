@@ -559,7 +559,11 @@ library votes and the decision gates, not by any implementation.
    whether to repoint it or to accept the gap.
 9. **Getting the index to cloud workers (#466)** — which documented workflow
    to adopt, since it decides how #464 is deployed.
-10. Recurring: library batch votes; agreement-study frame selection; tier
+10. **Where the confidence scale saturates (#557)** — the combined confidence
+    caps at 0.99 on the ordinary two-technique agreement, and WS-5's monotonic
+    calibration map cannot separate what the cap collapsed, so calibration
+    does not settle it later.
+11. Recurring: library batch votes; agreement-study frame selection; tier
     re-blessing after #230.
 
 ## 7. Issue index (open work by track)
