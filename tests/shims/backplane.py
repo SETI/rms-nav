@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import polymath
@@ -222,6 +222,43 @@ class FakeBackplane:
 
     per_body: dict[str, BodyBackplaneData] = field(default_factory=dict)
     per_ring: dict[str, RingBackplaneData] = field(default_factory=dict)
+    backplanes: dict[tuple[Any, ...], KeyedScalar] = field(default_factory=dict)
+
+    def standardize_backplane_key(self, backplane_key: Any) -> tuple[Any, ...]:
+        """Name the key an array is registered under, as ``oops.Backplane`` does.
+
+        Production code asks for a key this way rather than reading the array's
+        ``key`` attribute, because oops attaches that attribute from outside
+        polymath and polymath carries it only across a copy or a clone -- never
+        onto an array computed from one.  Mirrors the real method: an array is
+        answered from ``key`` when it has one and by searching the registry for
+        it by identity otherwise, a string becomes an upper-case one-tuple, and
+        a tuple passes through.
+
+        Parameters:
+            backplane_key: An array obtained from this backplane, or a key
+                already in string or tuple form.
+
+        Returns:
+            The registered backplane key.
+
+        Raises:
+            ValueError: If an array is not one this backplane handed out, or the
+                argument is neither an array nor a string nor a tuple.
+        """
+        if isinstance(backplane_key, polymath.Qube):
+            key = getattr(backplane_key, 'key', None)
+            if key is not None:
+                return cast('tuple[Any, ...]', key)
+            for registered_key, array in self.backplanes.items():
+                if array is backplane_key:
+                    return registered_key
+            raise ValueError('illegal backplane key type: ' + type(backplane_key).__name__)
+        if isinstance(backplane_key, str):
+            return (backplane_key.upper(),)
+        if isinstance(backplane_key, tuple):
+            return backplane_key
+        raise ValueError('illegal backplane key type: ' + type(backplane_key).__name__)
 
     def _body(self, body_name: str) -> BodyBackplaneData:
         key = body_name.upper()
@@ -302,12 +339,13 @@ class FakeBackplane:
             ``('ring_radius', ring_target)`` tuple the production code
             reads back and hands to :meth:`border_atop`.
         """
+        key = ('ring_radius', ring_target)
+        if key in self.backplanes:
+            return self.backplanes[key]
         data = self._ring(ring_target)
-        return _scalar(
-            data.ring_radius_km,
-            ~data.ring_mask,
-            key=('ring_radius', ring_target),
-        )
+        radii = _scalar(data.ring_radius_km, ~data.ring_mask, key=key)
+        self.backplanes[key] = radii
+        return radii
 
     def ring_radial_resolution(self, ring_target: str) -> polymath.Scalar:
         """Return per-pixel radial km/px scale."""
