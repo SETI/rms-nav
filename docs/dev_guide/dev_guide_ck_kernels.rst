@@ -55,47 +55,64 @@ self-contained -- their difference is the correction -- and gives the writer the
 means to verify that the baseline kernels have not changed since navigation.
 
 **The oops observation frame is not the SPICE camera frame.** The navigated
-offset lives in the ``oops`` observation frame, and for three of the four
-instruments ``oops`` builds that frame with a constant flip on top of the SPICE
-frame:
+offset lives in the ``oops`` observation frame, which each host relates to the
+SPICE camera frame by a constant rotation ``R`` satisfying
+``C_oops = R . C_spice``. The host states that rotation, and the camera frame it
+applies to, on the observation itself:
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 30 40
+   :widths: 26 22 26 26
 
    * - Instrument
-     - ``oops`` frame versus SPICE frame
-     - Where
-   * - Cassini ISS (NAC, WAC)
-     - ``R = diag(-1, -1, +1)``, a 180 degree flip about the boresight
-     - ``oops/hosts/cassini/iss.py``
+     - ``spice_frame_name``
+     - ``spice_frame_id``
+     - ``spice_to_frame`` (``R``)
+   * - Cassini ISS
+     - ``CASSINI_ISS_NAC`` / ``_WAC``
+     - -82360 / -82361
+     - ``diag(-1, -1, +1)``, a 180 degree flip about the boresight
    * - New Horizons LORRI
-     - ``R = diag(+1, -1, -1)``; the SPICE boresight is -Z
-     - ``oops/hosts/newhorizons/lorri.py``
+     - ``NH_LORRI``
+     - -98300
+     - ``diag(+1, -1, -1)``; the SPICE boresight is -Z
    * - Galileo SSI
-     - ``R = I``; ``oops`` uses ``GLL_SCAN_PLATFORM`` directly
-     - ``oops/hosts/galileo/ssi/``
+     - ``GLL_SCAN_PLATFORM``
+     - -77001
+     - ``I``; the observation frame is the platform frame
    * - Voyager ISS
-     - no runtime relation: ``oops`` freezes a ``Cmatrix`` built from a
-       tolerance-snapped ``ckgp``
-     - ``oops/hosts/voyager/iss.py``
+     - ``VGn_ISSNA`` / ``VGn_ISSWA``
+     - -3n101 / -3n102
+     - ``I``; the frozen frame already carries the camera attitude
 
-where ``R`` relates the two J2000-referenced attitudes as
-``C_oops = R . C_spice``.
+Reading those subfields rather than keeping a table here is what keeps the frame
+an attitude is recorded in and the frame ``oops`` built the observation on from
+naming different cameras. ``CASSINI_ISS_NAC`` and ``CASSINI_ISS_WAC`` are 264.8
+arcsec apart, which is 44.2 NAC pixels, so that confusion is not a rounding
+error.
 
-A correction built in the ``oops`` frame and composed onto a
-``pxform``-derived matrix **without** conjugating through ``R`` is a proper
-rotation of the right magnitude pointing the wrong way -- for Cassini, with both
-tangent-plane components negated. It survives every check a hermetic test can
-make: the result is orthonormal, its determinant is 1, and its rotation angle is
-correct, because a magnitude is invariant under exactly the error being made.
-Only real host frames meeting real kernels can see it.
+A correction built in the ``oops`` frame and composed onto a SPICE-convention
+matrix **without** accounting for ``R`` is a proper rotation of the right
+magnitude pointing the wrong way -- for Cassini, with both tangent-plane
+components negated. It survives every check a hermetic test can make: the result
+is orthonormal, its determinant is 1, and its rotation angle is correct, because
+a magnitude is invariant under exactly the error being made. Only real host
+frames meeting real kernels can see it. Both conversions therefore go through
+:meth:`oops.observation.Observation.get_spice_cmatrix` and
+:meth:`~oops.observation.Observation.set_spice_cmatrix`, which apply ``R`` in
+both directions from the single declaration.
 
-So ``R`` is measured at runtime, never assumed. The measurement is
-``C_oops . cmatrix_original^T``, and it is checked against the constant this
-table records for the instrument, and checked again for being the same at the
-exposure start and stop as at the midtime. A violation raises rather than being
-absorbed.
+What a host declares is a claim rather than a measurement, so it is checked. At
+the exposure start, midtime and stop, ``C_oops(t) . pxform('J2000',
+spice_frame_name, t)^T`` must equal the declared ``R``. A frame that is right at
+the midtime and wrong at the edges is a moving frame misdeclared as a constant
+one, and the correction reaches a kernel as a single body-fixed rotation. A
+violation raises rather than being absorbed.
+
+Voyager is the exception to the check, not to the convention: its frame is
+frozen from a tolerance-snapped ``ckgp`` lookup rather than an evaluated chain,
+so ``pxform`` cannot place ``VGn_ISSNA`` at all. The accessor still answers
+correctly, so only the cross-check is skipped.
 
 Deriving the corrected attitude
 ===============================
@@ -103,8 +120,10 @@ Deriving the corrected attitude
 The conversion lives behind one function,
 :func:`~spindoctor.support.cmatrix.compute_pointing`, and nothing else computes
 it. The helpers beneath it are private for that reason rather than because they
-are trivial: when ``oops`` grows a corrected-attitude API of its own, this
-module's body is replaced and its interface stays.
+are trivial. The two conversions between the ``oops`` and SPICE conventions are
+``oops``'s; what remains here is what ``oops`` does not do -- turning a pixel
+offset into a rotation, refusing a malformed record, naming the C-kernel object
+and spacecraft clock, and gating a recorded attitude before applying it.
 
 Step 1: the corrected boresight, in the oops frame
 --------------------------------------------------
@@ -315,24 +334,27 @@ field of view holds*, so the reader replaces the observation's frame and
 leaves the FOV alone::
 
     if cmatrix == cmatrix_original (np.array_equal):
-        C_oops_corr = C_oops(mid)                       # short-circuit
+        obs.set_frame(oops.frame.Cmatrix(C_oops(mid)))  # short-circuit
     else:
-        R_hat       = C_oops(mid) . cmatrix_original^T  # measured, gated
-        C_oops_corr = R_hat . cmatrix
-    obs.frame = oops.frame.Cmatrix(C_oops_corr)         # frame_id=None
+        R_hat = C_oops(mid) . cmatrix_original^T        # measured, gated
+        obs.set_spice_cmatrix(cmatrix)
 
-with ``C_oops(mid)`` read from the observation's own frame at the midtime.
-Algebraically ``C_oops_corr = C_oops . (cmatrix_original^T . cmatrix)``: the
-observation's attitude composed with the recorded correction. The
-``array_equal`` short-circuit mirrors the writer's identity guard and is what
-makes an identity correction reproduce the observation's own midtime attitude
-exactly -- two float64 matrix products do not cancel to bit precision, so
-without it "no correction means no change" would be false at the 1e-16 level.
-The replacement frame is built unregistered (``frame_id=None``), so a batch
-loop over tens of thousands of images pollutes no global oops frame state;
-the one piece of shared state the mechanism touches is the process-global
-temporary-id counter, which is cosmetic when the wayframe is the frame
-itself.
+with ``C_oops(mid)`` read from the observation's own frame at the midtime. In
+the ordinary case ``oops`` composes the declared ``R`` onto the recorded matrix
+itself, which is the same attitude ``R_hat . cmatrix`` would give, to within the
+tolerance the gate has just enforced. The ``array_equal`` short-circuit is the
+one case that does not go through the setter: it mirrors the writer's identity
+guard, and makes an identity correction reproduce the observation's own midtime
+attitude exactly. Two float64 matrix products do not cancel to bit precision, so
+composing ``R`` onto the recorded baseline instead would make "no correction
+means no change" false at the 1e-16 level.
+
+The replacement frame is built with no frame ID, so nothing is registered under
+a name a later lookup can collide with. It is not free of consequence, though:
+``oops`` caches every ``Cmatrix`` by its matrix, so each image re-pointed to a
+distinct attitude leaves one wayframe and two frame-cache entries behind for the
+life of the process. That growth is pinned by a test rather than left to be
+discovered as a memory report from a full-catalogue run.
 
 ``R_hat`` is measured for one reason only: the gate. Before anything is
 applied, in order:
@@ -346,7 +368,7 @@ applied, in order:
    means the record is not this observation's
    (``cmatrix_foreign_midtime``).
 3. The flip gate: ``max|R_hat - R_expected| <= 1e-9``, with ``R_expected``
-   the instrument's constant from the frame table. Because ``R_hat`` mixes
+   the ``spice_to_frame`` rotation the host declares. Because ``R_hat`` mixes
    the observation's *current* attitude with the *recorded* baseline, this
    one inequality fails on a changed kernel pool, a transposed
    ``cmatrix_original`` or whole record (a transposed rotation is still a

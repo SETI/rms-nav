@@ -121,9 +121,9 @@ def synthetic_baseline(
         The baseline, at a fixed synthetic epoch.
     """
     return AttitudeBaseline(
+        camera_frame='TEST_CAMERA',
         cmatrix_original=cmatrix_original,
         oops_from_spice=oops_from_spice if oops_from_spice is not None else np.eye(3),
-        camera_frame='TEST_CAMERA',
         camera_frame_id=-999999,
         ck_frame_id=-999000,
         start_et=SYNTHETIC_START_ET,
@@ -137,22 +137,22 @@ def synthetic_baseline(
 
 
 def synthetic_frame_identity(flip: np.ndarray) -> _FrameIdentity:
-    """Build an instrument identity around a synthetic oops-from-SPICE flip.
+    """Build an instrument identity for a synthetic instrument.
 
     Injected in place of the real instrument table so hermetic tests can gate
     against any flip, including the non-involutory ones no real instrument
-    has.
+    has.  The flip itself now travels on the observation, as the host declares
+    it, so this takes it only to keep one call shape for the tests.
 
     Parameters:
-        flip: The constant rotation ``R`` satisfying ``C_oops = R . C_spice``.
+        flip: Unused; the observation carries the flip.
 
     Returns:
         The identity, with placeholder frame and clock ids.
     """
+    del flip
     return _FrameIdentity(
-        camera_frame='TEST_CAMERA',
         ck_frame_id=-999000,
         sclk_id=-999,
-        oops_from_spice=flip,
         frozen_oops_attitude=False,
     )

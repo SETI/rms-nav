@@ -148,6 +148,11 @@ def make_snapshot(
         frame='J2000',
     )
     snapshot.insert_subfield('data', np.zeros(shape_vu, dtype=np.float32))
+    # The subfields an oops host declares, which the pointing reader reads to
+    # learn the convention and the frame the observation was built on.
+    snapshot.insert_subfield('spice_to_frame', oops.Matrix3(np.eye(3)))
+    snapshot.insert_subfield('spice_frame_name', 'J2000')
+    snapshot.insert_subfield('spice_frame_id', 1)
     snapshot._closest_planet = closest_planet
     obs = HermeticObs(
         snapshot,

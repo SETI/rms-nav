@@ -933,6 +933,6 @@ def test_a_galileo_product_is_the_offset_product(galileo_metadata: dict[str, Any
     assert applied.source == 'offset'
     assert isinstance(obs.fov, oops.fov.OffsetFOV)
     offset = galileo_metadata['offset']
-    assert float(obs.fov.uv_offset[0]) == float(offset[1])
-    assert float(obs.fov.uv_offset[1]) == float(offset[0])
+    assert float(obs.fov.uv_offset.vals[0]) == float(offset[1])
+    assert float(obs.fov.uv_offset.vals[1]) == float(offset[0])
     assert obs.frame is frame_before

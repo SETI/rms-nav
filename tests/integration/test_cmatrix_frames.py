@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
+import oops
 import pytest
 from filecache import FCPath
 
@@ -109,19 +109,21 @@ def _rotation_about_z(angle_rad: float) -> np.ndarray:
 def _cassini_nac_identity() -> _FrameIdentity:
     """The Cassini NAC frame facts, for driving the baseline guards directly."""
     return _FrameIdentity(
-        camera_frame='CASSINI_ISS_NAC',
         ck_frame_id=-82000,
         sclk_id=-82,
-        oops_from_spice=_CASSINI_FLIP_ARRAY,
         frozen_oops_attitude=False,
     )
 
 
 class _StubTransform:
-    """Stands in for an oops ``Transform``, carrying only its matrix."""
+    """Stands in for an oops ``Transform``, carrying only its matrix.
+
+    The matrix is a real ``Matrix3`` rather than a stand-in, because the
+    accessor this feeds composes with it.
+    """
 
     def __init__(self, matrix: np.ndarray) -> None:
-        self.matrix = SimpleNamespace(vals=matrix)
+        self.matrix = oops.Matrix3(matrix)
 
 
 class _StubFrame:
@@ -145,13 +147,23 @@ class _StubObs:
     Only the attributes ``_attitude_baseline`` reads are provided.  The times
     come from a real frame so the SPICE clock and frame lookups it also makes
     resolve against the furnished kernels.
+
+    The accessor is borrowed from oops rather than reimplemented, so what the
+    test exercises is what a real observation would do with the dictated frame.
     """
+
+    get_spice_cmatrix = oops.obs.Observation.get_spice_cmatrix
 
     def __init__(self, attitude: Callable[[float], np.ndarray], obs: ObsSnapshotInst) -> None:
         self.frame = _StubFrame(attitude)
         self.time = (float(obs.time[0]), float(obs.time[1]))
         self.midtime = float(obs.midtime)
         self.texp = float(obs.texp)
+        # The subfields the real host declares, carried through unchanged so
+        # that only the frame is dictated by the test.
+        self.spice_to_frame = obs.spice_to_frame
+        self.spice_frame_name = obs.spice_frame_name
+        self.spice_frame_id = obs.spice_frame_id
 
 
 @pytest.mark.parametrize(
@@ -349,7 +361,7 @@ def test_the_recorded_ck_object_resolves_to_the_missions_clock(
     identity = _frame_identity(obs)
     assert identity is not None
     assert identity.sclk_id == sclk_id
-    assert _sclk_id(identity) == sclk_id
+    assert _sclk_id(identity, str(obs.spice_frame_name)) == sclk_id
 
 
 @pytest.mark.parametrize(
@@ -433,6 +445,10 @@ def test_epoch_varying_flip_is_refused() -> None:
     rotation, which is only valid while the two frames are rigidly attached.
     A stub observation whose frame drifts against the real SPICE camera frame
     exercises the guard that would otherwise let a drifting frame through.
+
+    The guard measures every epoch against the constant the host declares, so
+    a frame that is right at the midtime and wrong at the edges is refused at
+    the edge rather than by a separate constancy comparison.
     """
     obs = _load(ObsCassiniISS, _CASSINI_NAC)
     midtime = float(obs.midtime)
@@ -445,7 +461,7 @@ def test_epoch_varying_flip_is_refused() -> None:
         return product
 
     stub = cast(ObsSnapshotInst, _StubObs(attitude, obs))
-    with pytest.raises(NavPointingError, match='is not constant across the exposure'):
+    with pytest.raises(NavPointingError, match='the host declares'):
         _attitude_baseline(stub, _cassini_nac_identity())
 
 
@@ -463,5 +479,5 @@ def test_a_wrong_flip_measured_from_the_frame_is_refused() -> None:
         return spice
 
     stub = cast(ObsSnapshotInst, _StubObs(attitude, obs))
-    with pytest.raises(NavPointingError, match='differs from the expected'):
+    with pytest.raises(NavPointingError, match='the host declares'):
         _attitude_baseline(stub, _cassini_nac_identity())
