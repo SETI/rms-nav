@@ -557,15 +557,22 @@ def apply_cmatrix_to_obs(
 ) -> CmatrixApplication:
     """Point an observation at its recorded corrected attitude.
 
-    This is the reading half of :func:`compute_pointing`: it inverts the
-    writer's conjugation, replacing the observation's frame with one whose
-    midtime attitude is the recorded ``cmatrix``, while the field of view is
-    left untouched.  With ``C_oops`` the observation frame's own midtime
-    attitude, the replacement is ``R_hat . cmatrix`` where ``R_hat = C_oops .
-    cmatrix_original^T`` -- the observation's attitude composed with the
-    recorded correction.  A record whose correction is the identity
-    (``cmatrix`` equal to ``cmatrix_original`` as arrays) short-circuits to
-    ``C_oops`` itself, so no correction means exactly no change.
+    This is the reading half of :func:`compute_pointing`: it replaces the
+    observation's frame with one whose midtime attitude is the recorded
+    ``cmatrix``, while the field of view is left untouched.  The replacement
+    goes through ``Observation.set_spice_cmatrix``, which composes the
+    ``spice_to_frame`` rotation the host declares onto the recorded matrix.
+
+    ``R_hat = C_oops . cmatrix_original^T``, with ``C_oops`` the observation
+    frame's own midtime attitude, is measured for the gate below and is not
+    what gets applied.  The two agree: the gate passes only when ``R_hat``
+    equals the declared rotation to ``_FLIP_TOL``.
+
+    A record whose correction is the identity (``cmatrix`` equal to
+    ``cmatrix_original`` as arrays) is the one case that does not go through
+    the setter.  It installs ``C_oops`` itself, so no correction means exactly
+    no change; composing the declared rotation onto the recorded baseline
+    instead would be the same attitude but not the same float64.
 
     Before anything is applied, the record is gated:
 
@@ -574,8 +581,8 @@ def apply_cmatrix_to_obs(
     2. ``midtime_et`` must equal the observation's own midtime to a
        microsecond: the recorded attitude is a midtime attitude, so a record
        from another observation is refused rather than applied.
-    3. ``R_hat`` must equal the instrument's constant oops-from-SPICE flip to
-       the writer's own tolerance.  Because ``R_hat`` mixes the observation's
+    3. ``R_hat`` must equal the ``spice_to_frame`` rotation the host declares,
+       to the writer's own tolerance.  Because ``R_hat`` mixes the observation's
        *current* attitude with the *recorded* baseline, this one inequality
        fails on a changed kernel pool, a transposed ``cmatrix_original`` or
        whole record, and a changed host convention alike.  The one sub-case
@@ -781,17 +788,11 @@ def _spice_attitude(obs: ObsSnapshotInst, et: float) -> NDArrayFloatType:
         The 3x3 J2000-to-camera rotation in the SPICE convention.
 
     Raises:
-        NavPointingError: if the host declared no ``spice_to_frame`` rotation,
-            or the furnished kernels cannot place the frame at this epoch.
+        NavPointingError: if the furnished kernels cannot place the frame at
+            this epoch.
     """
     try:
         matrix = obs.get_spice_cmatrix(time=et)
-    except AttributeError as exc:
-        raise NavPointingError(
-            f'the oops host that built this {type(obs).__name__} declares no '
-            f'"spice_to_frame" rotation, so no C-matrix can be expressed in the SPICE '
-            f'convention: {exc}'
-        ) from exc
     except _SPICE_FAILURES as exc:
         raise NavPointingError(
             f'the observation frame has no attitude at et {et!r}: {exc}'
@@ -811,16 +812,7 @@ def _declared_camera_frame_name(obs: ObsSnapshotInst) -> str:
 
     Returns:
         The SPICE name of the frame the observation was built on.
-
-    Raises:
-        NavPointingError: if the host declared no such subfield.
     """
-    if not hasattr(obs, 'spice_frame_name'):
-        raise NavPointingError(
-            f'the oops host that built this {type(obs).__name__} declares no '
-            f'"spice_frame_name", so the SPICE camera frame this observation was built '
-            f'on is not known'
-        )
     return str(obs.spice_frame_name)
 
 
@@ -843,16 +835,10 @@ def _declared_camera_frame(obs: ObsSnapshotInst) -> tuple[str, int]:
         The frame's SPICE name and its id.
 
     Raises:
-        NavPointingError: if the host declared neither subfield, if the name
-            resolves to no id in the furnished pool, or if the id it resolves
-            to is not the one declared.
+        NavPointingError: if the name resolves to no id in the furnished pool,
+            or if the id it resolves to is not the one declared.
     """
     name = _declared_camera_frame_name(obs)
-    if not hasattr(obs, 'spice_frame_id'):
-        raise NavPointingError(
-            f'the oops host that built this {type(obs).__name__} declares no '
-            f'"spice_frame_id" beside its {name} frame name'
-        )
     declared = int(obs.spice_frame_id)
     try:
         resolved = int(cspyce.namfrm(name))
@@ -883,15 +869,9 @@ def _declared_flip(obs: ObsSnapshotInst) -> NDArrayFloatType:
         The 3x3 rotation as a read-only float64 array.
 
     Raises:
-        NavPointingError: if the host inserted no such subfield, or inserted
-            one that is not a proper orthonormal rotation.
+        NavPointingError: if the declared rotation is not a proper orthonormal
+            rotation.
     """
-    if not hasattr(obs, 'spice_to_frame'):
-        raise NavPointingError(
-            f'the oops host that built this {type(obs).__name__} declares no '
-            f'"spice_to_frame" rotation, so no C-matrix can be expressed in the SPICE '
-            f'convention'
-        )
     flip = _as_readonly_3x3(np.asarray(obs.spice_to_frame.vals, dtype=np.float64))
     _validate_rotation(flip, 'spice_to_frame')
     return flip

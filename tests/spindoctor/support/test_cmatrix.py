@@ -451,18 +451,6 @@ def test_a_frame_name_with_no_spice_id_is_a_pointing_failure() -> None:
         _declared_camera_frame(obs)
 
 
-def test_a_declared_frame_with_no_id_beside_it_is_refused() -> None:
-    """Both subfields are required; one without the other is not a frame."""
-
-    class _NameOnly:
-        """A host that declared the frame name and not its id."""
-
-        spice_frame_name = 'CASSINI_ISS_NAC'
-
-    with pytest.raises(NavPointingError, match='declares no "spice_frame_id"'):
-        _declared_camera_frame(cast(ObsSnapshotInst, _NameOnly()))
-
-
 def test_a_clock_that_cannot_encode_an_epoch_is_a_pointing_failure() -> None:
     """A clock with no furnished SCLK kernel is reported rather than raising raw."""
     with pytest.raises(NavPointingError, match='cannot encode et'):

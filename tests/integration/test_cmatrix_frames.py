@@ -123,6 +123,11 @@ class _StubTransform:
     """
 
     def __init__(self, matrix: np.ndarray) -> None:
+        """Wrap one rotation as a transform.
+
+        Parameters:
+            matrix: The 3x3 J2000-to-frame rotation the transform reports.
+        """
         self.matrix = oops.Matrix3(matrix)
 
 

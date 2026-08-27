@@ -459,6 +459,11 @@ def test_each_distinct_replacement_is_retained(monkeypatch: pytest.MonkeyPatch) 
     a full-catalog run.
     """
     _inject_identity(monkeypatch, _CASSINI_FLIP)
+    # The stub's own frame is a Cmatrix too, and on a cold cache the first one
+    # built would be counted alongside the replacements.  Build it once before
+    # the baseline is taken, so what the deltas measure is the replacements.
+    _, _, warm_c_oops = _navigated_record(_CASSINI_FLIP)
+    _FrameOnlyObs(warm_c_oops)
     wayframes_before = len(Cmatrix._WAYFRAMES)
     cache_before = len(Frame._FRAME_CACHE)
     replacements = 3

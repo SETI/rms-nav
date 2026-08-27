@@ -85,10 +85,11 @@ applies to, on the observation itself:
      - -3n101 / -3n102
      - ``I``; the frozen frame already carries the camera attitude
 
-Reading those subfields rather than keeping a table here is what keeps the frame
-an attitude is recorded in and the frame ``oops`` built the observation on from
-naming different cameras. ``CASSINI_ISS_NAC`` and ``CASSINI_ISS_WAC`` are 264.8
-arcsec apart, which is 44.2 NAC pixels, so that confusion is not a rounding
+Those subfields are read rather than restated here, so that the frame an
+attitude is recorded in is by construction the frame ``oops`` built the
+observation on. A table kept here could name a different camera than the
+observation it describes, and ``CASSINI_ISS_NAC`` and ``CASSINI_ISS_WAC`` are
+264.8 arcsec apart, or 44.2 NAC pixels, so that confusion is not a rounding
 error.
 
 A correction built in the ``oops`` frame and composed onto a SPICE-convention

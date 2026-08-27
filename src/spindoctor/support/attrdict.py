@@ -10,27 +10,29 @@ class AttrDict(dict[str, Any]):
     lookup (dict[key]).
 
     Because the instance dict and the mapping are the same object, setting an attribute
-    inserts a key.  The class therefore advertises the marker a library uses to recognize
-    an object it must not annotate; see the comment on it below.
+    inserts a key.  The class therefore carries the marker that keeps oops from writing
+    its mutability bookkeeping into one; see the comment on it below.
 
     Parameters:
         *args: Variable length argument list passed to dict constructor.
         **kwargs: Arbitrary keyword arguments passed to dict constructor.
     """
 
-    # This class publishes its own dict as its ``__dict__``, so an attribute set
-    # on an instance is a key inserted into the data.  That is the point for our
-    # own writes and a hazard for anyone else's: a library that caches
-    # bookkeeping on the objects it inspects silently adds keys that no
-    # configuration file declares.  oops does exactly that -- building a
-    # Backplane walks everything reachable from the observation, which includes
-    # the shared Config and so every section of it -- and it skips any object
-    # advertising this marker.  The marker lives on the class, so it is visible
-    # to hasattr without occupying the mapping.
+    # ``_IS_IMMUTABLE`` is oops's own marker, read by ``oops.mutable._get_info``,
+    # and this is the only reason it appears here.  That function caches its
+    # mutability verdict by setting an attribute on every object it walks, and
+    # it walks everything reachable from an Observation.  Building a Backplane
+    # therefore reaches the shared Config through the observation and so every
+    # section of it; because this class publishes its own dict as its
+    # ``__dict__``, the attribute oops sets becomes a configuration key that no
+    # configuration file declares, and the logging-config validator refuses it.
+    # The marker lives on the class, so oops finds it with ``hasattr`` without
+    # it occupying the mapping.
     #
-    # The opt-out is advisory: it protects the mapping from a library that
-    # honors it, not from one that writes unconditionally.  Remove it once oops
-    # keeps its bookkeeping on its own objects.  See #552.
+    # It is an opt-out from one package rather than a general convention: it
+    # works only because oops honors it, and it depends on a private upstream
+    # name.  Remove it once oops keeps its bookkeeping on its own objects.
+    # See #552.
     _IS_IMMUTABLE = True
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

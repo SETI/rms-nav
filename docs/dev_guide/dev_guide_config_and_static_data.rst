@@ -54,13 +54,16 @@ Sections
 Top-level YAML keys are exposed as
 :class:`~spindoctor.support.attrdict.AttrDict` properties so code can write
 ``cfg.bodies.use_lambert`` instead of ``cfg['bodies']['use_lambert']``. That
-convenience has a cost: an ``AttrDict`` is its own instance dictionary, so
-anything that sets an attribute on a section adds a key to it. A library that
-caches bookkeeping on the objects it traverses will therefore write into
-configuration data if it reaches a section, and
-:func:`~spindoctor.config.logging_keys.validate_logging_config` rejects the key
-it leaves behind. ``AttrDict`` advertises the marker such a library uses to
-recognize an object it must not annotate. The shipping sections:
+convenience has a cost: an :class:`~spindoctor.support.attrdict.AttrDict` is its
+own instance dictionary, so
+anything that sets an attribute on a section adds a key to it. ``oops`` caches
+its mutability verdict by setting an attribute on every object it walks, and it
+walks everything reachable from an observation, so building a backplane reaches
+the shared configuration and writes a key into every section of it, which
+:func:`~spindoctor.config.logging_keys.validate_logging_config` then rejects.
+The class carries ``oops``'s own opt-out marker to prevent that; it is a
+workaround for one package rather than a general convention, and is tracked for
+removal. The shipping sections:
 
 - ``general`` — global settings shared across programs.
 - ``logging`` — logger defaults, per-module levels, and per-program

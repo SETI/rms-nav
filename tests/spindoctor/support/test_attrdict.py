@@ -1,11 +1,11 @@
 """Hermetic tests for ``spindoctor.support.attrdict``.
 
 The class publishes its own dict as its ``__dict__``, which is what makes
-attribute access work and is also its one hazard: any library that sets an
-attribute on one of these objects is inserting a key into configuration data.
-The tests below pin both halves -- that our own attribute writes still land as
-keys, and that a library which honors the opt-out protocol leaves the mapping
-alone.
+attribute access work and is also its one hazard: an attribute set on one of
+these objects is a key inserted into configuration data.  oops does that, by
+caching its mutability verdict on every object it walks, so the class carries
+oops's opt-out marker.  These tests stand in for oops rather than importing it,
+so they pin the contract the marker relies on without needing a kernel pool.
 """
 
 from __future__ import annotations
@@ -18,11 +18,12 @@ from spindoctor.support.attrdict import AttrDict
 
 
 def walk_and_annotate(obj: Any, *, honor_optout: bool) -> bool:
-    """Stand in for a library that caches bookkeeping on objects it inspects.
+    """Stand in for ``oops.mutable._get_info``.
 
-    This mirrors what ``oops.mutable._get_info`` does: it walks whatever it can
-    reach and writes its own verdict back onto each object, skipping any object
-    that advertises ``_IS_IMMUTABLE``.
+    That function walks whatever it can reach from an observation and writes its
+    own verdict back onto each object, skipping any object that advertises
+    ``_IS_IMMUTABLE``.  Reproduced here rather than called, so the contract is
+    pinned without a kernel pool, and so the un-skipped case can be shown.
 
     Parameters:
         obj: The object to inspect.
@@ -100,6 +101,18 @@ def test_a_cooperating_walker_leaves_the_keys_untouched() -> None:
     section = AttrDict({'planet': 'SATURN'})
     walk_and_annotate(section, honor_optout=True)
     assert list(section) == ['planet']
+
+
+def test_an_unconditional_writer_lands_in_the_mapping() -> None:
+    """The hazard itself, which is what makes the marker worth carrying.
+
+    A walker that does not honor the opt-out puts its bookkeeping in the
+    mapping rather than beside it, where a caller reading the section back sees
+    a key no configuration file declares.
+    """
+    section = AttrDict({'planet': 'SATURN'})
+    walk_and_annotate(section, honor_optout=False)
+    assert '_FOREIGN_bookkeeping' in section
 
 
 def test_an_ordinary_object_is_still_annotated() -> None:
