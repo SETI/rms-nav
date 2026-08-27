@@ -86,10 +86,9 @@ and back.
   of order several pixels. The correction is therefore not expressible from
   the recorded data. When a result carries a fitted rotation, no `cmatrix`
   is recorded and the generator omits the image with a reason (sections
-  2.2, 3.2). Only Galileo SSI fits rotation today
-  (`fit_camera_rotation: true` appears only in `config_410_inst_gossi.yaml`;
-  pin behavior to the config key, not to prose). Twist support is a
-  follow-up (section 7).
+  2.2, 3.2). No instrument fits rotation today
+  (`fit_camera_rotation: true` appears in no config file; pin behavior to
+  the config key, not to prose). Twist support is a follow-up (section 7).
 - Registration of the corrected kernels in the SPICE database oops selects
   from. That database is scheduled for replacement; a plain `furnsh` of the
   meta-kernel is the supported loading path, and registration is a
@@ -1401,7 +1400,8 @@ blocks use of the kernels.
   define the boresight-referenced conversion -- including the sign flip
   from the `(v, u)`-to-`(x, y)` axis swap, under which a positive
   image-plane rotation is a negative rotation about camera +Z -- and lift
-  the `rotation_unsupported` omission. Costs only Galileo today.
+  the `rotation_unsupported` omission. Costs no instrument today, since
+  none fits rotation; the omission is unreachable until one does.
 - **Static per-instrument twist** (#435) belongs in an FK/IK correction
   rather than per-image CK records; the measured LORRI and SSI values are
   candidates.

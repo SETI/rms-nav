@@ -63,10 +63,10 @@ def test_settings_coiss_nac_saturation() -> None:
     assert settings.saturation_dn == 4095.0
 
 
-def test_settings_gossi_enables_rotation_fit() -> None:
-    """A gossi obs carries Galileo's camera-rotation-fit flag."""
+def test_settings_gossi_does_not_fit_rotation() -> None:
+    """A gossi obs fits no camera rotation, as every instrument now does."""
     settings = instrument_settings_from_obs(_obs('gossi'))
-    assert settings.fit_camera_rotation is True
+    assert settings.fit_camera_rotation is False
 
 
 def test_settings_vgiss_is_calibrated_if() -> None:

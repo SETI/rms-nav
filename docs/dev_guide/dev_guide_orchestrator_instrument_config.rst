@@ -78,9 +78,9 @@ The per-instrument YAML schema consumed by
   :doc:`dev_guide_orchestrator_image_classifier` for the field-by-field schema.
 - ``fit_camera_rotation`` — bool, top-level in the per-camera block, default ``False``.
   When ``True`` every technique adds in-plane camera rotation as a third parameter.
-  Only GOSSI sets it ``True``; Cassini ISS / NHLORRI / VGISS set ``False`` (VGISS does
-  carry non-negligible attitude rotation residuals, but rotation fitting is too slow to
-  enable there).
+  What decides the setting, and what a fitted rotation costs, is in
+  :doc:`dev_guide_rotation`. Each instrument's own value is stated in its
+  chapter under :doc:`instruments/instruments`, next to the reason for it.
 - ``max_rotation_deg`` — float, top-level in the per-camera block, default ``5.0`` deg.
   Maximum allowed rotation magnitude when ``fit_camera_rotation`` is ``True``.
 
@@ -135,15 +135,14 @@ Examples
         max_rotation_deg=5.0,
     )
 
-**Galileo SSI.**  ``config_410_inst_gossi.yaml`` declares
-``fit_camera_rotation: true`` (Galileo SSI carries non-negligible attitude rotation
-residuals) and ``max_rotation_deg: 5.0``. The orchestrator's per-image
-:class:`~spindoctor.nav_orchestrator.nav_context.NavContext`
-inherits ``fit_camera_rotation=True`` and every technique runs the 3-DoF path, so
-:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` reports a 3x3 covariance
-on Galileo imagery. Voyager ISS (``config_430_inst_vgiss.yaml``) also carries rotation
-residuals but sets ``fit_camera_rotation: false`` — the rotation search is too slow to
-enable there — so Voyager navigation runs the 2-DoF path.
+**Galileo SSI.**  ``config_410_inst_gossi.yaml`` declares a flat block rather
+than a per-camera one, so the resolution calls
+:meth:`~spindoctor.config.config.Config.category` with ``'galileo_ssi'`` and
+reads the block directly. Resolution is otherwise identical: the orchestrator's
+per-image :class:`~spindoctor.nav_orchestrator.nav_context.NavContext` inherits
+``fit_camera_rotation`` and ``max_rotation_deg`` from that block exactly as it
+does from a per-camera one, and what those values then decide is unchanged by
+where they were read from.
 
 **Cassini ISS CALIB pipeline.**  When the operator runs the calibrated-IF pipeline,
 ``data_units: calibrated_if``, ``noise.saturation_dn: null``, and

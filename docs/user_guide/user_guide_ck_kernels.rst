@@ -132,8 +132,8 @@ the corrected file carrying its segment or one of these reasons it has none:
        cannot be expressed as an attitude and none is claimed. It is reached
        only after the eligibility check above, so it applies to every
        otherwise eligible image of an instrument whose configuration fits
-       rotation, and to none of an instrument whose configuration does not; an
-       image of such an instrument whose navigation neither succeeded nor
+       rotation, and to none of an instrument whose configuration does not;
+       an image of such an instrument whose navigation neither succeeded nor
        conflicted is reported as ``not_eligible`` instead.
    * - ``botsim_loser``
      - An exposure taken on two cameras at once, on an instrument that can do

@@ -199,6 +199,17 @@ def _run_step(step: str, image_id: str, work: Path) -> None:
     Raises:
         AssertionError: if the step fails, quoting the end of its output.
     """
+    # The step imports spindoctor in a process of its own, where an editable
+    # install resolves the package through a finder that outranks the working
+    # directory.  Run from a worktree, it would therefore navigate with the
+    # source the install points at rather than the source under test, and every
+    # assertion below would describe the wrong tree.  Naming this checkout's
+    # src first is what keeps the subprocess measuring the code the test was
+    # collected from.
+    env = dict(os.environ)
+    src = str(_REPO_ROOT / 'src')
+    existing = env.get('PYTHONPATH')
+    env['PYTHONPATH'] = f'{src}{os.pathsep}{existing}' if existing else src
     completed = subprocess.run(
         [sys.executable, '-m', 'tests.integration.ck_round_trip', step, image_id, str(work)],
         cwd=str(_REPO_ROOT),
@@ -206,6 +217,7 @@ def _run_step(step: str, image_id: str, work: Path) -> None:
         text=True,
         check=False,
         timeout=_STEP_TIMEOUT_S,
+        env=env,
     )
     if completed.returncode != 0:
         raise AssertionError(
@@ -512,27 +524,22 @@ def test_the_re_navigated_cmatrix_matches_the_first(round_trip: RoundTrip) -> No
     assert round_trip.pixels(residual_rad) <= OFFSET_TOL_PX
 
 
-def test_a_galileo_frame_fits_a_camera_rotation(galileo_navigation: dict[str, Any]) -> None:
-    """Galileo navigation really does fit the rotation its config asks for.
+def test_a_galileo_frame_fits_no_camera_rotation(galileo_navigation: dict[str, Any]) -> None:
+    """Galileo fits no rotation, so its twist reaches the reported translation.
 
-    This is the fact that keeps Galileo out of the cohort, so it is measured
-    rather than assumed: the frame navigates successfully and reports a fitted
-    rotation of a few tenths of a degree.
+    The twist is real -- this frame measured -0.432 deg when the instrument
+    fitted one -- and it is deliberately absorbed rather than fitted, because a
+    rotation each technique measures about its own pivot is not a quantity the
+    ensemble can fuse or the attitude can carry.
     """
-    result = galileo_navigation['navigation_result']
-    assert 'rotation_deg' in result
-    # Measured on this frame: -0.432 deg (its library sibling C0059899900R fits
-    # -0.431).  The tolerance leaves room for a refinement of the star fit to
-    # move the answer without letting "a few tenths of a degree" degrade to a
-    # mere non-zero, which any noise fit would satisfy.
-    assert float(result['rotation_deg']) == pytest.approx(-0.432, abs=0.05)
+    assert 'rotation_deg' not in galileo_navigation['navigation_result']
 
 
-def test_a_galileo_frame_records_no_corrected_attitude(
+def test_a_galileo_frame_records_a_corrected_attitude(
     galileo_navigation: dict[str, Any],
 ) -> None:
-    """A fitted rotation means no C-matrix, since its pivot is not recorded."""
-    assert 'cmatrix' not in galileo_navigation['navigation_result']['pointing']
+    """With no fitted rotation the corrected C-matrix is built and recorded."""
+    assert 'cmatrix' in galileo_navigation['navigation_result']['pointing']
 
 
 def test_a_galileo_frame_still_records_its_uncorrected_attitude(
@@ -542,12 +549,12 @@ def test_a_galileo_frame_still_records_its_uncorrected_attitude(
     assert 'cmatrix_original' in galileo_navigation['navigation_result']['pointing']
 
 
-def test_a_galileo_frame_is_omitted_as_rotation_unsupported(
+def test_a_galileo_frame_is_not_omitted_as_rotation_unsupported(
     galileo_navigation: dict[str, Any],
 ) -> None:
-    """The generator's own reading of that frame is the reason it gets no segment."""
+    """Galileo frames reach the corrected kernels the mission had none of."""
     entry = ImageEntry.from_metadata(galileo_navigation)
-    assert entry.ineligibility_reason is OmissionReason.ROTATION_UNSUPPORTED
+    assert entry.ineligibility_reason is not OmissionReason.ROTATION_UNSUPPORTED
 
 
 def test_pixel_scales_measures_a_flat_fov() -> None:

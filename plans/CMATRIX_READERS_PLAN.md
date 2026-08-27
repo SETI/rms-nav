@@ -144,7 +144,7 @@ side; it is restated here so this plan stands alone.
 - Voyager's observation frame is frozen from a tolerance-snapped `ckgp`
   lookup; its `cmatrix_original` *is* that frozen attitude and `R = I`
   by construction, so no reader special case is needed.
-- A fitted-rotation result (all Galileo today) records
+- A fitted-rotation result (no instrument produces one today) records
   `cmatrix_original` only. A simulated image records no `pointing`
   block at all.
 - The kernel generator omits some recorded measurements from the
@@ -289,7 +289,7 @@ data classes, not a compatibility shim. The ladder, applied per image
 |---|---|---|
 | `pointing.cmatrix` present and valid, gates pass | C-matrix (frame replacement) | image log: debug/info one-liner naming the source |
 | gates find the pool already answering the corrected attitude (section 3.4) | **nothing** -- the observation is already correct | image log one-liner; counted at run level, reason `pool_already_corrected` |
-| `cmatrix` absent, offset present (a fitted-rotation result -- the mechanism; Galileo is the only instance today) | offset via `OffsetFOV`, as today | image log: reason `no_cmatrix_rotation_fitted`; counted per reason at run level |
+| `cmatrix` absent, offset present (a fitted-rotation result -- the mechanism; no instrument produces one today) | offset via `OffsetFOV`, as today | image log: reason `no_cmatrix_rotation_fitted`; counted per reason at run level |
 | `pointing` block absent, offset present (simulated images; any pre-`pointing`-schema record) | offset via `OffsetFOV` | image log: reason `no_pointing_block`; counted |
 | `pointing` block unusable: `cmatrix` malformed (wrong shape, non-finite, bool/str elements, not a proper rotation), or `cmatrix_original` absent or malformed, or `times` / `midtime_et` absent or non-finite (the gates cannot run) | offset via `OffsetFOV` | **warning to image log and one line to the run log**, reason `malformed_pointing` |
 | midtime gate fails (record belongs to another observation) | offset via `OffsetFOV` | **warning to both logs**, reason `cmatrix_foreign_midtime` |
