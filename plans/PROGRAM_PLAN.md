@@ -378,8 +378,8 @@ selector #467, `sd_offset` writing its own rows #486, a pruned-rows question
 #542), operational questions with a decision in them (a documented workflow
 for getting the index to cloud workers #466, the consumer open that takes a
 write lock it never needs #462), and correctness or hygiene items (#472,
-#493, #496, #497, #501, #512, #514, #515, #518, #519, #520, #528, #531,
-#534, #536, #538, #540, #541).
+#493, #496, #497, #501, #512, #514, #515, #516, #528, #531, #533, #534,
+#536, #538, #540, #541).
 
 Some items start with an operator decision, because each is a scope
 commitment:
@@ -550,8 +550,13 @@ library votes and the decision gates, not by any implementation.
 7. **New Horizons pointing family (#468)** — whether the merged family should
    be declared reconstructed on its comment-area evidence rather than staying
    `UNCLASSIFIED`.
-8. Recurring: library batch votes; agreement-study frame selection; tier
-   re-blessing after #230.
+8. **The written-product comparison (#547)** — the one place a built product
+   is compared between the results tree and the index runs against no frame;
+   whether to repoint it or to accept the gap.
+9. **Getting the index to cloud workers (#466)** — which documented workflow
+   to adopt, since it decides how #464 is deployed.
+10. Recurring: library batch votes; agreement-study frame selection; tier
+    re-blessing after #230.
 
 ## 7. Issue index (open work by track)
 

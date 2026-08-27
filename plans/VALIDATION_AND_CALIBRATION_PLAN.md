@@ -803,9 +803,12 @@ target.
 **Two limits on the method itself, to be carried rather than discovered.**
 A *monotonic* calibration map cannot separate values that were collapsed onto one
 number before it sees them, and `COMBINED_CONFIDENCE_CAP` does exactly that above a
-threshold the ordinary good case reaches (#557) -- so the confidence axis is
-censored from above, and the map is fitted with that understood rather than fitted
-through it. And the anchor is only as good as the techniques feeding it: a
+threshold the ordinary good case reaches (#557): two results whose precision-weighted
+mean confidence is 0.66 report the ceiling when both count as significant
+corroborators and no second agreement group applied the disagreement penalty, which
+is applied after the cap. So the confidence axis is censored from above over a range
+that ordinary agreement reaches, and the map is fitted with that understood rather
+than fitted through it. And the anchor is only as good as the techniques feeding it: a
 confidently-wrong contributor moves the cross-technique disagreement this workstream
 calibrates against (#558).
 

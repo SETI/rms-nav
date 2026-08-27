@@ -2,8 +2,10 @@
 
 *Explicit operator instructions — commands to run, files to modify, and
 prompts to hand to agent sessions — for every next step in
-`plans/PROGRAM_PLAN.md` as of 2026-08-25. Work through Section 0 first;
-everything after it can be dispatched in parallel as agent sessions.
+`plans/PROGRAM_PLAN.md` as of 2026-08-27. Work through Section 0 first; after
+it, independent and unblocked work can be dispatched in parallel as agent
+sessions. Where a section states an order or a dependency -- Section 0.3's
+groups, or anything gated on #288 -- that order governs.
 Environment for every command below: `source /seti/newnav/setup.sh` from
 `/seti/newnav/rms-nav` (the venv is `venv/`). A venv installed before
 2026-08-25 needs `venv/bin/pip install -e ".[dev]"` once, because
