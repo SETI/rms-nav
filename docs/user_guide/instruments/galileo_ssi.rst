@@ -7,9 +7,8 @@ Overview
 
 The Galileo Solid State Imager is a single framing camera which SpinDoctor
 navigates across the whole PDS3 archive: the cruise targets and the Jupiter
-orbital tour. Navigation, backplanes and mosaics are supported; corrected
-pointing kernels are not produced for this instrument, for the reason given
-below.
+orbital tour. Navigation, backplanes, mosaics and corrected pointing kernels
+are all supported.
 
 Pipeline support
 ================

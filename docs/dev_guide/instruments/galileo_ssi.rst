@@ -225,9 +225,8 @@ tangent-plane shift, and the difference is measured over a 17x17 grid across
 the full frame, worst case over eight offset directions, at 50 pixels of total
 boresight displacement: 1.82e-8 rad, which is 1.79e-3 pixels both in the
 tangent plane and in pixel space. It is linear in the offset, so quoting it
-without the offset it was measured at means nothing. The measurement stands
-even though no corrected kernel is written, since the same term governs any
-attitude-versus-offset comparison on this instrument.
+without the offset it was measured at means nothing. The same term governs
+any attitude-versus-offset comparison on this instrument.
 
 **Reproduction path.** ``cspyce.pxform('J2000', 'GLL_SCAN_PLATFORM',
 midtime_et)`` against each furnished candidate, accepted at 1e-9 radians.
@@ -326,6 +325,4 @@ Open items
   measurement.
 * ``from_file`` carries a TODO on the extended-FOV margin branch, which is
   duplicated across every loader and belongs somewhere shared.
-* No corrected C-kernels are produced, and closing that gap means recording the
-  rotation pivot on the navigation result rather than changing the writer.
 * The simulator PSF is unverified for want of star frames in the cohort.
