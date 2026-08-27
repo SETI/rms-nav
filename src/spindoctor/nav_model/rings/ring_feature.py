@@ -416,7 +416,7 @@ class RingFeature:
             if len(mode_info) == 5:
                 mode, a, ae, long_peri_rad, rate_peri_rad_per_sec = mode_info
                 radii_bp = context.obs.ext_bp.radial_mode(
-                    radii_bp.key,
+                    context.obs.ext_bp.standardize_backplane_key(radii_bp),
                     mode,
                     context.epoch,
                     ae,
@@ -427,7 +427,7 @@ class RingFeature:
             else:
                 mode, amplitude, phase_rad, speed_rad_per_sec = mode_info
                 radii_bp = context.obs.ext_bp.radial_mode(
-                    radii_bp.key,
+                    context.obs.ext_bp.standardize_backplane_key(radii_bp),
                     mode,
                     context.epoch,
                     amplitude,
@@ -534,8 +534,9 @@ class RingFeature:
         ]:
             label = labels[edge_type]
             feature_name = self.name or 'UNNAMED'
+            edge_key = context.obs.ext_bp.standardize_backplane_key(edge_bp)
             edge_mask = (
-                context.obs.ext_bp.border_atop(edge_bp.key, a).mvals.astype('bool').filled(False)
+                context.obs.ext_bp.border_atop(edge_key, a).mvals.astype('bool').filled(False)
             )
             edge_info_list.append((edge_mask, f'{feature_name} {label}', label))
 
@@ -616,8 +617,9 @@ class RingFeature:
 
         label = labels[edge_type]
         feature_name = self.name or 'UNNAMED'
+        radii_key = context.obs.ext_bp.standardize_backplane_key(radii_bp)
         edge_mask: NDArrayBoolType = (
-            context.obs.ext_bp.border_atop(radii_bp.key, edge_a).mvals.astype('bool').filled(False)
+            context.obs.ext_bp.border_atop(radii_key, edge_a).mvals.astype('bool').filled(False)
         )
         edge_info_list: list[tuple[NDArrayBoolType, str, str]] = [
             (edge_mask, f'{feature_name} {label}', label)

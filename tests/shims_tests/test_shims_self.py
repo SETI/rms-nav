@@ -142,6 +142,41 @@ def test_fake_backplane_ring_radius_carries_border_atop_key() -> None:
     assert radii.key == ('ring_radius', 'saturn:ring')
 
 
+def test_fake_backplane_names_the_key_of_a_ring_radius_array() -> None:
+    """``standardize_backplane_key`` answers for an array it handed out."""
+    ring = RingBackplaneData(
+        ring_radius_km=np.zeros((2, 2)),
+        ring_mask=np.ones((2, 2), dtype=bool),
+    )
+    bp = FakeBackplane(per_ring={'saturn:ring': ring})
+    radii = bp.ring_radius('saturn:ring')
+    assert bp.standardize_backplane_key(radii) == ('ring_radius', 'saturn:ring')
+
+
+def test_fake_backplane_names_the_key_without_the_attribute() -> None:
+    """An array carrying no ``key`` is found in the registry by identity."""
+    ring = RingBackplaneData(
+        ring_radius_km=np.zeros((2, 2)),
+        ring_mask=np.ones((2, 2), dtype=bool),
+    )
+    bp = FakeBackplane(per_ring={'saturn:ring': ring})
+    radii = bp.ring_radius('saturn:ring')
+    del radii.key
+    assert bp.standardize_backplane_key(radii) == ('ring_radius', 'saturn:ring')
+
+
+def test_fake_backplane_refuses_to_name_an_unregistered_array() -> None:
+    """An array this backplane never handed out has no key here."""
+    ring = RingBackplaneData(
+        ring_radius_km=np.zeros((2, 2)),
+        ring_mask=np.ones((2, 2), dtype=bool),
+    )
+    bp = FakeBackplane(per_ring={'saturn:ring': ring})
+    with pytest.raises(ValueError) as exc_info:
+        bp.standardize_backplane_key(polymath.Scalar(np.zeros((2, 2))))
+    assert 'illegal backplane key type' in str(exc_info.value)
+
+
 def test_fake_backplane_border_atop_uses_default_threshold() -> None:
     """``border_atop`` returns pixels whose ring radius is within 0.5 km of ``a``."""
     radius = np.array([[100_000.0, 100_000.4], [200_000.0, 100_000.8]])

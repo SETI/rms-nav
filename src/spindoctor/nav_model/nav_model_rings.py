@@ -387,6 +387,12 @@ class NavModelRings(NavModelRingsBase):
         if bp_radii.is_all_masked():
             self._logger.info('No rings visible in observation')
             return
+        # Ask the backplane to name the key rather than reading bp_radii.key:
+        # oops attaches that attribute from outside polymath, so polymath drops
+        # it from any array it clones, and no array that was computed from this
+        # one carries it at all.  Resolved once because naming a key can cost a
+        # scan of every registered backplane.
+        bp_radii_key = obs.ext_bp.standardize_backplane_key(bp_radii)
         min_radius = float(bp_radii.min().vals)
         max_radius = float(bp_radii.max().vals)
         self._logger.info(
@@ -429,7 +435,7 @@ class NavModelRings(NavModelRingsBase):
                 extended FOV.
             """
             border_arr: NDArrayBoolType = (
-                obs.ext_bp.border_atop(bp_radii.key, a).mvals.astype('bool').filled(False)
+                obs.ext_bp.border_atop(bp_radii_key, a).mvals.astype('bool').filled(False)
             )
             res_at_edge = resolutions[border_arr]
             res_ma = np.ma.asarray(res_at_edge)
