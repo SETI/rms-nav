@@ -135,15 +135,12 @@ Examples
         max_rotation_deg=5.0,
     )
 
-**Galileo SSI.**  ``config_410_inst_gossi.yaml`` declares
-``fit_camera_rotation: false`` and ``max_rotation_deg: 5.0``. Galileo SSI carries
-non-negligible attitude rotation residuals and leaves them unfitted; see
-:doc:`dev_guide_rotation`. The orchestrator's per-image
-:class:`~spindoctor.nav_orchestrator.nav_context.NavContext`
-inherits ``fit_camera_rotation=False`` and every technique runs the 2-DoF path, so
-:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` reports a 2x2 covariance.
-Voyager ISS (``config_430_inst_vgiss.yaml``) also carries rotation residuals and also
-leaves them unfitted.
+**Galileo SSI.**  ``config_410_inst_gossi.yaml`` declares a flat block rather
+than a per-camera one, so the resolution reads ``config.category('galileo_ssi')``
+directly. Everything downstream is unchanged: the orchestrator's per-image
+:class:`~spindoctor.nav_orchestrator.nav_context.NavContext` inherits
+``fit_camera_rotation`` and ``max_rotation_deg`` from that block exactly as it
+does from a per-camera one.
 
 **Cassini ISS CALIB pipeline.**  When the operator runs the calibrated-IF pipeline,
 ``data_units: calibrated_if``, ``noise.saturation_dn: null``, and

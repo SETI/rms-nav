@@ -191,9 +191,8 @@ What the flag decides, and what a fitted rotation costs, is in
 C-kernel specifics
 ==================
 
-Nothing is written for this instrument, for the reason above. What follows
-describes what a run would do were the rotation expressible, and is what the
-writer's holdings tests already exercise.
+Corrected kernels are written for this instrument. What follows is what a run
+does, and is what the writer's holdings tests exercise.
 
 **Baseline structure.** Ordinary time-varying type-3 kernels for object
 -77001, which a corrected segment would compose a body-fixed ``delta`` onto at
@@ -301,12 +300,11 @@ builders and ``pds4_template_variables``, and adding a template directory.
 Backplanes, mosaics, and statistics
 ===================================
 
-**Backplanes.** Nothing instrument-specific in the stage itself, but every
-image of this instrument takes the offset fallback rather than the C-matrix
-path, because rotation fitting leaves no recorded C-matrix. The reason is
-counted as ``no_cmatrix_rotation_fitted``.
+**Backplanes.** Nothing instrument-specific in the stage itself. A navigated
+image records a corrected C-matrix and the stage takes the C-matrix path;
+``no_cmatrix_rotation_fitted`` is not counted, since no rotation is fitted.
 
-**Mosaics.** As for backplanes: the same fallback, counted the same way.
+**Mosaics.** As for backplanes.
 
 **Statistics.** Nothing particular.
 :func:`~spindoctor.cli.stats.report_sections.resolve_offset_limit` reads
