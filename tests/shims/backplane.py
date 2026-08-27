@@ -64,10 +64,10 @@ def _scalar(
 
     ``polymath.Scalar`` already covers ``.vals`` / ``.mvals`` /
     ``min`` / ``max`` / ``median`` / ``expand_mask`` / ``mask_where`` /
-    ``any`` / ``__getitem__`` natively.  The shim only needs to set the
-    ``key`` attribute the navigation pipeline reads back from
-    ``ring_radius`` results so it can call
-    :meth:`oops.Backplane.border_atop`.
+    ``any`` / ``__getitem__`` natively.  The shim adds only the ``key``
+    attribute that ``oops.Backplane`` sets on a registered backplane, so
+    that :meth:`FakeBackplane.standardize_backplane_key` answers from it
+    the way the real method does.
 
     Parameters:
         vals: Numpy array or scalar.
@@ -227,13 +227,15 @@ class FakeBackplane:
     def standardize_backplane_key(self, backplane_key: Any) -> tuple[Any, ...]:
         """Name the key an array is registered under, as ``oops.Backplane`` does.
 
-        Production code asks for a key this way rather than reading the array's
-        ``key`` attribute, because oops attaches that attribute from outside
-        polymath and polymath carries it only across a copy or a clone -- never
-        onto an array computed from one.  Mirrors the real method: an array is
-        answered from ``key`` when it has one and by searching the registry for
-        it by identity otherwise, a string becomes an upper-case one-tuple, and
-        a tuple passes through.
+        This is how production code names a key.  It does not read the array's
+        ``key`` attribute, which oops sets on what the registry hands out but
+        which is absent from any array computed from one -- correctly so, since
+        a computed array is not the registered backplane and a key claiming
+        otherwise would resolve to the wrong array without raising.
+
+        Mirrors the real method: an array is answered from ``key`` when it has
+        one and by searching the registry for it by identity otherwise, a
+        string becomes an upper-case one-tuple, and a tuple passes through.
 
         Parameters:
             backplane_key: An array obtained from this backplane, or a key
@@ -328,16 +330,19 @@ class FakeBackplane:
     # ------------------------------------------------------------------
 
     def ring_radius(self, ring_target: str) -> KeyedScalar:
-        """Return per-pixel ring-plane radius in km, tagged with its key.
+        """Return per-pixel ring-plane radius in km, registered under its key.
+
+        The array is registered under ``('ring_radius', ring_target)`` and
+        cached, so :meth:`standardize_backplane_key` -- which is how production
+        names it before calling :meth:`border_atop` -- can find it by identity.
+        Repeat calls answer with the one object, as ``oops.Backplane`` answers
+        from its cache.
 
         Parameters:
             ring_target: Ring target name, as keyed into ``per_ring``.
 
         Returns:
-            :class:`KeyedScalar` of per-pixel radii, masked outside the
-            configured ``ring_mask``, whose ``key`` is the
-            ``('ring_radius', ring_target)`` tuple the production code
-            reads back and hands to :meth:`border_atop`.
+            Per-pixel radii, masked outside the configured ``ring_mask``.
         """
         key = ('ring_radius', ring_target)
         if key in self.backplanes:
@@ -355,9 +360,9 @@ class FakeBackplane:
     def border_atop(self, key: tuple[Any, ...], a: float) -> polymath.Scalar:
         """Return a boolean Scalar marking pixels at ring radius ``a``.
 
-        ``key`` is the tuple read off ``ring_radius(...).key`` by the
-        production code; the head determines which ring's radius array
-        we threshold against ``a``.
+        ``key`` is the tuple production code obtains from
+        :meth:`standardize_backplane_key`; the head determines which ring's
+        radius array we threshold against ``a``.
         """
         if not key or key[0] != 'ring_radius':
             raise LookupError(f'FakeBackplane.border_atop expected a ring_radius key, got {key!r}')
