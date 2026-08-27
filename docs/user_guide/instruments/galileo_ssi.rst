@@ -14,11 +14,8 @@ below.
 Pipeline support
 ================
 
-* **Navigation** -- supported, with a per-frame camera rotation fitted
-  alongside the translation.
-* **Corrected-pointing C-kernels** -- **not produced.** The run is accepted and
-  reports every image, but every otherwise eligible image is omitted with
-  ``rotation_unsupported``, so no kernel is written. See
+* **Navigation** -- supported.
+* **Corrected-pointing C-kernels** -- supported. See
   `Corrected-pointing C-kernels`_.
 * **Backplanes** -- supported.
 * **Mosaics** -- supported, body and ring.
@@ -133,12 +130,14 @@ every image size, rather than a table keyed by size. It is generous because the
 reconstructed attitude carries real per-frame error, and it is the largest
 offset a search can find.
 
-**Camera rotation.** Rotation fitting is **on** for this instrument, bounded at
-5 degrees. Every technique works in three degrees of freedom, ``(dv, du,
-theta)``, and the result reports a rotation alongside the translation. Two
-consequences reach a user: navigation costs more per image than a
-translation-only fit, and no image of this instrument is eligible for a
-corrected C-kernel.
+**Camera rotation.** Rotation fitting is **off** for this instrument, as it is
+for every instrument. Every technique works in two degrees of freedom, ``(dv,
+du)``, and the twist the frames carry is absorbed into the reported
+translation. It is left unfitted because a fitted rotation is not a
+well-defined quantity: each technique turns about its own centre, and the same
+physical twist about two different pivots differs by a pure translation, so
+techniques measuring one rotation report translations the ensemble cannot
+compare. A fitted rotation also cannot be carried into a corrected attitude.
 
 **Measured twist.** Over the frames that lock, the twist is
 -0.0526 +/- 0.0017 degrees, which displaces the field corner by 0.52 pixels,
@@ -171,23 +170,7 @@ It writes none of the spacecraft-clock fields (``start_time_scet``,
 Corrected-pointing C-kernels
 ============================
 
-**No corrected kernels are produced for this instrument.** ``sd_create_ck
-gossi`` is a valid invocation and runs to completion, but every otherwise
-eligible image is omitted with ``rotation_unsupported`` and no kernel, and no
-meta-kernel, is written. A run that reaches the writing phase still writes the
-report, naming the reason on every row.
-
-The cause is the rotation fitting described above. A fitted rotation turns
-about a pivot chosen per technique, which the navigation result does not
-record, so the correction cannot be expressed as an attitude and none is
-claimed rather than one being guessed at. The two facts are tied together: this
-instrument gets a per-frame rotation because its reconstructed attitude needs
-one, and that is exactly what makes its correction inexpressible as a rotation
-of the scan platform alone.
-
-Everything below describes what a run would use if that changed.
-
-**What would be corrected.** The corrected object is **-77001, the scan
+**What is corrected.** The corrected object is **-77001, the scan
 platform**. The camera frame the correction is measured in is
 ``GLL_SCAN_PLATFORM``, which is also the frame the observation is built in.
 Segment time tags are encoded against spacecraft clock **-77**.
@@ -228,25 +211,21 @@ one-second cadence once the exposure reaches ten seconds. The attitude is
 time-varying: the correction is held body-fixed and composed onto the
 baseline's own pointing at each record epoch.
 
-**Omission reasons this instrument produces.** ``rotation_unsupported``, on
-every otherwise eligible image, for the reason above. ``not_eligible`` also
-appears, on images whose navigation neither succeeded nor conflicted, and is
-reported ahead of ``rotation_unsupported``. ``botsim_loser`` cannot
-appear: it belongs to an instrument that exposes two cameras at once, and this
-one has a single camera. ``no_reproducing_baseline`` and
-``baseline_coverage_gap`` are unreachable while every image is refused earlier.
+**Omission reasons this instrument produces.** ``not_eligible``, on images
+whose navigation neither succeeded nor conflicted. ``rotation_unsupported``
+cannot appear, since this instrument fits no rotation. ``botsim_loser``
+cannot appear either: it belongs to an instrument that exposes two cameras at
+once, and this one has a single camera. ``no_reproducing_baseline`` and
+``baseline_coverage_gap`` are reachable and mean what they mean everywhere.
 
-**Interpolation error.** Not measured, and not measurable while no segment is
-written.
+**Interpolation error.** Not yet measured for this instrument.
 
 Known limitations
 =================
 
-* No corrected-pointing C-kernels, as described above. The navigated pointing
-  is available only as the pixel offset and rotation in ``_metadata.json``.
-* The rotation fitting that navigation performs is not carried into any
-  downstream product that expresses pointing as an attitude: the backplane and
-  mosaic stages fall back to applying the pixel offset for these images.
+* The per-frame twist these images carry is absorbed into the reported
+  translation rather than measured: it is real, and a navigation that reports
+  only a translation prices it as translation error.
 * The residual distortion is about half a pixel at the field corner and the
   navigator does not remove it, so a feature near the frame edge is measured
   against a model that is that far off.

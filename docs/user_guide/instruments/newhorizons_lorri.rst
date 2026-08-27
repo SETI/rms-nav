@@ -248,7 +248,8 @@ the baseline's own pointing at each record epoch.
 
 **Omission reasons this instrument produces.** ``not_eligible``,
 ``no_reproducing_baseline`` and ``baseline_coverage_gap``.
-``rotation_unsupported`` never appears, because rotation fitting is off.
+``rotation_unsupported`` never appears, because no instrument fits camera
+rotation.
 ``botsim_loser`` cannot appear: it belongs to an instrument that exposes two
 cameras at once, and this one has a single camera.
 

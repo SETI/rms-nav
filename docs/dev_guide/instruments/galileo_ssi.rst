@@ -121,9 +121,10 @@ Placeholder values, carrying inline ``# PLACEHOLDER`` markers:
 and ``marker_value`` are hard facts. The ``_sources`` convention is not used in
 this file.
 
-``fit_camera_rotation: true`` is the setting that separates this block from
-every other, and it is commented in place with the reason: the instrument
-carries non-negligible attitude rotation residuals.
+``fit_camera_rotation: false``, as in every other instrument block. It is
+commented in place at length, because the residuals it declines to fit are
+real: what makes them unfittable is that a rotation is measured about a
+different centre by each technique.
 
 Photometric and PSF calibration
 ===============================
@@ -181,27 +182,24 @@ exists for.
 **Per-spacecraft variation.** None. One spacecraft, one camera, one CK object
 and one clock.
 
-**Rotation fitting.** ``fit_camera_rotation`` is ``true`` -- the only
-instrument where it is -- bounded by ``max_rotation_deg: 5.0``. Every technique
-works in three degrees of freedom, ``(dv, du, theta)``, every covariance grows
-from 2x2 to 3x3, and the ensemble's combined estimate carries a populated
-``rotation_rad``.
+**Rotation fitting.** ``fit_camera_rotation`` is ``false``, as it is for every
+instrument. Every technique works in two degrees of freedom, ``(dv, du)``,
+every covariance is 2x2, and the combined estimate carries no ``rotation_rad``.
 
-The interaction with C-kernel eligibility is total and is the single most
-consequential fact about this instrument. A fitted rotation turns about a pivot
-chosen per technique, which
-:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` does not record, so
-:func:`~spindoctor.support.cmatrix.compute_pointing` returns a
-``PointingSolution`` whose ``cmatrix`` is ``None``. Every image of this
-instrument is therefore ``rotation_unsupported`` in the C-kernel run, and no
-corrected kernel is written. Downstream, the backplane and mosaic stages find
-no usable C-matrix on these records and degrade to the offset path under the
-reason ``no_cmatrix_rotation_fitted``.
+The twist these frames carry is real and is absorbed into the reported
+translation. What makes it unfittable is not the writer but the estimate: a
+rotation is measured about a different centre by each technique -- a vertex
+centroid for the DT techniques, a composite centroid for the disc, a weighted
+catalog centroid for the star fits -- and a rotation by theta about pivot P
+differs from the same rotation about pivot Q by the pure translation
+``(I - R(theta))(P - Q)``. Techniques describing one physical twist therefore
+report translations the ensemble fuses as though they were comparable.
 
-Expressing a fitted rotation as an attitude means recording the pivot the
-rotation turned about, which is a change to
-:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` and to every
-technique that produces one, not a change to the writer.
+Expressing a fitted rotation as an attitude would additionally mean recording
+the pivot it turned about, which
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` does not carry.
+Fitting every technique about the FOV centre removes both problems at once and
+needs no pivot field; that is the direction of the standing rotation design.
 
 C-kernel specifics
 ==================
@@ -291,11 +289,9 @@ distortion cohort.
 test (``test_image_library.py``) run on those sidecars.
 ``tests/integration/test_cmatrix_frames.py`` measures the oops-from-SPICE flip
 on a real frame of this instrument and checks it against the identity.
-``tests/integration/test_ck_round_trip.py`` has no round trip for this
-instrument, since it produces no corrected kernel to round-trip, but it does
-assert the reason: that a frame of this instrument fits a camera rotation,
-records no corrected attitude while still recording its uncorrected one, and
-is omitted as ``rotation_unsupported``.
+``tests/integration/test_ck_round_trip.py`` asserts that a frame of this
+instrument fits no camera rotation, records a corrected attitude alongside its
+uncorrected one, and is not omitted as ``rotation_unsupported``.
 
 **Unit tests.** ``tests/spindoctor/inst/test_inst_galileo_ssi.py`` pins the
 limiting-magnitude form: the anchor at unit exposure, one magnitude gained per

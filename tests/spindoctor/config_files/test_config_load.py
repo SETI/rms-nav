@@ -31,6 +31,36 @@ def test_bootstrap_angles_are_degrees() -> None:
     assert bootstrap.max_subsolar_dist_deg == 45.0
 
 
+def test_no_shipped_instrument_fits_camera_rotation() -> None:
+    """No instrument enables rotation fitting, and enabling one needs work first.
+
+    A fitted rotation is not currently a well-defined quantity.  Each technique
+    turns about its own centre, and the same physical twist about two different
+    pivots differs by the pure translation ``(I - R(theta))(P - Q)``, so
+    techniques measuring one rotation report translations that the ensemble
+    fuses as though they were comparable.  A fitted rotation also cannot be
+    carried into a corrected attitude, so it suppresses the corrected C-matrix
+    and omits the frame from every corrected kernel.
+
+    Enabling it for an instrument therefore needs the rotation redesign first
+    -- fitting every technique about the FOV centre -- and needs the conflicted
+    result path taught to carry a rotation, which today it silently drops.
+    This test fails when a configuration enables it, so that arrives as a
+    decision rather than as a surprise.
+    """
+    config = Config()
+    config.read_config()
+    cassini = config.category('cassini_iss')
+    blocks = [
+        cassini['nac'],
+        cassini['wac'],
+        config.category('voyager_iss'),
+        config.category('galileo_ssi'),
+        config.category('newhorizons_lorri'),
+    ]
+    assert [b for b in blocks if b['fit_camera_rotation'] is True] == []
+
+
 def test_per_instrument_required_fields_present() -> None:
     """Every shipped 4N0 instrument block has the required Phase 3 keys."""
     config = Config()
@@ -51,7 +81,7 @@ def test_per_instrument_required_fields_present() -> None:
     galileo = config.category('galileo_ssi')
     assert galileo['data_units'] == 'raw_dn'
     assert galileo['noise']['saturation_dn'] == 255
-    assert galileo['fit_camera_rotation'] is True
+    assert galileo['fit_camera_rotation'] is False
     assert galileo['max_rotation_deg'] == 5.0
     assert galileo['mag_offset']['fallback_combo'] == 'CL'
     nhlorri = config.category('newhorizons_lorri')

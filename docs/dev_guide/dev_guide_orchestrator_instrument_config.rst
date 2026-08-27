@@ -78,9 +78,8 @@ The per-instrument YAML schema consumed by
   :doc:`dev_guide_orchestrator_image_classifier` for the field-by-field schema.
 - ``fit_camera_rotation`` — bool, top-level in the per-camera block, default ``False``.
   When ``True`` every technique adds in-plane camera rotation as a third parameter.
-  Only GOSSI sets it ``True``; Cassini ISS / NHLORRI / VGISS set ``False`` (VGISS does
-  carry non-negligible attitude rotation residuals, but rotation fitting is too slow to
-  enable there).
+  No instrument sets it ``True``. Galileo SSI and Voyager ISS both carry
+  non-negligible attitude rotation residuals and both leave them unfitted.
 - ``max_rotation_deg`` — float, top-level in the per-camera block, default ``5.0`` deg.
   Maximum allowed rotation magnitude when ``fit_camera_rotation`` is ``True``.
 
@@ -136,14 +135,16 @@ Examples
     )
 
 **Galileo SSI.**  ``config_410_inst_gossi.yaml`` declares
-``fit_camera_rotation: true`` (Galileo SSI carries non-negligible attitude rotation
-residuals) and ``max_rotation_deg: 5.0``. The orchestrator's per-image
+``fit_camera_rotation: false`` and ``max_rotation_deg: 5.0``. Galileo SSI carries
+non-negligible attitude rotation residuals and leaves them unfitted, because each
+technique measures a rotation about its own centre and the same twist about two
+centres differs by a pure translation, so the reported translations are not
+comparable. The orchestrator's per-image
 :class:`~spindoctor.nav_orchestrator.nav_context.NavContext`
-inherits ``fit_camera_rotation=True`` and every technique runs the 3-DoF path, so
-:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` reports a 3x3 covariance
-on Galileo imagery. Voyager ISS (``config_430_inst_vgiss.yaml``) also carries rotation
-residuals but sets ``fit_camera_rotation: false`` — the rotation search is too slow to
-enable there — so Voyager navigation runs the 2-DoF path.
+inherits ``fit_camera_rotation=False`` and every technique runs the 2-DoF path, so
+:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` reports a 2x2 covariance.
+Voyager ISS (``config_430_inst_vgiss.yaml``) also carries rotation residuals and also
+leaves them unfitted.
 
 **Cassini ISS CALIB pipeline.**  When the operator runs the calibrated-IF pipeline,
 ``data_units: calibrated_if``, ``noise.saturation_dn: null``, and

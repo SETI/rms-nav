@@ -265,8 +265,8 @@ the baseline's own pointing at each record epoch.
 
 **Omission reasons this instrument produces.** ``not_eligible``,
 ``botsim_loser``, ``no_reproducing_baseline`` and ``baseline_coverage_gap``.
-``rotation_unsupported`` never appears, because rotation fitting is off for
-both cameras.
+``rotation_unsupported`` never appears, because no instrument fits camera
+rotation.
 
 ``botsim_loser`` is unique to this instrument, and it follows from the
 corrected object being the bus. A BOTSIM exposure produces two frames, one per
