@@ -62,6 +62,20 @@ binding.
 pending the real-anchored pass (#230). The remaining workstreams below build
 on that baseline; each has a tracking issue (cross-map below).
 
+**One prerequisite for measuring anything at scale.** It is Track E work
+rather than methodology, and it silently corrupts what every workstream below
+reads:
+
+- **#288** — 10 of 75 curated library sidecars disagree in the local
+  integration environment, so the regression instrument that is supposed to
+  detect a navigation change cannot currently do so. Until it is reconciled,
+  a navigation-affecting change can only be gated on *no new failures against
+  `main`*, and the library's own tiers cannot be read as verified
+  expectations.
+
+It does not block writing methodology or building tooling. It blocks
+collecting the numbers.
+
 **Two shared decisions, declared once:**
 
 - **Confidence-calibration methodology (binding for #230).** Confidence is
@@ -89,8 +103,8 @@ carry the methodology and acceptance criteria):
 | WS-1b | #226 | Reprojection consistency. |
 | WS-2 | #227 (+ #223, #309, #341, #377, #409) | De-circularization done; #227 open only for the realism residual (realism-anchored calibration #309, terminator verdict #223, sim-fidelity gaps, and the scene-coordinate convention split #409 where stars are the outlier). |
 | WS-17 | #355 | Distortion measured from star fields; residual is the per-camera Voyager sim split. |
-| WS-3 | #172, #174, #235 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
-| WS-4 | #229, #426 | CI integration tiers. |
+| WS-3 | #172, #174, #235, #288 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. #288 is the standing regression: 10 of 75 sidecars disagree locally, so the library's tiers are not currently verified expectations. |
+| WS-4 | #229, #426, #324, #336, #335, #340 | CI integration tiers, plus what does not run in Actions today: the agreement-estimator tests (#324), the data-independent simulator suites (#336), the committed sim baselines that have no canonical environment (#335), and the cross-check's yes/no primary-technique flag (#340). |
 | WS-5 | #230, #176 | Real-anchored recalibration once WS-1 anchors exist. |
 | WS-6 | #231 | Capability matrix. |
 | WS-7 | #397, #398, #399, #400, #401, #402, #403, #404, #405, #407 | Titan haze navigation delivered and validated; open items are the deferred refinements and the operator ratification bundle (#407). |
@@ -467,6 +481,20 @@ covariance only on a curated set of round uniform moons in favorable
 ring/multi-body geometry." The pairwise layer carries low risk and no external-data
 need.
 
+**The anchor must not be contaminated before it is measured (#558).** This
+workstream's product is cross-technique *disagreement*, and a technique that
+reports a confidently wrong answer contributes a disagreement that is a property of
+the defect rather than of the scene. The confidently-wrong ring locks
+(#346, #476, #504) are the known case: on `N1633925572_1_CALIB`, measured 2026-08-26, a body fit
+and a star fit agree to 0.08 px while `RingEdgeNav` converges 39 px away on 452 of
+6786 inliers, is not flagged spurious, and enters the combine. Feeding that frame to
+this workstream does not merely add noise -- it moves the anchor WS-5 then
+calibrates against, so a calibration fitted before those defects are closed learns
+to distrust ring evidence everywhere and has to be redone once they are. Either fix
+that family first, or exclude from the agreement product any frame whose
+contributing technique self-reports an inlier fraction below a stated floor, and say
+which was chosen.
+
 ### WS-1b: Reprojection consistency across overlapping frames (secondary corroboration)
 **Closes:** the one regime WS-1 cannot reach — a body imaged repeatedly with **no
 second in-frame fiducial** — so it is not redundant with WS-1.
@@ -772,9 +800,22 @@ target.
  (no feedback loop), and tier boundaries map to stated error percentiles.
 - A test guards calibration drift.
 
-**Dependencies:** WS-0 (which bins yield per-technique σ), WS-1 (anchor), WS-2
-(single-technique regimes). **Risk:** medium — may reveal that some
-techniques' covariances are mis-scaled (feeds WS-9).
+**Two limits on the method itself, to be carried rather than discovered.**
+A *monotonic* calibration map cannot separate values that were collapsed onto one
+number before it sees them, and `COMBINED_CONFIDENCE_CAP` does exactly that above a
+threshold the ordinary good case reaches (#557): two results whose precision-weighted
+mean confidence is 0.66 report the ceiling when both count as significant
+corroborators and no second agreement group applied the disagreement penalty, which
+is applied after the cap. So the confidence axis is censored from above over a range
+that ordinary agreement reaches, and the map is fitted with that understood rather
+than fitted through it. And the anchor is only as good as the techniques feeding it: a
+confidently-wrong contributor moves the cross-technique disagreement this workstream
+calibrates against (#558).
+
+**Dependencies:** WS-0 (which bins yield per-technique σ), WS-1 (anchor, and
+see #558 on keeping it uncontaminated), WS-2 (single-technique regimes). **Risk:**
+medium — may reveal that some techniques' covariances are mis-scaled (feeds WS-9),
+and the confidence axis may prove too censored to calibrate above the cap (#557).
 
 ---
 
@@ -943,8 +984,21 @@ calibration).
 - Inventory the load-bearing constants: `ROTATION_UNOBSERVABLE_VARIANCE = 1e15`
  (`nav_technique.py`), `DEFAULT_PINVH_RCOND = 1e-9` (`ensemble.py`),
  `SNR_REF = 8.0` / `SNR_FLOOR = 0.1` (`nav_model/stars/nav_model_stars.py:77-78`),
- blob noise thresholds, MAD factor, edge thresholds. For each: document its derivation,
- sensitivity, and the regime where it holds, next to its definition.
+ `COMBINED_CONFIDENCE_CAP = 0.99` and `AGREEMENT_FACTOR_CAP = 1.5`
+ (`feature/constants.py`), blob noise thresholds, MAD factor, edge thresholds. For
+ each: document its derivation, sensitivity, and the regime where it holds, next to
+ its definition.
+- **Decide where the confidence scale should saturate** (#557). The two caps above
+ censor the combined confidence from above, and they bind far earlier than
+ "exceptionally confident": the agreement factor `1 + 0.5*log2(n_significant)`
+ already equals its own cap at `n_significant = 2`, so two significant
+ corroborating techniques whose precision-weighted mean confidence reaches 0.66
+ report exactly 0.99 unless a second agreement group applies the disagreement
+ penalty, which is applied after the cap. Four distinct library frames measured
+ 2026-08-26 report that one value.
+ Refusing to emit 1.0 is defensible -- confidence is a proxy, not a probability --
+ but a scale that saturates on the ordinary good case carries no information above
+ the cap, and gives no credit for a third or fourth corroborating technique.
 - **Measure star SNR from the image, not the magnitude.** Replace (or cross-check)
  the synthesized `snr_eff = SNR_REF * 2.512**(mag_limit - vmag)` with a
  photometrically measured per-star SNR from the actual frame for gating and
@@ -955,7 +1009,8 @@ calibration).
 
 **Acceptance criteria.** Every load-bearing constant has a documented derivation
 and a sensitivity bound; star SNR used for covariance derives from measured
-photometry; covariance coverage passes WS-5.
+photometry; covariance coverage passes WS-5; the confidence scale's saturation
+point is a decision with a recorded rationale rather than an inherited constant.
 
 **Dependencies:** WS-1/WS-5 for coverage validation. **Risk:**
 medium — measured SNR may change star gating behavior and need re-tuning.

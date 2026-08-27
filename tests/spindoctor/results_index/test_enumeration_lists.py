@@ -64,8 +64,14 @@ validating any of them.
 """
 
 PLANS = FCPath(Path(__file__).resolve().parents[3]) / 'plans'
-PLAN = PLANS / 'RESULTS_INDEX_PLAN.md'
-"""The plan, which states the enumeration twice: in Phase 5 and in criterion 1."""
+PLAN = PLANS / 'archive' / 'RESULTS_INDEX_PLAN_2026-08-04.md'
+"""The plan, which states the enumeration twice: in Phase 5 and in criterion 1.
+
+The plan is archived, its work having shipped, and the archive holds it under a
+dated name.  Being archived does not free it from this check: it is one of the
+four statements the check binds together, and a member added to or removed from
+the enumeration is edited into all four or into none.
+"""
 
 NAVIGATION_GUIDE = (
     FCPath(Path(__file__).resolve().parents[3])

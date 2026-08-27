@@ -1,12 +1,16 @@
 # Archived critiques
 
-Point-in-time review documents (dated in each filename; all reviewing the code merged as commit
-77a90f4), kept for reference. Each is a snapshot of what its author found on its
-date, frozen as written: none is maintained, and none carries a running status
-section. Internal file paths and line numbers reflect the tree as reviewed and
-have drifted since; the paths predate the SpinDoctor rename, so `src/nav/` is now
-`src/spindoctor/`, `tests/nav/` is `tests/spindoctor/`, and the CLI entry points
-are `sd_*`.
+Point-in-time review documents, dated in each filename, kept for reference. Each
+is a snapshot of what its author found on its date, frozen as written: none is
+maintained, and none carries a running status section. A critique is archived
+once the work it reviewed has landed, which is why the parent `critiques/`
+directory is empty whenever no review is open.
+
+Internal file paths and line numbers reflect the tree as reviewed and have
+drifted since. The 2026-06 and 2026-07-08 reviews all read the code merged as
+commit `77a90f4`, and their paths predate the SpinDoctor rename, so `src/nav/`
+is now `src/spindoctor/`, `tests/nav/` is `tests/spindoctor/`, and the CLI entry
+points are `sd_*`.
 
 For what is actually open, read the live plans and the GitHub issues, not these
 records: `plans/PROGRAM_PLAN.md` is the plan of record, and every finding below
@@ -36,3 +40,34 @@ that remains open is tracked there or in an issue.
   the verification record (37 of 38 sampled code findings independently confirmed)
   and its verdict that the engineering quality outruns the evidentiary basis until
   the validation program runs.
+- `SIM_REALISM_CRITIQUE_2026-07-18.md` — independent assessment of the executed
+  simulator realism and de-circularization work
+  (`plans/archive/SIM_REALISM_PLAN_2026-07-18.md`), written against the
+  `rf_sim_realism` branch as it merged. It is the assessment
+  `docs/dev_guide/dev_guide_simulator.rst` and
+  `util/calibration/CAMPAIGN_20260718.md` cite for the capability envelope's
+  phrasing. Its open findings are the simulator-fidelity issues that now feed
+  the realism-anchored calibration campaign (#309): #325, #329-#333, #341-#345,
+  #290, #377, plus the boundary and mirror-parity guards #310 and #311.
+- `TITAN_NAV_CONCEPT_2026-07-25.md` — the method analysis that selected haze
+  solar-symmetry navigation (the French method) over the alternatives for
+  Titan, frozen as the record of why the shipped approach won.
+- `TITAN_NAV_PLAN_CRITIQUE_2026-07-25.md`, `..._R2.md`, `..._R3.md`,
+  `..._R4_OPUS.md`, `..._R5_OPUS.md`, `..._R6_OPUS.md` — the six adversarial
+  review rounds over `plans/archive/TITAN_NAV_PLAN_2026-07-25.md` before
+  implementation; each round's findings were folded into the plan revision that
+  followed it, so the plan as archived (revision 12) is what they produced.
+- `TITAN_NAV_COLLATERAL_SWEEP_2026-07-25.md` — the seventh round: a sweep for
+  what the Titan work would touch outside its own subsystem, run before
+  implementation began.
+- `CK_KERNEL_BRANCH_CRITIQUE_2026-08-07.md` — review of the corrected-pointing
+  C-kernel branch (`plans/archive/CK_KERNEL_PLAN_2026-08-04.md`) before it
+  merged. Its findings that were not fixed on the branch are filed as issues
+  (#433, #437, #440, #443, #444, #446, #448, #455, #459); the kernel
+  classification defects it raised (#449, #452) were fixed and closed.
+- `CMATRIX_READERS_PLAN_CRITIQUE_2026-08-07.md` — adversarial review of
+  `plans/archive/CMATRIX_READERS_PLAN_2026-08-09.md` *before* implementation,
+  verdict CONDITIONAL with the mechanism verified correct by execution. Every
+  finding was folded into the plan before coding, which its section 0
+  enumerates; this document is the record of what the review caught that the
+  plan as first written would have shipped wrong.
