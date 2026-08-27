@@ -287,7 +287,7 @@ reads its baseline's attitude history, and writes its own zeros.
 
 **Omission reasons this instrument produces.** ``not_eligible`` and
 ``no_reproducing_baseline``. ``rotation_unsupported`` never appears, because
-no instrument fits camera rotation. ``botsim_loser`` cannot appear: it belongs to an
+rotation fitting is off. ``botsim_loser`` cannot appear: it belongs to an
 instrument that exposes two cameras at once, and a Voyager exposure uses one.
 ``baseline_coverage_gap`` cannot arise from segment building either, since a
 frozen segment never reads the baseline at its record epochs.

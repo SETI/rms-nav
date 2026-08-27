@@ -6,6 +6,11 @@ Asserts the renumbered ``config_NNN_*.yaml`` set loads cleanly under
 
 from __future__ import annotations
 
+import pathlib
+
+from ruamel.yaml import YAML
+
+import spindoctor.config.config
 from spindoctor.config import Config
 
 
@@ -31,34 +36,47 @@ def test_bootstrap_angles_are_degrees() -> None:
     assert bootstrap.max_subsolar_dist_deg == 45.0
 
 
-def test_no_shipped_instrument_fits_camera_rotation() -> None:
-    """No instrument enables rotation fitting, and enabling one needs work first.
+def _enables_rotation(node: object) -> bool:
+    """Whether ``fit_camera_rotation`` is true anywhere in a loaded config tree.
 
-    A fitted rotation is not currently a well-defined quantity.  Each technique
-    turns about its own centre, and the same physical twist about two different
-    pivots differs by the pure translation ``(I - R(theta))(P - Q)``, so
-    techniques measuring one rotation report translations that the ensemble
-    fuses as though they were comparable.  A fitted rotation also cannot be
-    carried into a corrected attitude, so it suppresses the corrected C-matrix
-    and omits the frame from every corrected kernel.
+    Parameters:
+        node: A node of the parsed YAML, at any depth.
 
-    Enabling it for an instrument therefore needs the rotation redesign first
-    -- fitting every technique about the FOV centre -- and needs the conflicted
-    result path taught to carry a rotation, which today it silently drops.
-    This test fails when a configuration enables it, so that arrives as a
-    decision rather than as a surprise.
+    Returns:
+        True if any ``fit_camera_rotation`` key below this node is true.
     """
-    config = Config()
-    config.read_config()
-    cassini = config.category('cassini_iss')
-    blocks = [
-        cassini['nac'],
-        cassini['wac'],
-        config.category('voyager_iss'),
-        config.category('galileo_ssi'),
-        config.category('newhorizons_lorri'),
+    if isinstance(node, dict):
+        if node.get('fit_camera_rotation') is True:
+            return True
+        return any(_enables_rotation(value) for value in node.values())
+    if isinstance(node, list):
+        return any(_enables_rotation(value) for value in node)
+    return False
+
+
+def test_no_shipped_instrument_fits_camera_rotation() -> None:
+    """No shipped instrument enables rotation fitting, and enabling one needs work.
+
+    Nothing can currently use a fitted rotation.  Each technique measures it
+    about its own centre, so the translations reported alongside it are not in
+    one convention, and a rotation without a recorded centre cannot be carried
+    into an attitude -- which suppresses the corrected C-matrix and omits the
+    frame from the corrected kernels.  Enabling it therefore needs the rotation
+    convention settled first, and needs the conflicted result path taught to
+    carry a rotation, which today it silently drops.
+
+    The instrument files are discovered rather than listed, so an instrument
+    added later is covered without this test being edited.  It fails when a
+    shipped configuration enables the flag, so that arrives as a decision.
+    """
+    config_dir = pathlib.Path(spindoctor.config.config.__file__).resolve().parent.parent
+    inst_files = sorted((config_dir / 'config_files').glob('config_4[0-9]0_inst_*.yaml'))
+    assert inst_files, 'no per-instrument configuration files were discovered'
+    loader = YAML(typ='safe')
+    enabling = [
+        path.name for path in inst_files if _enables_rotation(loader.load(path.read_text()))
     ]
-    assert [b for b in blocks if b['fit_camera_rotation'] is True] == []
+    assert enabling == []
 
 
 def test_per_instrument_required_fields_present() -> None:

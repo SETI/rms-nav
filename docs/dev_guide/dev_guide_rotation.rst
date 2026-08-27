@@ -25,11 +25,22 @@ remove; what the per-frame fit costs, since it turns every technique's
 pointing is wanted as a C-kernel, because a fitted rotation turns about
 a per-technique pivot the result does not record and therefore cannot be
 expressed as an attitude at all. An instrument with the flag on writes
-no corrected C-kernels. No instrument currently sets it, and the pivot is
-why: a rotation measured about a different centre by each technique is
-not a quantity the ensemble can fuse, since the same twist about two
-pivots differs by a pure translation and those translations are then
-combined as though comparable.
+no corrected C-kernels.
+
+The pivot is the deeper of those. Rotation is fitted per technique, and
+each technique turns about its own centre -- a vertex centroid for the
+DT techniques, a composite centroid for the disc, a weighted catalog
+centroid for the star fits. A rigid rotation by theta about pivot P and
+the same rotation about pivot Q differ by the pure translation
+``(I - R(theta))(P - Q)``, so two techniques describing one physical
+twist report *different translations*, which the ensemble then fuses as
+though they were comparable. For a fraction of a degree across a couple
+of hundred pixels of pivot separation that disagreement is of order a
+pixel. A fitted rotation is therefore not a well-defined quantity while
+the pivot varies, which is a stronger objection than the kernel one: it
+is wrong rather than merely unusable. Fitting every technique about the
+FOV centre removes it and needs no pivot field recorded anywhere; that
+is the direction of the standing rotation design.
 
 The measured per-instrument twist and its frame-to-frame scatter are in
 :doc:`/fov_distortion_report/fov_distortion_report`. What each

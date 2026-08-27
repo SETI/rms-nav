@@ -121,10 +121,8 @@ Placeholder values, carrying inline ``# PLACEHOLDER`` markers:
 and ``marker_value`` are hard facts. The ``_sources`` convention is not used in
 this file.
 
-``fit_camera_rotation: false``, as in every other instrument block. It is
-commented in place at length, because the residuals it declines to fit are
-real: what makes them unfittable is that a rotation is measured about a
-different centre by each technique.
+``fit_camera_rotation: false``, commented in place. The residuals it declines
+to fit are real; :doc:`/dev_guide/dev_guide_rotation` carries the reasoning.
 
 Photometric and PSF calibration
 ===============================
@@ -182,24 +180,13 @@ exists for.
 **Per-spacecraft variation.** None. One spacecraft, one camera, one CK object
 and one clock.
 
-**Rotation fitting.** ``fit_camera_rotation`` is ``false``, as it is for every
-instrument. Every technique works in two degrees of freedom, ``(dv, du)``,
-every covariance is 2x2, and the combined estimate carries no ``rotation_rad``.
+**Rotation fitting.** ``fit_camera_rotation`` is ``false``. Every technique
+works in two degrees of freedom, ``(dv, du)``, every covariance is 2x2, and
+the combined estimate carries no ``rotation_rad``. The twist these frames
+carry is real and is absorbed into the reported translation.
 
-The twist these frames carry is real and is absorbed into the reported
-translation. What makes it unfittable is not the writer but the estimate: a
-rotation is measured about a different centre by each technique -- a vertex
-centroid for the DT techniques, a composite centroid for the disc, a weighted
-catalog centroid for the star fits -- and a rotation by theta about pivot P
-differs from the same rotation about pivot Q by the pure translation
-``(I - R(theta))(P - Q)``. Techniques describing one physical twist therefore
-report translations the ensemble fuses as though they were comparable.
-
-Expressing a fitted rotation as an attitude would additionally mean recording
-the pivot it turned about, which
-:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` does not carry.
-Fitting every technique about the FOV centre removes both problems at once and
-needs no pivot field; that is the direction of the standing rotation design.
+What the flag decides, and what a fitted rotation costs, is in
+:doc:`/dev_guide/dev_guide_rotation` rather than here.
 
 C-kernel specifics
 ==================

@@ -8,20 +8,14 @@ galileo_ssi:
   star_psf_sizes:
     100: [7, 7]
   # Galileo SSI carries non-negligible attitude rotation residuals, and they
-  # are deliberately left unfitted, because a fitted rotation is not currently
-  # a well-defined quantity.  Each technique rotates about its own centre --
-  # the DT techniques about a vertex centroid, the disc about a composite
-  # centroid, the star fits about a weighted catalog centroid -- and a rotation
-  # by theta about pivot P differs from the same rotation about pivot Q by the
-  # translation (I - R(theta))(P - Q).  Techniques describing one physical
-  # twist therefore report different translations, which the ensemble then
-  # fuses as though they were comparable; for a fraction of a degree across a
-  # couple of hundred pixels of pivot separation that is of order a pixel.
-  # A fitted rotation also cannot be carried into a corrected attitude, so it
-  # suppresses the corrected C-matrix and omits the frame from every corrected
-  # kernel.  With fitting off the twist is absorbed into the reported
-  # translation, as it already is for every other instrument.  Issue #434 is
-  # the standing account and proposes fitting about the FOV centre instead.
+  # are deliberately left unfitted.  Nothing can currently use a fitted
+  # rotation: each technique measures it about its own centre, so the
+  # translations that come back with it are not in one convention, and a
+  # rotation without a recorded centre cannot be carried into an attitude at
+  # all -- which suppresses the corrected C-matrix and omits the frame from
+  # the corrected kernels.  With fitting off the twist is absorbed into the
+  # reported translation.  Issue #434 is the standing account and proposes
+  # fitting about the FOV centre, which would make it usable.
   fit_camera_rotation: false
   max_rotation_deg: 5.0
   noise:

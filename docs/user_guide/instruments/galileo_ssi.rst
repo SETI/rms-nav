@@ -130,14 +130,10 @@ every image size, rather than a table keyed by size. It is generous because the
 reconstructed attitude carries real per-frame error, and it is the largest
 offset a search can find.
 
-**Camera rotation.** Rotation fitting is **off** for this instrument, as it is
-for every instrument. Every technique works in two degrees of freedom, ``(dv,
-du)``, and the twist the frames carry is absorbed into the reported
-translation. It is left unfitted because a fitted rotation is not a
-well-defined quantity: each technique turns about its own centre, and the same
-physical twist about two different pivots differs by a pure translation, so
-techniques measuring one rotation report translations the ensemble cannot
-compare. A fitted rotation also cannot be carried into a corrected attitude.
+**Camera rotation.** Rotation fitting is **off** for this instrument. Every
+technique works in two degrees of freedom, ``(dv, du)``, and the twist these
+frames carry is absorbed into the reported translation. What the setting
+decides is in :doc:`/dev_guide/dev_guide_rotation`.
 
 **Measured twist.** Over the frames that lock, the twist is
 -0.0526 +/- 0.0017 degrees, which displaces the field corner by 0.52 pixels,
@@ -213,7 +209,7 @@ baseline's own pointing at each record epoch.
 
 **Omission reasons this instrument produces.** ``not_eligible``, on images
 whose navigation neither succeeded nor conflicted. ``rotation_unsupported``
-cannot appear, since this instrument fits no rotation. ``botsim_loser``
+never appears, because rotation fitting is off. ``botsim_loser``
 cannot appear either: it belongs to an instrument that exposes two cameras at
 once, and this one has a single camera. ``no_reproducing_baseline`` and
 ``baseline_coverage_gap`` are reachable and mean what they mean everywhere.
