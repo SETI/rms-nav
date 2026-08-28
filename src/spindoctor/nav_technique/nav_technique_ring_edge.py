@@ -146,6 +146,9 @@ class RingEdgeNav(NavTechnique):
         Raises:
             KeyError: If any tuning key is missing, so a config typo fails
                 at process startup rather than mid-image.
+            ValueError: If ``edge_localization_sigma_px`` is negative or not
+                finite, which would silently corrupt the residual scale
+                rather than fail.
         """
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
@@ -164,6 +167,14 @@ class RingEdgeNav(NavTechnique):
         self._spurious_max_lm_displacement_px = float(
             self.tuning['spurious_max_lm_displacement_px']
         )
+        self._edge_localization_sigma_px = float(self.tuning['edge_localization_sigma_px'])
+        if not math.isfinite(self._edge_localization_sigma_px) or (
+            self._edge_localization_sigma_px < 0.0
+        ):
+            raise ValueError(
+                'RingEdgeNav.edge_localization_sigma_px must be finite and >= 0; got '
+                f'{self._edge_localization_sigma_px!r}'
+            )
         self._lm_trust_region_px = float(self.tuning['lm_trust_region_px'])
         self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
         self._gradient_ridge_refine = bool(self.tuning['gradient_ridge_refine'])
@@ -242,12 +253,28 @@ class RingEdgeNav(NavTechnique):
             edge_mask = edge_dt <= 0.5
             polyline_mask = build_polyline_mask(vertices, edge_dt.shape[:2])
             margin_v, margin_u = search_window_for_obs(context)
+            model_sigma_min = float(sigmas.min()) if sigmas.size else 0.0
+            model_sigma_max = float(sigmas.max()) if sigmas.size else 0.0
+            # The fit's residual is the distance from a model vertex to the
+            # nearest image edge, so its scale carries BOTH uncertainties: the
+            # catalog's radial uncertainty (the per-vertex sigma) and how
+            # precisely the image edge itself is placed.  The latter is the
+            # binary edge mask's own quantization and dominates whenever a
+            # well-solved ring edge projects to a small fraction of a pixel.
+            # Combining them in quadrature is what keeps the robust weighting
+            # measuring model agreement rather than pixel phase; see
+            # ``edge_localization_sigma_px`` in the technique config.
+            sigmas = np.hypot(sigmas, self._edge_localization_sigma_px)
             self.logger.debug(
-                'Aggregated %d ring-edge vertices, sigma_radial range [%.3f, %.3f] px, '
-                'search window (v, u) = (%d, %d) px',
+                'Aggregated %d ring-edge vertices, model sigma_radial range '
+                '[%.3f, %.3f] px, fit residual scale range [%.3f, %.3f] px after '
+                'the %.2f px edge-localization term, search window (v, u) = (%d, %d) px',
                 int(vertices.shape[0]),
+                model_sigma_min,
+                model_sigma_max,
                 float(sigmas.min()) if sigmas.size else 0.0,
                 float(sigmas.max()) if sigmas.size else 0.0,
+                self._edge_localization_sigma_px,
                 margin_v,
                 margin_u,
             )
