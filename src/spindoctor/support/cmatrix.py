@@ -20,33 +20,38 @@ convention and both at the exposure midtime:
 ``cmatrix``
     The corrected attitude, the one a kernel should carry.
 
-The oops observation frame is **not** the SPICE camera frame.  For three of the
-four supported instruments oops builds its frame with a constant flip ``R`` on
-top of the SPICE frame, so that ``C_oops = R . C_spice``:
+The oops observation frame is **not** the SPICE camera frame.  Each host states
+the relation between them: it inserts the constant rotation ``R`` satisfying
+``C_oops = R . C_spice`` as the observation's ``spice_to_frame`` subfield, and
+names the SPICE camera frame in ``spice_frame_name`` and ``spice_frame_id``.
+This module reads all three rather than keeping a table of its own, so the frame
+an attitude is recorded in and the frame oops built the observation on cannot
+name different cameras -- the confusion that puts a wide-angle attitude in the
+narrow-angle frame.
 
-============================  ==========================
-Instrument                    ``R``
-============================  ==========================
-Cassini ISS (NAC, WAC)        ``diag(-1, -1, +1)``
-New Horizons LORRI            ``diag(+1, -1, -1)``
-Galileo SSI                   identity
-Voyager ISS                   identity by construction
-============================  ==========================
+A correction built in the oops frame and composed onto a SPICE-convention matrix
+without accounting for ``R`` is a proper rotation of the right magnitude
+pointing the wrong way, so the two conversions go through
+``Observation.get_spice_cmatrix`` and ``Observation.set_spice_cmatrix``, which
+apply it in both directions from the one declaration.
 
-A correction built in the oops frame and composed onto a ``pxform``-derived
-matrix without conjugating through ``R`` is a proper rotation of the right
-magnitude pointing the wrong way, so ``R`` is measured at runtime and checked
-against the value above rather than assumed.
+What a host declares is a claim, not a measurement, so it is checked: at the
+exposure start, midtime and stop the rotation between the observation frame and
+``pxform`` of the named camera frame must equal the declared ``R``.  A frame
+that is right at the midtime and wrong at the edges is a moving frame
+misdeclared as a constant one, and the correction is written to a kernel as a
+single body-fixed rotation.
 
-Voyager is the exception to everything: oops freezes the observation frame from
-a tolerance-snapped ``ckgp`` lookup rather than evaluating a frame chain, so
-``pxform`` at the midtime does not reproduce it.  For Voyager the observation
-frame attitude already **is** the SPICE camera frame attitude, and ``R`` is the
-identity by construction.
+Voyager is the exception to the check, not to the convention: oops freezes the
+observation frame from a tolerance-snapped ``ckgp`` lookup rather than
+evaluating a frame chain, so ``pxform`` cannot evaluate that camera frame at
+all.  The accessor answers correctly there regardless, so only the cross-check
+is skipped.
 
-The offset-to-rotation conversion lives here, behind one entry point, so that
-when oops grows its own corrected-attitude API this module's body is replaced
-and its interface stays.
+What stays here is what oops does not do: turning a navigated pixel offset into
+a rotation, refusing a malformed record, naming the C-kernel object and the
+spacecraft clock a correction is written against, and gating a recorded
+attitude before it is applied.
 """
 
 import enum
@@ -138,15 +143,6 @@ _SPICE_FAILURES = (LookupError, OSError, RuntimeError, ValueError)
 _IDENTITY: NDArrayFloatType = np.eye(3)
 _IDENTITY.setflags(write=False)
 
-# oops rotates the Cassini ISS camera frames 180 degrees about the boresight
-# because the instrument's internal coordinate system is turned that way.
-_CASSINI_OOPS_FROM_SPICE: NDArrayFloatType = np.diag([-1.0, -1.0, 1.0])
-_CASSINI_OOPS_FROM_SPICE.setflags(write=False)
-
-# The LORRI SPICE boresight is -Z; oops flips Y and Z to put it on +Z.
-_LORRI_OOPS_FROM_SPICE: NDArrayFloatType = np.diag([1.0, -1.0, -1.0])
-_LORRI_OOPS_FROM_SPICE.setflags(write=False)
-
 # Angular tolerance, in matrix-element terms, for the measured flip matching
 # its expected constant value and for that value being epoch-independent.
 _FLIP_TOL = 1e-9
@@ -172,22 +168,17 @@ class _FrameIdentity:
     """Per-instrument frame facts needed to place a correction in SPICE terms.
 
     Parameters:
-        camera_frame: SPICE name of the frame the observation's boresight is
-            expressed in.
         ck_frame_id: SPICE id of the object a corrected C-kernel targets.
         sclk_id: SPICE id of the spacecraft clock that object's time tags are
             encoded against.
-        oops_from_spice: The constant rotation ``R`` relating the oops
-            observation frame to the SPICE camera frame.
         frozen_oops_attitude: True when oops freezes the observation frame
-            from a tolerance-snapped pointing lookup, so the SPICE baseline is
-            the observation frame itself rather than a ``pxform`` evaluation.
+            from a tolerance-snapped pointing lookup, so ``pxform`` cannot
+            evaluate the camera frame at all and the declared flip has nothing
+            to be cross-checked against.
     """
 
-    camera_frame: str
     ck_frame_id: int
     sclk_id: int
-    oops_from_spice: NDArrayFloatType
     frozen_oops_attitude: bool
 
 
@@ -566,15 +557,22 @@ def apply_cmatrix_to_obs(
 ) -> CmatrixApplication:
     """Point an observation at its recorded corrected attitude.
 
-    This is the reading half of :func:`compute_pointing`: it inverts the
-    writer's conjugation, replacing the observation's frame with one whose
-    midtime attitude is the recorded ``cmatrix``, while the field of view is
-    left untouched.  With ``C_oops`` the observation frame's own midtime
-    attitude, the replacement is ``R_hat . cmatrix`` where ``R_hat = C_oops .
-    cmatrix_original^T`` -- the observation's attitude composed with the
-    recorded correction.  A record whose correction is the identity
-    (``cmatrix`` equal to ``cmatrix_original`` as arrays) short-circuits to
-    ``C_oops`` itself, so no correction means exactly no change.
+    This is the reading half of :func:`compute_pointing`: it replaces the
+    observation's frame with one whose midtime attitude is the recorded
+    ``cmatrix``, while the field of view is left untouched.  The replacement
+    goes through ``Observation.set_spice_cmatrix``, which composes the
+    ``spice_to_frame`` rotation the host declares onto the recorded matrix.
+
+    ``R_hat = C_oops . cmatrix_original^T``, with ``C_oops`` the observation
+    frame's own midtime attitude, is measured for the gate below and is not
+    what gets applied.  The two agree: the gate passes only when ``R_hat``
+    equals the declared rotation to ``_FLIP_TOL``.
+
+    A record whose correction is the identity (``cmatrix`` equal to
+    ``cmatrix_original`` as arrays) is the one case that does not go through
+    the setter.  It installs ``C_oops`` itself, so no correction means exactly
+    no change; composing the declared rotation onto the recorded baseline
+    instead would be the same attitude but not the same float64.
 
     Before anything is applied, the record is gated:
 
@@ -583,8 +581,8 @@ def apply_cmatrix_to_obs(
     2. ``midtime_et`` must equal the observation's own midtime to a
        microsecond: the recorded attitude is a midtime attitude, so a record
        from another observation is refused rather than applied.
-    3. ``R_hat`` must equal the instrument's constant oops-from-SPICE flip to
-       the writer's own tolerance.  Because ``R_hat`` mixes the observation's
+    3. ``R_hat`` must equal the ``spice_to_frame`` rotation the host declares,
+       to the writer's own tolerance.  Because ``R_hat`` mixes the observation's
        *current* attitude with the *recorded* baseline, this one inequality
        fails on a changed kernel pool, a transposed ``cmatrix_original`` or
        whole record, and a changed host convention alike.  The one sub-case
@@ -665,32 +663,35 @@ def apply_cmatrix_to_obs(
             f'this one exposes at midtime {obs_midtime!r}',
             reason=CMATRIX_FOREIGN_MIDTIME,
         )
+    expected = _declared_flip(obs)
+    camera_frame = _declared_camera_frame_name(obs)
     c_oops = _observation_attitude(obs, obs_midtime)
     if np.array_equal(corrected, original):
         # Two float64 matrix products do not cancel to bit precision, so
         # without this short-circuit "no correction means no change" would be
         # false at the 1e-16 level; it mirrors the writer's identity guard.
-        c_oops_corrected: NDArrayFloatType = np.asarray(c_oops, dtype=np.float64)
-    else:
-        r_hat = np.asarray(c_oops, dtype=np.float64) @ original.T
-        expected = np.asarray(identity.oops_from_spice, dtype=np.float64)
-        if not np.allclose(r_hat, expected, rtol=0.0, atol=_FLIP_TOL):
-            if np.allclose(c_oops, expected @ corrected, rtol=0.0, atol=_FLIP_TOL):
-                # The pool already answers the corrected attitude -- corrected
-                # kernels furnished at load time.  The observation is already
-                # right; applying the correction again, or the offset, would
-                # move it by roughly twice the navigated offset.
-                return CmatrixApplication.POOL_ALREADY_CORRECTED
-            raise NavPointingError(
-                f'the rotation between the observation frame and the recorded '
-                f'{identity.camera_frame} baseline is {r_hat.tolist()!r}, which differs from the '
-                f'expected {expected.tolist()!r} by up to '
-                f'{float(np.max(np.abs(r_hat - expected)))!r}; the kernel pool, the record, or '
-                f'the host convention has changed since navigation',
-                reason=CMATRIX_BASELINE_MISMATCH,
-            )
-        c_oops_corrected = r_hat @ corrected
-    obs.frame = oops.frame.Cmatrix(c_oops_corrected)
+        # Going through the oops setter would compose the declared flip onto
+        # the recorded baseline instead, which is the same attitude but not
+        # the same float64.
+        obs.set_frame(oops.frame.Cmatrix(np.asarray(c_oops, dtype=np.float64)))
+        return CmatrixApplication.FRAME_REPLACED
+    r_hat = np.asarray(c_oops, dtype=np.float64) @ original.T
+    if not np.allclose(r_hat, expected, rtol=0.0, atol=_FLIP_TOL):
+        if np.allclose(c_oops, expected @ corrected, rtol=0.0, atol=_FLIP_TOL):
+            # The pool already answers the corrected attitude -- corrected
+            # kernels furnished at load time.  The observation is already
+            # right; applying the correction again, or the offset, would
+            # move it by roughly twice the navigated offset.
+            return CmatrixApplication.POOL_ALREADY_CORRECTED
+        raise NavPointingError(
+            f'the rotation between the observation frame and the recorded '
+            f'{camera_frame} baseline is {r_hat.tolist()!r}, which differs from the '
+            f'{np.asarray(expected).tolist()!r} the host declares by up to '
+            f'{float(np.max(np.abs(r_hat - expected)))!r}; the kernel pool, the record, or '
+            f'the host convention has changed since navigation',
+            reason=CMATRIX_BASELINE_MISMATCH,
+        )
+    obs.set_spice_cmatrix(corrected)
     return CmatrixApplication.FRAME_REPLACED
 
 
@@ -737,26 +738,20 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
     """
     if isinstance(obs, ObsCassiniISS):
         return _FrameIdentity(
-            camera_frame=f'CASSINI_ISS_{obs.camera}',
             ck_frame_id=_CASSINI_CK_FRAME_ID,
             sclk_id=_ck_object_sclk_id(_CASSINI_CK_FRAME_ID),
-            oops_from_spice=_CASSINI_OOPS_FROM_SPICE,
             frozen_oops_attitude=False,
         )
     if isinstance(obs, ObsGalileoSSI):
         return _FrameIdentity(
-            camera_frame='GLL_SCAN_PLATFORM',
             ck_frame_id=_GALILEO_CK_FRAME_ID,
             sclk_id=_ck_object_sclk_id(_GALILEO_CK_FRAME_ID),
-            oops_from_spice=_IDENTITY,
             frozen_oops_attitude=False,
         )
     if isinstance(obs, ObsNewHorizonsLORRI):
         return _FrameIdentity(
-            camera_frame='NH_LORRI',
             ck_frame_id=_LORRI_CK_FRAME_ID,
             sclk_id=_ck_object_sclk_id(_LORRI_CK_FRAME_ID),
-            oops_from_spice=_LORRI_OOPS_FROM_SPICE,
             frozen_oops_attitude=False,
         )
     if isinstance(obs, ObsVoyagerISS):
@@ -768,16 +763,118 @@ def _frame_identity(obs: ObsSnapshotInst) -> _FrameIdentity | None:
         # the digit when it reads the label, so a key error here would mean
         # that stopped being true.
         ck_frame_id = VOYAGER_CK_OBJECT_ID[digit]
-        # The Voyager FK spells the cameras ISSNA and ISSWA, so the oops
-        # detector names NAC and WAC contribute only their first letter.
         return _FrameIdentity(
-            camera_frame=f'VG{digit}_ISS{obs.camera[0]}A',
             ck_frame_id=ck_frame_id,
             sclk_id=_ck_object_sclk_id(ck_frame_id),
-            oops_from_spice=_IDENTITY,
             frozen_oops_attitude=True,
         )
     return None
+
+
+def _spice_attitude(obs: ObsSnapshotInst, et: float) -> NDArrayFloatType:
+    """Return the observation's attitude at one epoch in the SPICE convention.
+
+    This is ``oops.Observation.get_spice_cmatrix``, which composes the
+    observation frame's own attitude with the inverse of the host's declared
+    ``spice_to_frame`` rotation.  It answers uniformly for a frame oops
+    evaluates from a chain and for one it froze from a pointing lookup, so no
+    caller here has to distinguish the two.
+
+    Parameters:
+        obs: The observation whose attitude is read.
+        et: TDB seconds past J2000.
+
+    Returns:
+        The 3x3 J2000-to-camera rotation in the SPICE convention.
+
+    Raises:
+        NavPointingError: if the furnished kernels cannot place the frame at
+            this epoch.
+    """
+    try:
+        matrix = obs.get_spice_cmatrix(time=et)
+    except _SPICE_FAILURES as exc:
+        raise NavPointingError(
+            f'the observation frame has no attitude at et {et!r}: {exc}'
+        ) from exc
+    return _as_readonly_3x3(np.asarray(matrix.vals, dtype=np.float64))
+
+
+def _declared_camera_frame_name(obs: ObsSnapshotInst) -> str:
+    """Return the name of the SPICE camera frame the host declares.
+
+    Reads the ``spice_frame_name`` subfield and nothing else, so a caller that
+    only has to name the frame -- in a refusal message, say -- needs no kernel
+    pool to do it.
+
+    Parameters:
+        obs: The observation to read.
+
+    Returns:
+        The SPICE name of the frame the observation was built on.
+    """
+    return str(obs.spice_frame_name)
+
+
+def _declared_camera_frame(obs: ObsSnapshotInst) -> tuple[str, int]:
+    """Return the SPICE camera frame the host declares for this observation.
+
+    oops inserts the name and the id as the ``spice_frame_name`` and
+    ``spice_frame_id`` subfields.  Reading them rather than spelling the name
+    here means the frame this module evaluates and the frame oops built the
+    observation on cannot name different cameras -- the confusion that puts a
+    wide-angle attitude in the narrow-angle frame.
+
+    The two subfields are cross-checked against the kernel pool, because they
+    are one fact stated twice and a table can be edited on one side only.
+
+    Parameters:
+        obs: The observation to read.
+
+    Returns:
+        The frame's SPICE name and its id.
+
+    Raises:
+        NavPointingError: if the name resolves to no id in the furnished pool,
+            or if the id it resolves to is not the one declared.
+    """
+    name = _declared_camera_frame_name(obs)
+    declared = int(obs.spice_frame_id)
+    try:
+        resolved = int(cspyce.namfrm(name))
+    except _SPICE_FAILURES as exc:
+        raise NavPointingError(f'the frame {name} has no SPICE id: {exc}') from exc
+    if resolved != declared:
+        raise NavPointingError(
+            f'the host declares frame {name} as id {declared}, but the furnished kernels '
+            f'resolve that name to {resolved}; the two disagree about which frame the '
+            f'observation was built on'
+        )
+    return name, declared
+
+
+def _declared_flip(obs: ObsSnapshotInst) -> NDArrayFloatType:
+    """Return the constant rotation ``R`` the host declares for this observation.
+
+    oops inserts it as the ``spice_to_frame`` subfield, the rotation from the
+    SPICE frame convention of the instrument to the oops convention, and reads
+    the same subfield in ``Observation.get_spice_cmatrix``.  Taking it from
+    there rather than from a table here means the attitude this module records
+    and the frame oops built cannot disagree about the convention.
+
+    Parameters:
+        obs: The observation to read.
+
+    Returns:
+        The 3x3 rotation as a read-only float64 array.
+
+    Raises:
+        NavPointingError: if the declared rotation is not a proper orthonormal
+            rotation.
+    """
+    flip = _as_readonly_3x3(np.asarray(obs.spice_to_frame.vals, dtype=np.float64))
+    _validate_rotation(flip, 'spice_to_frame')
+    return flip
 
 
 def _observation_attitude(obs: ObsSnapshotInst, et: float) -> NDArrayFloatType:
@@ -840,31 +937,24 @@ def _attitude_baseline(obs: ObsSnapshotInst, identity: _FrameIdentity) -> Attitu
     ):
         if not math.isfinite(value):
             raise NavPointingError(f'the observation records a non-finite {label}: {value!r}')
-    if identity.frozen_oops_attitude:
-        # oops froze this frame from a tolerance-snapped pointing lookup, so a
-        # pxform at the midtime does not reproduce it; the observation frame
-        # attitude already is the SPICE camera attitude that was navigated.
-        cmatrix_original = _observation_attitude(obs, midtime_et)
-        oops_from_spice = _IDENTITY
-    else:
-        cmatrix_original = _pxform(identity.camera_frame, midtime_et)
-        oops_from_spice = _observation_attitude(obs, midtime_et) @ cmatrix_original.T
-        _check_flip(oops_from_spice, identity)
-        for et in (start_et, stop_et):
-            at_epoch = _observation_attitude(obs, et) @ _pxform(identity.camera_frame, et).T
-            if not np.allclose(at_epoch, oops_from_spice, rtol=0.0, atol=_FLIP_TOL):
-                raise NavPointingError(
-                    f'the rotation between the oops and SPICE {identity.camera_frame} frames '
-                    f'is not constant across the exposure: it differs by up to '
-                    f'{float(np.max(np.abs(at_epoch - oops_from_spice)))!r} between et {et!r} '
-                    f'and the midtime {midtime_et!r}'
-                )
-    sclk_id = _sclk_id(identity)
+    oops_from_spice = _declared_flip(obs)
+    camera_frame, camera_frame_id = _declared_camera_frame(obs)
+    cmatrix_original = _spice_attitude(obs, midtime_et)
+    if not identity.frozen_oops_attitude:
+        # The declared flip is oops's claim about its own frame, not a
+        # measurement, so it is checked against the frame chain SPICE actually
+        # builds -- at every epoch of the exposure, since a flip that is right
+        # at the midtime and wrong at the edges is a moving frame misdeclared
+        # as a constant one.
+        for et in (start_et, midtime_et, stop_et):
+            measured = _observation_attitude(obs, et) @ _pxform(camera_frame, et).T
+            _check_flip(measured, oops_from_spice, camera_frame, et)
+    sclk_id = _sclk_id(identity, camera_frame)
     return AttitudeBaseline(
         cmatrix_original=cmatrix_original,
         oops_from_spice=oops_from_spice,
-        camera_frame=identity.camera_frame,
-        camera_frame_id=_camera_frame_id(identity.camera_frame),
+        camera_frame=camera_frame,
+        camera_frame_id=camera_frame_id,
         ck_frame_id=identity.ck_frame_id,
         start_et=start_et,
         stop_et=stop_et,
@@ -876,7 +966,7 @@ def _attitude_baseline(obs: ObsSnapshotInst, identity: _FrameIdentity) -> Attitu
     )
 
 
-def _sclk_id(identity: _FrameIdentity) -> int:
+def _sclk_id(identity: _FrameIdentity, camera_frame: str) -> int:
     """Resolve the spacecraft clock for a CK object and check it is the right one.
 
     ``cspyce.ckmeta`` computes a clock id from a CK object id rather than
@@ -890,6 +980,7 @@ def _sclk_id(identity: _FrameIdentity) -> int:
     Parameters:
         identity: The instrument's frame facts, carrying both the CK object
             and the spacecraft clock expected for it.
+        camera_frame: SPICE name of the camera frame, for the message.
 
     Returns:
         The resolved spacecraft clock id, equal to ``identity.sclk_id``.
@@ -907,7 +998,7 @@ def _sclk_id(identity: _FrameIdentity) -> int:
     if resolved != identity.sclk_id:
         raise NavPointingError(
             f'CK object {identity.ck_frame_id} resolves to spacecraft clock {resolved}, not the '
-            f'{identity.sclk_id} the {identity.camera_frame} camera is tagged against; every '
+            f'{identity.sclk_id} the {camera_frame} camera is tagged against; every '
             f'clock string built from it would encode the wrong spacecraft'
         )
     # The recorded id is returned, not the one ``ckmeta`` computed, even though
@@ -939,24 +1030,6 @@ def _sclk_string(sclk_id: int, et: float) -> str:
         ) from exc
 
 
-def _camera_frame_id(camera_frame: str) -> int:
-    """Look up the SPICE id of a named frame.
-
-    Parameters:
-        camera_frame: SPICE name of the camera frame.
-
-    Returns:
-        The frame's SPICE id.
-
-    Raises:
-        NavPointingError: if the name resolves to no id in the kernel pool.
-    """
-    try:
-        return int(cspyce.namfrm(camera_frame))
-    except _SPICE_FAILURES as exc:
-        raise NavPointingError(f'the frame {camera_frame} has no SPICE id: {exc}') from exc
-
-
 def _pxform(camera_frame: str, et: float) -> NDArrayFloatType:
     """Evaluate the J2000-to-camera rotation from the furnished kernels.
 
@@ -981,21 +1054,28 @@ def _pxform(camera_frame: str, et: float) -> NDArrayFloatType:
     return np.asarray(matrix, dtype=np.float64)
 
 
-def _check_flip(measured: NDArrayFloatType, identity: _FrameIdentity) -> None:
-    """Raise unless the measured oops-to-SPICE flip is the expected constant.
+def _check_flip(
+    measured: NDArrayFloatType,
+    expected: NDArrayFloatType,
+    camera_frame: str,
+    et: float,
+) -> None:
+    """Raise unless the measured oops-to-SPICE flip is the declared constant.
 
     Parameters:
-        measured: The rotation ``R`` measured from the observation.
-        identity: The instrument's frame facts, carrying the expected ``R``.
+        measured: The rotation ``R`` measured from the observation and the
+            furnished kernels at ``et``.
+        expected: The rotation the host declared as ``spice_to_frame``.
+        camera_frame: SPICE name of the camera frame, for the message.
+        et: The epoch the measurement was made at, for the message.
 
     Raises:
         NavPointingError: if the two differ by more than ``_FLIP_TOL``.
     """
-    expected = np.asarray(identity.oops_from_spice, dtype=np.float64)
     if not np.allclose(measured, expected, rtol=0.0, atol=_FLIP_TOL):
         raise NavPointingError(
-            f'the rotation between the oops observation frame and the SPICE '
-            f'{identity.camera_frame} frame is {measured.tolist()!r}, which differs from the '
-            f'expected {expected.tolist()!r} by up to '
+            f'at et {et!r} the rotation between the oops observation frame and the SPICE '
+            f'{camera_frame} frame is {np.asarray(measured).tolist()!r}, which differs from '
+            f'the {np.asarray(expected).tolist()!r} the host declares by up to '
             f'{float(np.max(np.abs(measured - expected)))!r}'
         )

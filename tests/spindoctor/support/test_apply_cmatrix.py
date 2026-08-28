@@ -19,6 +19,7 @@ import numpy as np
 import oops
 import pytest
 from oops.frame import Frame
+from oops.frame.cmatrix import Cmatrix
 from tests.cmatrix_helpers import (
     SYNTHETIC_MIDTIME_ET,
     observation_attitude,
@@ -50,6 +51,12 @@ _PLANTED_OFFSET = (8.68, -17.37)
 _CASSINI_FLIP = np.diag([-1.0, -1.0, 1.0])
 
 
+# The flip the injected host declares for the stub observations a test builds.
+# ``_inject_identity`` sets it, so a test that injects a synthetic instrument
+# gets that instrument's convention on both the identity and the observation.
+_DECLARED_FLIP: np.ndarray = np.eye(3)
+
+
 class _FrameOnlyObs:
     """Observation stub carrying exactly what the reader touches.
 
@@ -57,15 +64,45 @@ class _FrameOnlyObs:
     observation to the instrument table lookup, which these tests inject.
     """
 
-    def __init__(self, c_oops: np.ndarray, *, midtime: float = SYNTHETIC_MIDTIME_ET) -> None:
+    # The reader now reaches the observation through the oops Observation API,
+    # so the stub borrows the two methods it calls rather than reimplementing
+    # them; whatever oops does to a frame is what these tests exercise.
+    set_frame = oops.obs.Observation.set_frame
+    set_spice_cmatrix = oops.obs.Observation.set_spice_cmatrix
+
+    @property
+    def spice_to_frame(self) -> Any:
+        """The oops-from-SPICE rotation the injected host declares.
+
+        Read at access time rather than at construction, so a test may build
+        the observation before it injects the instrument whose convention it
+        wants gated against.
+        """
+        return oops.Matrix3(_DECLARED_FLIP if self._flip is None else self._flip)
+
+    # The reader also reads the SPICE camera frame off the observation, as the
+    # host declares it.
+    spice_frame_name = 'TEST_CAMERA'
+    spice_frame_id = -999999
+
+    def __init__(
+        self,
+        c_oops: np.ndarray,
+        *,
+        midtime: float = SYNTHETIC_MIDTIME_ET,
+        flip: np.ndarray | None = None,
+    ) -> None:
         """Build the stub around one constant observation-frame attitude.
 
         Parameters:
             c_oops: The J2000-to-observation-frame rotation.
             midtime: The exposure midtime, TDB seconds past J2000.
+            flip: The oops-from-SPICE rotation the host would declare; None
+                for the identity.
         """
         self.frame = oops.frame.Cmatrix(c_oops)
         self.midtime = midtime
+        self._flip = flip
 
 
 def _inject_identity(monkeypatch: pytest.MonkeyPatch, flip: np.ndarray) -> None:
@@ -77,6 +114,7 @@ def _inject_identity(monkeypatch: pytest.MonkeyPatch, flip: np.ndarray) -> None:
     """
     identity = synthetic_frame_identity(flip)
     monkeypatch.setattr(cmatrix_module, '_frame_identity', lambda obs: identity)
+    monkeypatch.setitem(globals(), '_DECLARED_FLIP', np.asarray(flip, dtype=np.float64))
 
 
 def _navigated_record(
@@ -231,7 +269,7 @@ def test_a_transposed_record_fails_the_flip_gate(
     _inject_identity(monkeypatch, _CASSINI_FLIP)
     if which == 'record':
         cmatrix = cmatrix.T.copy()
-    with pytest.raises(NavPointingError, match='differs from the expected') as info:
+    with pytest.raises(NavPointingError, match='the host declares') as info:
         apply_cmatrix_to_obs(
             cast(ObsSnapshotInst, obs), cmatrix, original.T.copy(), SYNTHETIC_MIDTIME_ET
         )
@@ -250,7 +288,7 @@ def test_a_drifted_baseline_fails_the_gate(monkeypatch: pytest.MonkeyPatch) -> N
     obs = _FrameOnlyObs(drift @ c_oops)
     frame_before = obs.frame
     _inject_identity(monkeypatch, _CASSINI_FLIP)
-    with pytest.raises(NavPointingError, match='differs from the expected') as info:
+    with pytest.raises(NavPointingError, match='the host declares') as info:
         apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET)
     assert info.value.reason == CMATRIX_BASELINE_MISMATCH
     # The reader promises the observation is never mutated on a raise.
@@ -400,25 +438,38 @@ def test_a_malformed_midtime_is_refused(
     assert info.value.reason == MALFORMED_POINTING
 
 
-def test_frame_replacement_registers_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two applications leave both oops frame registries untouched.
-
-    The replacement frame is built unregistered, so a batch loop over tens of
-    thousands of images pollutes no global frame state.  The one piece of
-    shared state the mechanism does touch is the temporary-id counter, which
-    is asserted to be all that moved.
-    """
+def test_frame_replacement_registers_no_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The replacement frame is registered under no ID a later lookup can find."""
     cmatrix, original, c_oops = _navigated_record(_CASSINI_FLIP)
     _inject_identity(monkeypatch, _CASSINI_FLIP)
-    frame_cache_before = dict(Frame.FRAME_CACHE)
-    wayframe_registry_before = dict(Frame.WAYFRAME_REGISTRY)
-    counter_before = int(Frame.TEMPORARY_FRAME_ID)
+    frame_registry_before = dict(Frame._FRAME_REGISTRY)
     for _ in range(2):
         obs = _FrameOnlyObs(c_oops)
         apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET)
-    assert frame_cache_before == Frame.FRAME_CACHE
-    assert wayframe_registry_before == Frame.WAYFRAME_REGISTRY
-    # Each Cmatrix construction takes exactly one temporary id: each loop
-    # iteration builds one stub frame and one replacement, so four ids moved
-    # the counter and nothing else did.
-    assert int(Frame.TEMPORARY_FRAME_ID) == counter_before + 4
+    assert frame_registry_before == Frame._FRAME_REGISTRY
+
+
+def test_each_distinct_replacement_is_retained(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A replacement is cached by its matrix and never released.
+
+    oops keys every Cmatrix by its own matrix, so each image a batch re-points
+    to a distinct attitude leaves one wayframe and two frame-cache entries
+    behind for the life of the process.  This pins the growth rate, so a
+    change that bounds it is visible here rather than as a memory report from
+    a full-catalog run.
+    """
+    _inject_identity(monkeypatch, _CASSINI_FLIP)
+    # The stub's own frame is a Cmatrix too, and on a cold cache the first one
+    # built would be counted alongside the replacements.  Build it once before
+    # the baseline is taken, so what the deltas measure is the replacements.
+    _, _, warm_c_oops = _navigated_record(_CASSINI_FLIP)
+    _FrameOnlyObs(warm_c_oops)
+    wayframes_before = len(Cmatrix._WAYFRAMES)
+    cache_before = len(Frame._FRAME_CACHE)
+    replacements = 3
+    for i in range(replacements):
+        cmatrix, original, c_oops = _navigated_record(_CASSINI_FLIP, offset_px=(1.0 + i, -2.0 - i))
+        obs = _FrameOnlyObs(c_oops)
+        apply_cmatrix_to_obs(cast(ObsSnapshotInst, obs), cmatrix, original, SYNTHETIC_MIDTIME_ET)
+    assert len(Cmatrix._WAYFRAMES) == wayframes_before + replacements
+    assert len(Frame._FRAME_CACHE) == cache_before + 2 * replacements

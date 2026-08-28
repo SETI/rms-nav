@@ -84,6 +84,11 @@ def _hermetic_obs(frame: Any = 'J2000') -> ObsSnapshot:
         axes=('v', 'u'), tstart=_TSTART, texp=_TEXP, fov=fov, path='SSB', frame=frame
     )
     snapshot.insert_subfield('data', np.zeros(_SHAPE_VU, dtype=np.float32))
+    # The subfields an oops host declares, which the reader reads to learn the
+    # convention and the frame the observation was built on.
+    snapshot.insert_subfield('spice_to_frame', oops.Matrix3(_IDENTITY))
+    snapshot.insert_subfield('spice_frame_name', 'J2000')
+    snapshot.insert_subfield('spice_frame_id', 1)
     snapshot._closest_planet = None
     return ObsSnapshot(snapshot, extfov_margin_vu=(0, 0))
 
@@ -438,8 +443,8 @@ def test_the_offset_fallback_carries_the_recorded_uv_offset(
     )
     apply_pointing_to_obs(cast(ObsSnapshotInst, obs), selection)
     fov = cast(oops.fov.OffsetFOV, obs.fov)
-    assert fov.uv_offset[0] == _OFFSET_DV_DU[1]
-    assert fov.uv_offset[1] == _OFFSET_DV_DU[0]
+    assert fov.uv_offset.vals[0] == _OFFSET_DV_DU[1]
+    assert fov.uv_offset.vals[1] == _OFFSET_DV_DU[0]
 
 
 def test_a_gate_failure_with_no_offset_leaves_pointing_uncorrected(
@@ -469,8 +474,8 @@ def test_an_offset_selection_wraps_the_fov() -> None:
     applied = apply_pointing_to_obs(cast(ObsSnapshotInst, obs), selection)
     assert applied == AppliedPointing(source='offset', reason='no_pointing_block')
     fov = cast(oops.fov.OffsetFOV, obs.fov)
-    assert fov.uv_offset[0] == _OFFSET_DV_DU[1]
-    assert fov.uv_offset[1] == _OFFSET_DV_DU[0]
+    assert fov.uv_offset.vals[0] == _OFFSET_DV_DU[1]
+    assert fov.uv_offset.vals[1] == _OFFSET_DV_DU[0]
 
 
 def test_a_none_selection_touches_nothing() -> None:

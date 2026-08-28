@@ -419,7 +419,9 @@ drops its fitted rotation (#521) is thereby unreachable and is deferred until
 an instrument fits rotation again.
 
 The rest of the plan's follow-ups are filed and none blocks use of the
-kernels: the oops API replacing the hand-derived derivation (#433),
+kernels: the remaining half of the oops API swap (#433) -- the conversion
+between the oops and SPICE conventions now goes through oops, and what is
+left is the offset-to-rotation construction, waiting on SETI/rms-oops#213 --
 fitted-twist support (#434) with the static-twist FK/IK question behind it
 (#435, #436), SPICE database registration (#437), the interior-epoch
 fidelity bound through an adaptive record cadence (#440, #444) with its

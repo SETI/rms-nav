@@ -32,9 +32,9 @@ from spindoctor.support.cmatrix import (
     PointingSolution,
     _attitude_baseline,
     _build_pointing_solution,
-    _camera_frame_id,
     _check_flip,
     _ck_object_sclk_id,
+    _declared_camera_frame,
     _FrameIdentity,
     _oops_correction_matrix,
     _pxform,
@@ -344,38 +344,37 @@ def test_a_nan_correction_is_rejected_by_the_result_check() -> None:
 def _cassini_identity() -> _FrameIdentity:
     """The Cassini NAC frame identity, for the flip-check and clock tests."""
     return _FrameIdentity(
-        camera_frame='CASSINI_ISS_NAC',
         ck_frame_id=_CASSINI_CK_FRAME_ID,
         sclk_id=CK_OBJECT_SCLK_ID[_CASSINI_CK_FRAME_ID],
-        oops_from_spice=_CASSINI_FLIP,
         frozen_oops_attitude=False,
     )
 
 
 def test_a_mismatched_flip_is_refused() -> None:
     """A measured flip that is not the instrument's constant raises."""
-    with pytest.raises(NavPointingError, match='differs from the expected'):
-        _check_flip(_IDENTITY, _cassini_identity())
+    with pytest.raises(NavPointingError, match='the host declares'):
+        _check_flip(_IDENTITY, _CASSINI_FLIP, 'CASSINI_ISS_NAC', 0.0)
 
 
 def test_the_mismatched_flip_message_names_the_camera_frame() -> None:
     """The refusal says which frame disagreed, so it is attributable."""
     with pytest.raises(NavPointingError, match='CASSINI_ISS_NAC'):
-        _check_flip(_IDENTITY, _cassini_identity())
+        _check_flip(_IDENTITY, _CASSINI_FLIP, 'CASSINI_ISS_NAC', 0.0)
 
 
 def test_a_flip_within_tolerance_is_accepted() -> None:
     """A flip differing by less than the tolerance is accepted silently."""
     perturbed = _CASSINI_FLIP + np.full((3, 3), 1e-12)
-    assert _outcome_of(lambda: _check_flip(perturbed, _cassini_identity())) == 'accepted'
+    outcome = _outcome_of(lambda: _check_flip(perturbed, _CASSINI_FLIP, 'CASSINI_ISS_NAC', 0.0))
+    assert outcome == 'accepted'
 
 
 def test_a_flip_just_outside_tolerance_is_refused() -> None:
     """A flip differing by more than the tolerance raises."""
     perturbed = _CASSINI_FLIP.copy()
     perturbed[0, 1] = 1e-8
-    with pytest.raises(NavPointingError, match='differs from the expected'):
-        _check_flip(perturbed, _cassini_identity())
+    with pytest.raises(NavPointingError, match='the host declares'):
+        _check_flip(perturbed, _CASSINI_FLIP, 'CASSINI_ISS_NAC', 0.0)
 
 
 def test_the_missions_own_clock_resolves_and_is_accepted() -> None:
@@ -385,7 +384,8 @@ def test_the_missions_own_clock_resolves_and_is_accepted() -> None:
     in either the CK object or the clock id fails here rather than producing
     time strings from a plausible-looking wrong clock.
     """
-    assert _sclk_id(_cassini_identity()) == CK_OBJECT_SCLK_ID[_CASSINI_CK_FRAME_ID]
+    resolved = _sclk_id(_cassini_identity(), 'CASSINI_ISS_NAC')
+    assert resolved == CK_OBJECT_SCLK_ID[_CASSINI_CK_FRAME_ID]
 
 
 def test_a_ck_object_with_no_recorded_clock_is_a_pointing_failure() -> None:
@@ -401,10 +401,8 @@ def _voyager2_identity_with_the_voyager1_ck_object() -> _FrameIdentity:
     spacecraft's CK object is the realistic way this mismatch arises.
     """
     return _FrameIdentity(
-        camera_frame='VG2_ISSNA',
         ck_frame_id=_VOYAGER1_CK_FRAME_ID,
         sclk_id=_VOYAGER2_SCLK_ID,
-        oops_from_spice=_IDENTITY,
         frozen_oops_attitude=True,
     )
 
@@ -412,13 +410,13 @@ def _voyager2_identity_with_the_voyager1_ck_object() -> _FrameIdentity:
 def test_a_clock_that_is_not_the_missions_is_refused() -> None:
     """A CK object resolving to another spacecraft's clock raises."""
     with pytest.raises(NavPointingError, match='resolves to spacecraft clock -31'):
-        _sclk_id(_voyager2_identity_with_the_voyager1_ck_object())
+        _sclk_id(_voyager2_identity_with_the_voyager1_ck_object(), 'VG2_ISSNA')
 
 
 def test_the_refused_clock_message_names_the_expected_clock() -> None:
     """The refusal says which clock was expected, so it is attributable."""
     with pytest.raises(NavPointingError, match='not the -32'):
-        _sclk_id(_voyager2_identity_with_the_voyager1_ck_object())
+        _sclk_id(_voyager2_identity_with_the_voyager1_ck_object(), 'VG2_ISSNA')
 
 
 def test_a_frame_the_kernel_pool_does_not_know_is_a_pointing_failure() -> None:
@@ -432,10 +430,25 @@ def test_a_frame_the_kernel_pool_does_not_know_is_a_pointing_failure() -> None:
     assert isinstance(info.value.__cause__, LookupError)
 
 
+class _StubDeclaringObs:
+    """Observation stub carrying only the two frame subfields a host declares."""
+
+    def __init__(self, name: str, frame_id: int) -> None:
+        """Build the stub around one declared frame.
+
+        Parameters:
+            name: The SPICE frame name the host declares.
+            frame_id: The SPICE frame id the host declares.
+        """
+        self.spice_frame_name = name
+        self.spice_frame_id = frame_id
+
+
 def test_a_frame_name_with_no_spice_id_is_a_pointing_failure() -> None:
-    """A frame name that resolves to no id is reported, not left to surface later."""
+    """A declared frame name that resolves to no id is reported, not left to surface later."""
+    obs = cast(ObsSnapshotInst, _StubDeclaringObs('NO_SUCH_FRAME', -999999))
     with pytest.raises(NavPointingError, match='NO_SUCH_FRAME has no SPICE id'):
-        _camera_frame_id('NO_SUCH_FRAME')
+        _declared_camera_frame(obs)
 
 
 def test_a_clock_that_cannot_encode_an_epoch_is_a_pointing_failure() -> None:
@@ -540,6 +553,9 @@ class _StubTimedObs:
         self.time = (start, stop)
         self.midtime = midtime
         self.texp = texp
+        self.spice_to_frame = oops.Matrix3(_CASSINI_FLIP)
+        self.spice_frame_name = 'CASSINI_ISS_NAC'
+        self.spice_frame_id = -82360
 
 
 @pytest.mark.parametrize(

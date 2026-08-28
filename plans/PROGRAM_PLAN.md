@@ -352,8 +352,10 @@ with the reason recorded when neither is usable — closing #50 and #188. The
 designs are archived at `plans/archive/CK_KERNEL_PLAN_2026-08-04.md` and
 `plans/archive/CMATRIX_READERS_PLAN_2026-08-09.md`; current behavior is
 `docs/user_guide/user_guide_ck_kernels.rst` and its dev-guide companion.
-What that leaves is the kernel follow-ups: the oops API replacing the
-hand-derived derivation (#433), one rotation convention about the image
+What that leaves is the kernel follow-ups: the remaining half of the oops
+API swap (#433), whose offset-to-rotation construction waits on
+SETI/rms-oops#213 now that the convention conversion goes through oops, one
+rotation convention about the image
 center (#434) -- which is upstream of the wider distortion cohorts (#561) and
 of any decision to fit rotation again -- with the static-twist FK/IK pair
 behind it (#435, #436), SPICE database registration
