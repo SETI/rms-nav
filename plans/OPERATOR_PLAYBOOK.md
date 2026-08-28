@@ -463,10 +463,12 @@ deferred until an instrument fits rotation again; a test fails if one does.
   (owns the N1492091163 / N1867601758 / N1867602424 red pins)
 - **#476** RingEdgeNav is not shift-equivariant: a planted shift re-locks it
   onto the wrong ring edge — the same coarse-lock family as #346 and #373,
-  seen from the round-trip side
+  seen from the round-trip side; measured as an alias lattice that polarity
+  does not break, so it waits on #373
 - **#504** RingEdgeNav's pooled inlier-fraction veto discards *correct* ring
   fits on real B-ring scenes, so the cost appears as a smaller cohort rather
-  than as a failure
+  than as a failure; the cause is a residual scale finer than the evidence,
+  and what remains is telling correct fits from aliased ones
 - **#482** BodyDiscCorrelateNav misses by up to ~1 px on a weakly-constrained
   axis, the residual left after PR #484 closes #447
 - **#394** shape-lock veto suppression trusts a star fix that could itself be

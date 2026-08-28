@@ -234,10 +234,17 @@ The known open defects:
   lock confidently onto the wrong ring feature. Standing library reds.
 - **#504** — RingEdgeNav's pooled inlier-fraction veto discards correct ring
   fits on real B-ring scenes: a veto that fires on good answers costs
-  coverage in exactly the scene class the Saturn cohorts are made of.
+  coverage in exactly the scene class the Saturn cohorts are made of. Its
+  cause is settled -- the fit used a catalog sigma a hundred times finer
+  than the binary edge mask it measures against, so the robust weighting
+  read sub-pixel phase instead of model agreement -- and repairing that
+  takes the 71-image B-ring cohort from 15 navigations to 68. Separating
+  the correct fits from the aliased ones remains open and needs #373.
 - **#476** — RingEdgeNav is not shift-equivariant either: a planted shift
   re-locks onto the wrong ring edge. Same family as #346 and #373 seen
-  from the round-trip side.
+  from the round-trip side; the coarse score surface is an alias lattice
+  whose members score within 1 % of each other, and polarity does not
+  separate them.
 - **#482** — BodyDiscCorrelateNav misses by up to ~1 px on a
   weakly-constrained axis. The residual left after the shift-equivariance
   fix (#447) closes the coarse-grid and boundary-pinning halves.

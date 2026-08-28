@@ -166,10 +166,13 @@ and a per-axis NCC-quadratic fallback in `evaluate_candidate` for the case
 where the upsampled-DFT refinement argmax lands on the window boundary and
 the old code reported a pinned +-0.5 px.
 
-The PR is green, mergeable, and fifty commits behind `main`. What it filed
-rather than fixed: RingEdgeNav is not shift-equivariant either and a planted
-shift re-locks it onto the wrong ring edge (#476, same family as #346
-and #373 seen from the round-trip side); `BodyDiscCorrelateNav` still misses by
+The PR is green, mergeable, and fifty commits behind `main`; its sweep tool
+no longer imports against `main`, because `apply_offset_to_obs` became a
+private helper in #564. What it filed rather than fixed: RingEdgeNav is not
+shift-equivariant either and a planted shift re-locks it onto the wrong ring
+edge (#476, same family as #346 and #373 seen from the round-trip side, and
+now measured down to an alias lattice whose members score within 1 % of each
+other and which polarity does not separate); `BodyDiscCorrelateNav` still misses by
 up to ~1 px on a weakly-constrained axis (#482); and the library pins the fix
 moves need re-ratcheting (#483, which cannot be done honestly until #288 is
 reconciled).
@@ -179,9 +182,28 @@ reconciled).
 The veto discards correct ring fits on real B-ring scenes. A veto that fires
 on good answers costs coverage in exactly the scene class the Saturn cohorts
 are made of, and it does so silently, so the cost does not appear as a
-failure anywhere -- it appears as a smaller cohort. Essential, and it
-interacts with #346/#373/#476: the same coarse-lock weakness that produces
-wrong locks is what the veto is compensating for.
+failure anywhere -- it appears as a smaller cohort.
+
+Its cause is settled: `RingEdgeNav` used each vertex's catalog radial sigma
+as the residual scale of its robust fit, and on a low-resolution ring frame
+that sigma is a thousandth of a pixel while the evidence is a binary edge
+mask quantized to the integer grid. The Tukey redescender could then keep
+only the vertices sitting exactly on a mask pixel, so the fit never left its
+integer coarse seed, the gradient-ridge pass had nothing it was allowed to
+move, the reported sigma was not an uncertainty, and the fraction the veto
+read counted sub-pixel phase rather than model agreement. Combining the two
+uncertainties in quadrature takes the 71-image B-ring cohort from 15
+navigations (5 within 2 px of the bundle's published pointing) to 68 (28
+within 2 px).
+
+What remains open is the half the issue actually asks for: *separating* the
+correct fits from the aliased ones. Nine candidate discriminators were
+measured against two independently labelled sets -- the B-ring cohort against
+published pointing, the ring-class library frames against sidecar ground
+truth -- and every statistic that separates within one set inverts on the
+other, because an alignment one ringlet spacing away still puts most of the
+model on an image edge. That is an acquisition problem, so #504's remaining
+half and #476 both wait on #373 rather than on any post-fit statistic.
 
 ### #346 — the remaining confident-wrong ring-lock
 
