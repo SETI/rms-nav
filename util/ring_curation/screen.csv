@@ -1,0 +1,654 @@
+image_id,verdict,reason
+N1458303802_2,bad,dark frame with only star points and no rings
+N1463476856_2,marginal,small crisp ring arc at bottom edge but frame mostly dark
+N1463628417_2,marginal,small ring arc confined to one corner of a dark frame
+N1464249530_1,marginal,bright ring arc only in corner and partly saturated
+N1464249800_1,bad,dark frame with faint diffuse glow and no ring edges
+N1464511022_2,bad,dark frame with only star points and no rings
+N1467344155_2,marginal,ring banding fills frame but soft and low contrast
+N1467344214_2,marginal,low contrast banding with only faint diagonal lanes
+N1467344332_2,marginal,soft low contrast banding without sharp edges
+N1467344391_2,marginal,soft low contrast banding without sharp edges
+N1467345149_2,good,high contrast diagonal lanes with distinct edges across frame
+N1467345267_2,marginal,faint banding with one weak diagonal edge in corner
+N1467345326_2,marginal,very faint dark banding and one weak lane
+N1467345444_2,marginal,distinct dark lanes only in one corner rest faint
+N1469402614_2,bad,dark frame with only star points and no rings
+N1471412676_2,bad,smooth glow gradient with no ring features
+N1471414477_2,bad,smooth glow gradient with no ring features
+N1471418167_2,bad,Saturn disk dominates with no ring features
+N1471421769_2,bad,Saturn disk dominates with no ring features
+N1471993371_2,bad,mostly dark with tiny ring sliver in corner
+N1472193899_2,bad,Saturn disk and haze dominate with no ring features
+N1472197501_2,bad,diffuse limb glow and no ring features
+N1472201103_2,bad,Saturn disk and haze dominate with no ring features
+N1472649235_1,bad,nearly black frame with single point source only
+N1473177482_1,bad,Saturn disk and atmosphere dominate with no rings
+N1473188282_1,bad,Saturn atmosphere dominates with no ring features
+N1473204482_1,bad,Saturn disk and atmosphere dominate with no rings
+N1473231482_1,bad,Saturn disk and atmosphere dominate with no rings
+N1473236882_1,bad,Saturn disk and atmosphere dominate with no rings
+N1473289330_1,marginal,fine ringlets visible only in narrow strip at frame edge
+N1473692743_1,marginal,ring striations at right edge but soft and disk dominates
+N1473703470_1,marginal,striated ring band at edge partly saturated rest is disk
+N1473703543_7,bad,disk glow dominates and ring arcs are very soft
+N1473703716_1,marginal,ring striations at right edge but soft and disk dominates
+N1473703764_1,marginal,faint ring striations at right edge and disk dominates
+N1474005783_1,bad,disk dominates and ring strip at edge is saturated
+N1475766766_1,bad,smooth atmosphere gradient with no ring features
+N1475766785_1,bad,smooth atmosphere gradient with no ring features
+N1475766804_1,bad,smooth atmosphere gradient with no ring features
+N1476337893_1,bad,Saturn disk dominates with only faint corner ring lines
+N1476584780_1,bad,Saturn disk and dark side dominate with no rings
+N1476584980_1,bad,Saturn disk and dark side dominate with no rings
+N1476585047_1,bad,Saturn disk and dark side dominate with no rings
+N1477307700_2,good,sharp curved ringlets and gap edges across frame
+N1477308275_2,good,many sharp ringlet boundaries and dark gaps
+N1477308379_2,good,many crisp ringlets and dark gaps across frame
+N1477308958_2,good,dense sharp ring banding high contrast
+N1477309062_2,marginal,banding visible but soft and washed out
+N1477593061_1,good,sharp high-contrast ringlets and gap edges
+N1479573767_1,bad,nearly all dark with only faint corner sliver
+N1480612821_1,bad,dark frame with overexposed limb arc and point sources only
+N1484916091_1,good,crisp ring band across top with distinct edges and banding
+N1485154691_1,bad,smooth atmosphere gradient no rings
+N1485169091_1,bad,smooth atmosphere gradient no rings
+N1485183491_1,bad,atmosphere dominates no ring features
+N1485197891_1,bad,atmosphere dominates no ring features
+N1485204839_1,bad,featureless gray gradient with dark band no rings
+N1486212747_1,bad,disk dominates with only thin edge-on strip at margin
+N1486212820_1,bad,disk dominates with only thin edge-on strip at margin
+N1486212926_1,bad,atmosphere fills frame faint edge lines only
+N1486380437_1,bad,atmosphere gradient no rings
+N1486551174_4,bad,atmosphere plus black dropout band no rings
+N1486557474_1,bad,atmosphere gradient no rings
+N1486991973_1,bad,dark frame with moon and thin edge-on line only
+N1492102115_1,good,bright sharp narrow ringlet traceable across frame
+N1492102152_1,good,bright sharp narrow ringlet traceable across frame
+N1492102189_1,good,bright sharp narrow ringlet traceable across frame
+N1493373935_1,bad,edge-on view rings reduced to thin lines
+N1493959934_2,marginal,two narrow dim strands with sharp edges but sparse
+N1495328067_1,marginal,sharp outer edge but banding washed out low contrast
+N1495334718_1,bad,saturated white frame with speckle only
+N1498737200_1,marginal,thin bright arcs truncated by shadow
+N1498737320_1,marginal,thin bright arcs truncated by shadow
+N1498737440_1,marginal,thin bright arcs truncated by shadow
+N1498737555_1,bad,noise-dominated flat field with faint regular stripes
+N1503230887_1,marginal,faint diffuse bands with very low contrast
+N1505735909_2,marginal,narrow ring strip with sharp edges but heavily foreshortened
+N1506011034_1,bad,moon dominates with only featureless ring strip at frame edge
+N1506011109_1,bad,smooth gradient with moon and only edge sliver of ring
+N1506011128_1,bad,dark frame with moon and faint edge sliver only
+N1508049239_1,bad,thin foreshortened ring lines with two moons on dark frame
+N1516296088_1,marginal,foreshortened saturated ansa with limited interior structure
+N1521908630_1,marginal,thin edge-on ansa with sharp strands but few features
+N1524901682_1,marginal,saturated foreshortened band in front of Titan disk
+N1529142393_1,bad,edge-on ring spike only a thin line
+N1529142629_1,bad,edge-on ring spike only a thin line
+N1529142809_1,bad,edge-on ring spike only a thin line
+N1529144099_1,bad,edge-on ring spike only a thin line plus faint moon
+N1529144159_1,bad,edge-on ring spike only a thin line plus faint moon
+N1529144339_1,bad,edge-on ring spike only a thin line plus faint moon
+N1529144399_1,bad,mostly black frame with tiny bright spike and moon
+N1529144459_1,bad,mostly black frame with tiny bright spike and moon
+N1529148007_1,bad,ring only a thin edge-on line crossed by moon
+N1531541129_1,bad,edge-on ansa a thin foreshortened lens on dark frame
+N1532372568_1,marginal,broad bands visible but soft edges and low contrast
+N1532407832_1,good,crisp curved ringlets and dark gap edges
+N1536485154_1,good,fine ringlets and sharp gap with embedded ringlet
+N1537019704_1,good,sharp ringlet across dark gap plus multiple crisp edges
+N1537019964_1,good,high contrast banding with many distinct edges
+N1537020098_1,good,many crisp ringlets and gap boundaries
+N1537021909_1,good,crisp banding and distinct ringlet edges
+N1539331550_1,good,high resolution sharp ringlet striations
+N1539331684_1,good,sharp ringlet striations with strong contrast
+N1540579647_1,marginal,broad soft bands with mostly diffuse boundaries
+N1540580396_1,marginal,mostly dark with faint bands and one bright edge at corner
+N1541104714_1,good,many crisp horizontal ringlets in composite
+N1541557055_1,good,crisp curved ringlet strands throughout composite
+N1541557304_1,good,crisp curved ringlet strands throughout composite
+N1543793433_1,marginal,low contrast bands with soft edges and glare
+N1543793733_1,good,distinct band edges and dark lanes despite glare
+N1543805616_1,bad,posterized blocky artifacts render frame unusable
+N1544035853_1,marginal,dense striations but noisy and dark with soft texture
+N1547772129_1,good,high contrast crisp ringlets and gaps
+N1547820457_1,good,crisp ringlets with bright sharp edges in composite
+N1550452145_1,marginal,washed out pale bands with weak soft edges
+N1553207351_1,good,many sharp fine ringlet bands with high contrast
+N1554631845_1,marginal,broad soft diagonal bands with low contrast
+N1555486776_1,good,sharp ring edge with dark gap and thin ringlet
+N1556031079_1,good,multiple crisp narrow bright ringlets
+N1556032385_1,marginal,broad soft bands mostly smooth gradient
+N1556711016_1,good,many crisp curved ringlets and bright band with gaps
+N1556711360_1,good,numerous fine ringlets with sharp bright bands and gap
+N1556711704_1,marginal,ringlets visible but faint over dark half with noise streaks
+N1560311549_1,marginal,one edge and faint fine banding in top strip only
+N1560311811_1,good,distinct bright ringlets with sharp gap edges
+N1560311927_1,good,strong bands separated by sharp dark gaps
+N1560313734_1,good,clear bright band and sharp boundaries
+N1560313850_1,good,broad bands with sharp bright ringlet line
+N1560314913_1,good,many bands and ringlets with sharp edges and gaps
+N1560315027_1,bad,frame mostly dark with rings only in a corner sliver
+N1561118424_1,bad,Saturn disk gradient dominates with horizontal banding artifact and no ring features
+N1571965603_1,marginal,washed-out bright field with soft arcs
+N1573240997_1,good,dark gap with sharp edges and fine ringlets
+N1573263994_1,good,sharp gap edges plus fine ringlet structure
+N1573275711_1,good,dark gap with crisp edges and ringlets
+N1573277863_1,bad,diffuse bright glow dominates with only soft striations
+N1573277993_1,bad,mostly dark smooth gradient with faint streaks
+N1573281856_1,good,sharp gap edges and fine ringlets at good contrast
+N1573288043_1,good,dark gap with sharp edges and ringlet detail
+N1574016951_1,good,many crisp ringlet boundaries and distinct bands
+N1574017041_1,good,crisp ringlet boundaries and distinct banding
+N1575250375_2,marginal,soft arcs with dropout line artifacts over bright half
+N1575252055_1,good,many crisp curved ringlets with dark gaps
+N1575255415_1,good,dense fine ringlets sharply resolved
+N1575257169_1,good,curved ringlets with distinct dark gap and edges
+N1575257935_1,good,multiple crisp ring bands and gap edges
+N1575404246_2,good,sharp ringlets and dark gap despite dropout bar
+N1575405146_1,marginal,banding visible but dark and low contrast
+N1575406497_1,marginal,dark smooth arcs with weak band edges
+N1575406946_1,good,many distinct fine ringlets with clear boundaries
+N1575420477_1,good,sharp gap and crisp ring outer edge
+N1575421918_1,marginal,faint strands and one bright corner edge in dark frame
+N1585899014_1,marginal,diagonal bands soft and low contrast
+N1585899036_1,marginal,diagonal bands soft and low contrast
+N1585904807_1,marginal,soft low-contrast diagonal banding
+N1585904818_1,marginal,soft low-contrast diagonal banding
+N1586711062_1,good,sharp ringlet boundaries with good contrast
+N1586711606_1,good,distinct ringlets and dark lanes well contrasted
+N1588248301_1,good,high-contrast gap edges and bright ringlets
+N1589181166_1,marginal,fine bands present but dim and low contrast
+N1591693813_1,good,sharp high-contrast band edges
+N1591696423_1,good,sharp bright bands with crisp edges
+N1592965575_1,marginal,washed-out bright bands with one crisp edge
+N1595342355_1,good,dense sharp ringlets and clean ring edge
+N1595482672_1,bad,mostly black frame with moon only
+N1595482715_1,bad,mostly black frame with moon only
+N1595507962_1,marginal,saturated band with edges only visible
+N1595508005_1,good,crisp gap edges and sharp outer edge
+N1595944266_1,good,sharp gap and dense fine ringlets in composite
+N1601522656_1,marginal,narrow strand and edge ringlets in mostly dark frame
+N1606481271_1,bad,mostly dark frame with only a thin edge-on ring sliver at left plus glare
+N1606481359_1,bad,diffuse glare cross with no ring features
+N1607663861_1,bad,ring only a thin line in dark frame
+N1607664023_1,bad,ring only a thin line in dark frame
+N1610300874_1,good,distinct band and gap edges sharp across frame
+N1610303368_1,marginal,crisp ringlets only at bottom edge rest faint dark
+N1610502912_1,good,many sharp gap and ringlet edges high contrast
+N1614222851_1,marginal,single narrow F ring strand in mostly dark frame
+N1614223071_1,marginal,single narrow F ring strand fainter mostly dark
+N1614682798_1,marginal,bands visible but soft and washed out low contrast
+N1614682886_1,marginal,numerous bands but soft washed out low contrast
+N1617920398_1,good,many distinct bands plus sharp moon shadow
+N1622022571_1,good,sharp bright F ring ansa curve plus main ring edge
+N1631539839_1,bad,ring only a thin foreshortened line in dark frame
+N1631539872_1,bad,ring only a thin foreshortened line in dark frame
+N1632165849_1,bad,saturated strip at top rest nearly featureless dark
+N1632165909_1,bad,saturated strip at top rest nearly featureless dark
+N1632166779_1,marginal,banding discernible but very dark low contrast
+N1632166839_1,marginal,banding discernible but very dark low contrast
+N1632167709_1,good,many crisp high contrast ringlet bands
+N1632167769_1,good,many crisp high contrast ringlet bands
+N1634709792_1,bad,ring is only thin foreshortened bright lines on black
+N1634709880_1,bad,ring is only thin foreshortened bright lines on black
+N1635302459_1,bad,thin foreshortened ring stripe moons not ring features
+N1635387458_1,bad,nearly all black with a single thin line at frame edge
+N1636131449_1,bad,entirely dark featureless frame
+N1636131649_1,bad,entirely dark featureless frame
+N1636131689_1,bad,smooth saturated bright gradient with no discernible features
+N1636131889_1,bad,entirely dark featureless frame
+N1636131929_1,bad,featureless bright gradient no rings
+N1636132129_1,bad,frame entirely black
+N1636132169_1,bad,featureless bright gradient no rings
+N1636241330_1,bad,entirely dark featureless frame
+N1636241370_1,bad,smooth atmospheric gradient no ring features
+N1636241570_1,bad,frame entirely black
+N1636241610_1,bad,smooth atmospheric gradient no ring features
+N1636304358_1,bad,smooth gradient no ring features
+N1636304558_1,bad,frame entirely black
+N1636304598_1,bad,smooth gradient no ring features
+N1636383279_1,bad,frame entirely black
+N1636383319_1,bad,smooth gradient disk dominates no ring features
+N1636383519_1,bad,entirely dark featureless frame
+N1636383559_1,bad,smooth gray gradient with no sharp ring features
+N1636383759_1,bad,entirely dark featureless frame
+N1636399879_1,bad,smooth gradient frame with no discernible ring structure
+N1636400079_1,bad,entirely dark featureless frame
+N1636400119_1,bad,smooth gradient frame with no discernible ring structure
+N1638001135_1,bad,Titan disk dominates and rings are only thin foreshortened lines
+N1638880417_1,marginal,broad ring band with sharp lower edge but internal banding faint and low contrast
+N1641079966_1,good,sharp ring edge and thin ringlet with clear gap in corner
+N1641079999_1,good,sharp ring edge and thin ringlet crisp against dark sky
+N1641853869_1,good,many crisp ringlet bands and boundaries across frame
+N1641853925_1,marginal,bands present but soft smooth gradients with few sharp edges
+N1646767707_1,marginal,near edge-on ansa with nested edges visible but heavily foreshortened
+N1649610500_1,bad,ring is only a thin foreshortened vertical line
+N1649697408_1,bad,ring is only a thin foreshortened diagonal line
+N1649697441_1,bad,ring is only a thin foreshortened diagonal line
+N1659994221_1,bad,faint edge-on ansa sliver in dark frame
+N1659994254_1,bad,faint edge-on ansa sliver in dark frame
+N1662205952_1,good,Cassini division region with many sharp gap edges
+N1683444249_1,bad,frame nearly all black with edge-on sliver at margin
+N1686502855_1,bad,edge-on rings reduced to thin vertical spike
+N1710534480_1,marginal,edge-on ansa mostly saturated with one discernible interior gap edge
+N1723616238_1,good,sharp outer ring edge and distinct narrow gap
+N1723616617_1,good,sharp outer ring edge and distinct narrow gap
+N1724143912_1,marginal,fine ringlets visible but delicate and low contrast on bright field
+N1730572389_1,marginal,single faint thin ring line across top of dark frame
+N1732188039_3,bad,Saturn atmosphere dominates with smooth gradient and no rings
+N1732194638_1,bad,Saturn limb and atmosphere dominate with no ring features
+N1737360891_1,marginal,broad soft bands and top edge but low contrast
+N1737360924_1,marginal,broad soft bands and top edge but low contrast
+N1737366186_1,good,many fine crisp ringlet lines in upper half
+N1737366219_1,good,crisp bright and dark ringlet bands with clear boundaries
+N1743621426_1,marginal,ring arcs discernible but diffuse noisy and partly shadowed
+N1743621946_1,marginal,ring arcs discernible but diffuse noisy and partly shadowed
+N1744591427_1,marginal,thin ringlet lines discernible but very low contrast
+N1744591460_1,marginal,thin ringlet lines discernible but low contrast
+N1744591516_1,marginal,faint thin ringlet lines on flat low contrast field
+N1746302410_1,bad,featureless smooth bright gradient
+N1746302459_1,bad,featureless smooth dark field
+N1746302674_1,bad,noise speckle with only vague broad banding
+N1747231097_1,good,sharp ring gap edges plus moons for reference
+N1748914497_1,good,crisp bands with sharp ringlet and gap edges
+N1748914553_1,good,crisp banding and bright ringlet edge
+N1771437765_1,good,sharp ring outer edge with fine banding and gap
+N1771437798_1,good,sharp ring edge and dark gap banding
+N1772993573_1,good,high contrast diagonal bands with sharp boundaries
+N1783010075_1,marginal,Saturn disk dominates and ring bands are dark low contrast
+N1783010120_1,marginal,disk dominates with faint dark ring bands
+N1783010165_1,marginal,disk dominates and ring bands low contrast
+N1787181893_1,bad,diffuse limb glow with no sharp ring features
+N1787183198_1,bad,saturated limb smooth gradient no features
+N1789853176_1,good,dense crisp ringlet striping
+N1799411936_1,marginal,only faint thin arcs on smooth low contrast field
+N1799412222_1,marginal,mostly smooth with one faint arc edge
+N1799413116_1,marginal,soft diffuse bands low contrast
+N1799413354_1,marginal,soft diffuse bands with faint edges
+N1799415398_1,good,clear gap with bright ringlet and crisp banding
+N1799415572_1,good,distinct gap ringlet and banding
+N1799421103_1,good,fine banding with distinct inner boundary
+N1799421277_1,marginal,bands present but soft and faint
+N1799466337_1,bad,mostly blank saturated frame with no ring structure
+N1804918917_1,good,sharp ring edge and dark lane against sky
+N1805031585_3,marginal,sharp gap features but lower half of frame is black
+N1832859147_1,good,many crisp concentric ringlets
+N1832859518_1,good,many crisp concentric ringlets
+N1832859535_1,good,many crisp concentric ringlets
+N1832859567_1,good,many crisp concentric ringlets
+N1835821410_1,bad,mostly dark with only a moon point and faint glow
+N1836244183_1,good,sharp ring edge with banding and F ring line
+N1836244217_1,good,sharp ring edge with banding and F ring line
+N1836356497_1,good,broad ring sweep with many crisp bands and gap edges
+N1836779662_1,bad,frame mostly smooth gradient with only faint corner streaks
+N1836779926_1,marginal,foreshortened ring bands at left edge low contrast
+N1836783741_1,marginal,faint band streaks along left edge rest smooth gradient
+N1836822297_1,bad,bright disk dominates rings only thin lines in corner
+N1836824643_1,bad,disk dominates with only weak edge streaks upper left
+N1836832397_1,marginal,ring bands confined to left edge against bright disk
+N1845774290_1,good,bright ring arcs with sharp distinct edges
+N1847700086_1,bad,atmosphere clouds only no rings
+N1847700159_1,bad,atmosphere clouds only no rings
+N1849441813_1,good,distinct sharp ringlets lower right plus band structure
+N1849442366_1,good,distinct sharp ringlets and arcs across frame
+N1853393165_1,marginal,dim ring section with bands only in corner mostly dark
+N1853393232_1,marginal,ring bands in corner visible but frame mostly dark
+N1855877859_1,bad,moon dominates ring streaks diffuse and unsharp
+N1855878017_1,marginal,moon dominates but ring section with gap edge visible
+N1855878157_1,bad,moon dominates only faint thin ring line at corner
+N1860794252_1,good,many distinct bands with sharp lanes despite some smear texture
+N1860795639_1,good,fine crisp ringlets and dark lanes across frame
+N1860795731_1,good,sharp gap edges and abundant fine banding
+N1862642479_9,marginal,mostly dark with bands crisp only in lower right corner
+N1862642809_1,bad,nearly featureless dark frame with faint diffuse bands
+N1862642919_1,good,sharp dark gaps with distinct band edges
+N1862643139_1,good,dense crisp ringlets with sharp outer edge
+N1863265760_1,good,gap with sharp wavy edges and many ringlets
+N1863265838_1,good,gap edges crisp with clear banding despite speckle
+N1863266165_1,good,gap with sharp edges and distinct ringlets
+N1863267115_1,good,gap with sharp edges and clear banding
+N1863267232_1,good,sharp gap edges with embedded moonlet and crisp banding
+N1863268347_1,good,sharp gap edges and distinct ringlet bands
+N1863268419_1,good,sharp gap edges and distinct ringlet bands
+N1863268513_1,good,sharp gap edges and distinct ringlet bands
+N1863268607_1,good,sharp gap edges and distinct ringlet bands
+N1863269385_1,good,sharp gap edges and visible banding
+N1863269418_1,good,sharp gap edges and visible banding
+N1867602505_1,marginal,mostly dark gap with moon; ring edges only at frame margins
+N1867602538_1,marginal,mostly dark gap with moon; ring edges only at frame margins
+N1867602571_1,marginal,mostly dark gap with moon; ring edges only at frame margins
+N1867602907_1,bad,noise-dominated dark frame with only faint corner glow
+N1867602962_1,marginal,mostly dark gap; faint ring corners with weak edges
+N1867604488_1,bad,moon closeup on black; no rings discernible
+N1867604558_1,bad,moon closeup on black; no rings discernible
+N1867604614_1,bad,moon closeup on black; no rings discernible
+N1867604669_1,bad,moon closeup on black; no rings discernible
+N1867606339_1,bad,moon closeup on black; no rings discernible
+N1867606610_1,bad,moon closeup on black; no rings discernible
+N1867606643_1,bad,moon closeup on black; no rings discernible
+N1869315249_1,bad,smooth haze gradient; no ring features
+N1869316929_1,bad,smooth haze gradient; no ring features
+N1870073578_1,marginal,half frame dark with diffuse shadow edge; banding only at right
+N1870076479_1,good,dense sharp ringlet banding with gap edge
+N1870084227_1,good,dense sharp fine ringlets high contrast
+N1870084308_1,good,sharp gap edge with rich banding
+N1870084830_1,good,sharp outer ring edge with fine banding
+N1870086522_1,good,crisp dense fine ringlet banding across frame
+N1870086725_1,marginal,broad soft bands with low structure and diffuse boundaries
+N1870087065_1,good,distinct ringlets with sharp boundaries against dark
+N1871440782_1,good,multiple sharp curved ringlet edges across frame
+N1874678736_1,good,bright band with sharp edges and thin ringlet lines
+N1874679039_1,good,several crisp bands and ringlet boundaries
+N1874681266_1,good,two distinct bright ringlets with clear edges
+N1875232264_1,good,sharp narrow ringlet plus band edges
+N1875232984_1,good,bright band with sharp edges and thin ringlets
+N1875233609_5,good,broad band with crisp edges and fine ringlets
+N1875233884_1,good,distinct band boundaries with good contrast
+N1878581678_1,good,many high-contrast crisp bands
+N1878581875_1,marginal,bands visible but low contrast and soft
+W1464621381_1,marginal,tiny distant full ring system with visible ellipse but banding not crisp
+W1464621454_1,marginal,tiny distant full ring system with visible ellipse but banding not crisp
+W1477648292_1,bad,frame mostly dark with ring only a corner sliver
+W1477655012_1,bad,mostly dark with tiny corner sliver
+W1501393100_1,bad,Saturn disk dominates and rings reduce to thin edge-on slivers
+W1502581590_1,bad,nearly all black with saturated sliver at edge
+W1504578463_1,bad,saturated disk with only a thin ring line
+W1507411549_1,bad,dark frame with thin foreshortened ring streak
+W1508011493_1,bad,dark frame with edge-on ring line only
+W1508011730_1,bad,mostly black with only a thin edge-on ring line at right
+W1508011975_1,bad,mostly black with only a thin edge-on ring line at right
+W1508012210_1,bad,dark frame with edge-on ring line only
+W1508012700_1,bad,mostly black with only a thin edge-on ring line at right
+W1508014905_1,bad,mostly black with faint sliver only
+W1508051195_1,bad,thin foreshortened ring line on dark frame
+W1508117301_1,bad,edge-on thin ring line over dark disk
+W1508117362_1,bad,edge-on ring is only a thin line with moon and faint disk
+W1514177438_1,bad,edge-on ring wedge amid artifact-laden gradient
+W1514199717_1,bad,thin foreshortened ansa line only
+W1519471529_1,bad,saturated edge-on ring spike on black
+W1519477955_1,bad,saturated edge-on ring bar with no internal features
+W1525015733_1,bad,thin vertical edge-on ring line only
+W1525015823_1,bad,thin vertical edge-on ring line only
+W1525019333_1,bad,thin vertical ring line plus small moon crescent
+W1525019423_1,bad,thin vertical ring line plus small moon crescent
+W1527480270_1,bad,frame entirely dark with nothing discernible
+W1528431714_1,bad,moon crescent dominates and ring is a thin line
+W1528431780_1,bad,crescent and thin edge-on line only
+W1528431862_1,bad,frame almost fully saturated white
+W1528431943_1,bad,crescent and thin edge-on line only
+W1532384157_1,bad,completely black frame
+W1534205820_1,bad,mostly dark with one short faint arc only
+W1539414102_1,good,corner ansa with crisp bright bands and sharp outer edge
+W1542000097_1,bad,smooth gray gradient with no ring features
+W1542792948_1,marginal,ring bands at bottom but saturation dominates
+W1542932607_1,bad,mostly black with only faint smooth limb
+W1544737624_1,bad,atmosphere gradient dominates with tiny corner ring sliver
+W1544737657_1,bad,atmosphere gradient dominates with ring corner sliver
+W1544737723_1,bad,atmosphere gradient dominates with tiny corner ring sliver
+W1544737757_1,bad,atmosphere dominates and hides ring features
+W1544737790_1,bad,atmosphere dominates with faint ring wedge in corner
+W1544737878_1,bad,Saturn atmosphere dominates with only foreshortened ring streaks in corner
+W1549175609_1,bad,Saturn disk fills frame with only faint ring sliver at edge
+W1549175621_1,bad,Saturn disk fills frame and hides ring features
+W1549175633_1,bad,disk fills frame and rings barely visible at edge
+W1549175645_1,bad,disk fills frame and rings barely visible at edge
+W1549176769_1,bad,Saturn disk fills frame with no usable ring features
+W1549176859_1,bad,Saturn disk fills frame with only faint ring sliver at edge
+W1549176871_1,bad,Saturn disk fills frame and hides ring features
+W1549176883_1,bad,disk fills frame and rings barely visible at edge
+W1549176895_1,bad,disk fills frame and rings barely visible at edge
+W1550700212_1,bad,frame mostly saturated white with thin ring band at bottom edge
+W1558206261_1,bad,frame nearly all black with tiny bright arc in corner
+W1558476233_1,bad,mostly dark frame with moon point and faint sliver at bottom
+W1558907183_3,marginal,one sharp bright edge with faint bands in left strip
+W1559199373_1,bad,dark frame with glare and star speckle and no ring features
+W1559201773_1,bad,dark frame with glare column and no ring features
+W1559201821_1,bad,dark frame with glare column and no ring features
+W1559204172_1,bad,dark frame with glare column and no ring features
+W1559204220_1,bad,glare plume and stars with no ring features
+W1559228170_1,bad,diffuse glare streaks and stars with no rings
+W1559228218_1,bad,diffuse glare streaks and stars with no rings
+W1559627040_1,marginal,small corner ansa with bands but most of frame dark
+W1559709840_1,marginal,small top ansa with resolved ringlets in mostly dark frame
+W1561413761_1,marginal,small ring ansa tip in corner with sharp strands but tiny coverage
+W1572057742_1,bad,edge-on ring is only a thin line with bright ansa
+W1572058971_1,bad,edge-on ring is only a thin line with bright ansa
+W1572059279_1,bad,gray gradient with glare and faint edge-on streak only
+W1572585736_1,good,rings cross disk with distinct sharp bands and shadow
+W1575402005_1,good,bright ring ansa with crisp outer edge and distinct dark gap arc
+W1575652679_1,bad,huge saturated glare blob with star and no ring features
+W1575652734_1,marginal,saturated ansa but thin outer ring edges crisp
+W1575653040_1,bad,saturated glare and smooth gradient no ring structure
+W1575653110_1,marginal,saturated ansa with thin outer edge visible
+W1575653360_1,bad,saturated glare gradient fills frame
+W1577457538_1,good,ansa at top with crisp banding and gap edges
+W1577907794_1,marginal,ring bands with edges cross lower frame but Saturn disk dominates
+W1577908214_1,bad,Saturn disk dominates with only thin dark arcs at frame edges
+W1577908274_1,marginal,ring bands with edges in lower third but disk dominates and contrast low
+W1579178787_1,marginal,crisp ring banding confined to small corner over dark limb gradient
+W1579178877_1,marginal,crisp ring banding confined to top corner over dark limb gradient
+W1580012659_1,bad,mostly dark only tiny corner sliver of ring
+W1580341501_1,marginal,saturated ansa needle with one faint tip edge
+W1580341725_1,marginal,saturated ansa needle only tip outline discernible
+W1581772468_1,bad,black frame with faint thin arc at top edge only
+W1586540050_1,bad,frame nearly all black with tiny bright patch in corner
+W1587246653_1,bad,mostly dark tiny corner sliver of banding
+W1587247787_1,marginal,small sharp ring segment with bands confined to bottom corner
+W1587442126_1,bad,frame mostly saturated white with faint corner striations only
+W1587640464_1,bad,Saturn disk dominates rings only thin dark lanes
+W1588265544_1,bad,dark wedge over saturated background with only thin ring lines
+W1592959935_1,bad,Saturn disk glow fills corner with no ring features
+W1599985714_1,bad,dark frame tiny ansa tip and moon blob only
+W1603880509_1,bad,dark frame tiny corner speck and star streaks
+W1606638434_1,bad,mostly dark tiny corner sliver of ring
+W1609526821_1,bad,atmosphere bands fill frame no rings
+W1609526838_1,bad,atmosphere only no rings visible
+W1609526855_1,bad,atmosphere only no rings visible
+W1609526927_1,bad,dim atmosphere bands no rings
+W1609526999_1,bad,soft atmosphere bands dominate with no sharp ring features
+W1610918292_1,bad,frame nearly black with no discernible rings
+W1618418855_1,bad,mostly dark small corner sliver of ring
+W1619787793_1,marginal,corner ansa with distinct bands but small extent
+W1625677393_1,bad,ring only a thin saturated edge-on sliver at frame edge
+W1625677410_1,bad,thin edge-on sliver in noisy dark frame
+W1625677444_1,bad,thin saturated edge-on sliver with star speckle
+W1625677478_1,bad,thin edge-on sliver in dark noisy frame
+W1625677495_1,bad,noisy gradient with faint spike no structure
+W1625677512_1,bad,noisy gradient thin foreshortened ring spike only
+W1625678627_1,marginal,edge-on ring lines distinct but crescent dominates
+W1625678644_1,bad,only faint thin foreshortened ring lines
+W1625678712_1,marginal,thin ring arcs visible beside crescent
+W1625678746_1,marginal,thin ring lines and band beside crescent
+W1632193092_1,bad,mostly black with faint ring arc only in corner
+W1641540363_1,bad,mostly black with tiny ring fragment at bottom edge
+W1643271321_1,good,full-frame ring bands with sharp gap and ringlet edges
+W1646982957_1,bad,saturated glare with no ring structure
+W1646983093_1,bad,frame almost entirely saturated white
+W1646983125_1,bad,glare column and smooth gradient no features
+W1646983261_1,bad,frame nearly fully saturated white
+W1646983397_1,bad,glare column and gradient no ring features
+W1647012367_1,bad,frame fully saturated white
+W1648124194_1,bad,dark frame with saturated streaks and no ring structure
+W1648141153_1,bad,star speckle and faint haze with no usable ring edge
+W1651262689_1,bad,ring only a thin foreshortened line across disk
+W1658639669_1,bad,frame almost entirely saturated white
+W1686735102_1,bad,Saturn disk dominates with ring as thin line and shadows
+W1686735136_1,bad,Saturn disk dominates with ring as thin line and shadows
+W1686735153_1,bad,ring only a thin vertical line over dark disk with glare
+W1690905263_1,bad,smooth atmosphere gradient with no rings
+W1704623270_1,marginal,disk dominates but ring bands with a few edges visible at bottom
+W1704623342_1,marginal,disk dominates but foreshortened ring lanes show weak edges
+W1704623375_1,marginal,ring bands at bottom soft and low contrast under dominant disk
+W1704623408_1,marginal,disk dominates with ring lanes at bottom low contrast
+W1705802937_1,bad,disk dominates and rings reduced to thin foreshortened line
+W1711360207_1,bad,mostly dark with thin ring line and glare at disk edge
+W1712586760_1,bad,disk dominates and rings reduced to thin foreshortened line
+W1717379411_1,marginal,distinct bands on right but half frame lost to shadow
+W1717379445_1,marginal,broad ring bands with edges but smeared and half frame dark
+W1717379462_1,marginal,ring lanes visible but bright smear and shadowed half
+W1717426228_1,bad,heavy saturation and horizontal smear obscure band edges
+W1717426245_1,marginal,ring lanes discernible but weak with saturated smear
+W1725409975_1,bad,atmosphere clouds fill frame with no rings
+W1727149679_1,bad,frame almost entirely saturated white
+W1729153701_1,bad,dark disk dominates with rings only foreshortened corner streaks
+W1729153718_1,bad,mostly dark disk with only faint ring streaks in corners
+W1729153742_1,bad,mostly dark with very faint streaked ring sliver at top
+W1729153759_1,bad,mostly dark frame with only faint band traces in corners
+W1729156492_1,bad,ring is only a thin foreshortened arc on dark frame
+W1729156509_1,bad,very faint thin arc only
+W1729156533_1,bad,dark frame with limb line and only faint thin ring sliver
+W1729156550_1,bad,thin faint arc only on dark frame
+W1729156567_1,bad,thin foreshortened arc only
+W1729157397_1,bad,mostly dark with narrow ring sliver at frame edge
+W1732750432_1,bad,polar hexagon disk dominates with only small ring wedge in corner
+W1732754632_1,bad,polar hexagon disk dominates with only small ring sliver
+W1732756113_1,bad,Saturn polar atmosphere fills frame no rings
+W1732756132_1,bad,Saturn hexagon atmosphere fills frame no rings
+W1732756150_1,bad,featureless disk atmosphere fills frame no rings
+W1732756167_1,bad,featureless disk atmosphere fills frame no rings
+W1732756184_1,bad,featureless disk atmosphere fills frame no rings
+W1732756242_1,bad,Saturn atmosphere fills frame no rings
+W1732758832_1,bad,Saturn polar atmosphere dominates no rings
+W1732773584_1,bad,Saturn disk fills frame no ring features
+W1732778945_1,bad,smooth disk limb against dark sky no rings
+W1732778964_1,bad,polar disk dominates frame no ring features
+W1732778982_1,bad,bright disk dominates frame no ring features
+W1732778999_1,bad,bright disk dominates frame no ring features
+W1733512914_1,marginal,ring band and gap edge in corner but soft and low contrast
+W1733512948_1,marginal,ring band with gap edge confined to corner low contrast
+W1733512965_1,bad,rings barely discernible in faint corner glow
+W1733819822_1,marginal,disk dominates with ringlets compressed at frame edge
+W1733819854_1,marginal,disk dominates with foreshortened ringlet strip at edge
+W1736035345_1,bad,dark frame with only thin bright limb arc no ring structure
+W1736035410_1,bad,single thin bright line only
+W1736035474_1,bad,dark frame with only thin bright limb arc no ring structure
+W1736035613_1,bad,dark frame with only thin bright limb arc no ring structure
+W1736035734_1,bad,dark frame with only thin bright limb arc no ring structure
+W1736225610_1,marginal,disk dominates with weak dark ring bands in corner
+W1736230628_1,bad,smooth disk with thin foreshortened band at bottom
+W1736230662_1,bad,saturated disk with only thin bands at bottom
+W1737189026_1,bad,saturated blown-out gradient no features
+W1737189151_1,bad,smooth glare gradient no ring features
+W1737189232_1,bad,smooth glare gradient with saturated region no rings
+W1737189313_1,bad,smooth glare gradient with saturated region no rings
+W1737786689_1,good,bright striated ring band and sharp gap arcs over disk
+W1737790255_1,good,distinct ring arcs with striations and crisp gap edges
+W1741129397_1,good,striated bright band and well defined gap edges
+W1741173197_1,good,clear ring arcs and gap edges with fine banding
+W1745007975_1,good,multiple crisp ringlet arcs and gap edges across frame
+W1746262100_1,bad,Saturn polar disk dominates ring features hidden
+W1749083414_1,bad,disk atmosphere fills frame no ring features
+W1749083513_1,bad,featureless disk fills frame no ring features
+W1749083768_1,bad,Saturn disk dominates with only thin ring sliver at right edge
+W1750045119_1,marginal,disk dominates but corner ring bands with gap are sharp
+W1750045153_1,marginal,disk dominates with sharp ring bands and gap in corner
+W1750045170_1,bad,saturated disk band dominates and ring corner nearly featureless
+W1750523322_1,marginal,mostly dark with faint low-contrast ring arcs in top corner
+W1750944675_1,bad,polar hexagon atmosphere shot with no rings
+W1750944692_1,bad,polar atmosphere shot with no rings
+W1750951549_1,bad,polar hexagon shot with no ring features
+W1750951573_1,bad,polar hexagon shot with no ring features
+W1750953761_1,bad,polar disk shot with only faint edge-on streaks in corner
+W1750953778_1,bad,polar disk shot with only faint edge-on streaks in corner
+W1750953795_1,bad,polar hexagon disk dominates with tiny ring corner sliver
+W1750953812_1,bad,disk dominates frame with only faint corner ring sliver
+W1750953829_1,bad,dark disk-dominated frame with tiny corner ring sliver
+W1750954984_1,bad,disk fills frame with only faint foreshortened lines at edge
+W1750955001_1,bad,disk fills frame with only faint foreshortened lines at edge
+W1752981902_1,bad,frame mostly dark with only thin ring sliver at edge
+W1752981919_1,bad,mostly black with thin foreshortened ring line in corner
+W1753145795_1,bad,disk dominates with thin faint ring band at right edge
+W1753145812_1,bad,disk dominates and ring is a narrow edge sliver
+W1753145844_1,bad,disk dominates with near edge-on thin ring lines at right
+W1753145861_1,bad,disk dominates and rings are faint foreshortened lines
+W1753145918_1,bad,disk dominates and rings are faint foreshortened lines
+W1764696612_1,good,wide ring shot with crisp banding and sharp gap edges
+W1764696636_1,good,bright B ring and gap edges with fine sharp banding
+W1764696655_1,good,crisp ring bands and gap edges across frame
+W1764696672_1,good,sharp ring banding with clear gap and edge structure
+W1766848316_1,marginal,small ring arc in corner with sharp edge but tiny coverage
+W1770470363_1,bad,noisy mottled texture with no ring features
+W1773259514_1,bad,single bright crescent limb arc with no ring structure
+W1783956855_1,marginal,disk dominates but left side shows discernible ring bands
+W1783956889_1,marginal,disk dominates though edge-on ring stripes at left are sharp
+W1783956906_1,bad,disk dominates and ring stripe saturated with weak features
+W1792329488_1,bad,disk dominates and rings only a thin foreshortened line
+W1802263553_1,good,crisp ringlet banding across upper half
+W1802263588_1,good,many sharp ringlet bands despite saturated lower half
+W1802263653_1,good,sharp ringlet banding over upper half
+W1802265821_1,good,crisp ringlet bands in upper half
+W1812154531_1,bad,crescent disk with rings as thin edge-on line
+W1815069219_1,bad,black frame with only a thin edge-on ring line
+W1816834913_1,bad,featureless flat-field texture with no rings discernible
+W1816871150_1,bad,black frame with short thin edge-on line only
+W1817020846_1,bad,crescent Saturn with no rings
+W1817020880_1,bad,dark crescent Saturn with no ring features
+W1817020897_1,bad,dark crescent Saturn with no ring features
+W1821763173_1,bad,crescent disk dominates with edge-on thin ring line
+W1821830554_1,bad,saturated disk dominates and ring is a thin edge-on line
+W1823118496_1,bad,dark smeared glow with vertical streaks and no ring features
+W1827940616_1,bad,edge-on thin ring line over diffuse glow
+W1827940650_1,bad,diffuse glow with ring as single thin edge-on line
+W1827940667_1,bad,ring is only a thin foreshortened bright line on dark frame
+W1827946016_1,bad,edge-on thin ring line with only smeared corner banding
+W1827946050_1,bad,edge-on bright ring line over smeared glow
+W1827946067_1,bad,edge-on thin ring line with diffuse haze
+W1828201318_1,bad,edge-on thin ring line over featureless noisy gradient
+W1828201352_1,bad,noisy gradient with thin edge-on ring line
+W1828201369_1,bad,hazy frame with thin edge-on ring line
+W1841028909_1,marginal,ring bands over bright disk but low contrast and disk glare dominates
+W1841032507_1,marginal,curved ring bands upper left but soft and washed by saturated disk
+W1841032540_1,marginal,faint ring striations against bright disk with weak contrast
+W1841042702_1,marginal,ring bands barely visible over saturated gradient
+W1841042719_1,marginal,faint soft ring bands with most of frame a bright gradient
+W1852124652_1,bad,Saturn polar atmosphere fills frame with no rings visible
+W1865184220_1,marginal,ring segment at right edge partly saturated with weak banding
+W1865184237_1,marginal,narrow foreshortened ring arc at edge with one sharp bright band
+W1865184256_1,bad,saturated blowout and lens ghost artifacts with no clean ring features
+W1865184273_1,marginal,ring segment confined to right edge with saturated bright band and only faint banding
+W1865187543_1,good,ring arc with distinct sharp bands and edges against dark sky
+W1867551971_1,bad,Saturn atmosphere dominates frame and no rings discernible
+W1868287105_1,bad,frame black except thin ring sliver in bottom-left corner
+W1870764071_1,marginal,saturated ansa arc with only faint band fan below
+W1870764088_1,marginal,thin bright arc with faint band fan and weak contrast
+W1870764107_1,marginal,arc edge sharp but heavily saturated and red-flooded frame drowns structure
+W1870764124_1,marginal,thin arc with faint reddish band fan and low contrast
+W1870773144_1,marginal,ring arc only a sliver at bottom edge though ringlet edge is crisp
+W1870773161_1,marginal,bottom-edge arc sliver with modest band structure
+W1871866084_1,marginal,ring striations at right but dark low contrast and disk dominates
+W1871866101_1,marginal,ring band with striations at right but soft and disk dominates
+W1872479866_1,good,many crisp ring bands and gap edges across frame
+W1876352158_1,bad,mostly dark noise speckle with only tiny corner sliver
+W1877365637_1,bad,Saturn disk and atmosphere fill frame with no rings discernible
+W1877366237_1,bad,dark frame with only Saturn limb glow and no ring features
+W1881936401_1,bad,dark frame with thin faint line and saturated corner sliver
+W1881937543_1,bad,black frame with tiny saturated sliver in corner
+W1882017920_1,bad,smeared streaky frame with no sharp ring features
+W1882018459_1,bad,smeared streaky frame with no sharp ring features
+W1882018531_1,bad,completely black featureless frame
+W1882018555_1,bad,blown-out white frame with jagged saturation artifacts
+W1882018572_1,bad,saturated white frame with diffuse cloud patches and no ring features
+W1882018589_1,bad,heavy saturation and smeared streaks hide any ring structure
+W1882041721_1,marginal,edge-on ring strip with sharp linear edges but dominating atmosphere backdrop
+W1882041793_1,bad,frame entirely black
+W1882041817_1,marginal,edge-on ring strip and shadow lane distinct but atmosphere dominates
+W1882042260_1,bad,heavily smeared with only blurred vertical band
+W1882042332_1,bad,completely black featureless frame
+W1882042356_1,bad,frame mostly blown white and ring stripe faint
+W1882042373_1,bad,saturated white frame with smeared reddish patches only
+W1882042390_1,marginal,ring strip and shadow edges visible but large areas saturated
+W1882042414_1,bad,frame almost entirely white with one small dark blob
+W1882042446_1,bad,frame entirely black
+W1882052460_1,bad,heavily smeared with only blurred vertical band
+W1882052532_1,bad,completely black featureless frame
+W1882052556_1,marginal,bright edge-on ring strip with dark lane against mottled disk
+W1882052573_1,bad,washed-out white frame with weak diffuse band only
+W1882052590_1,marginal,ring strip and dark lane discernible amid saturated background
+W1882052614_1,bad,white saturated frame with only speckle blobs
+W1882052646_1,bad,frame entirely black
+W1883585911_1,marginal,faint ring striations at right while disk dominates
+W1883585928_1,marginal,dark ring striations at right while bright disk dominates
+W1883585946_1,marginal,ring striations at right but low contrast and disk dominates
+W1883585978_1,marginal,ring band saturated white with washed-out striations
+W1883611779_1,good,sharp ring bands and distinct gap edges with strong contrast

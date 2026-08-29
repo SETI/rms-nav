@@ -174,3 +174,6 @@ tests/integration/sim_sweeps/results/
 
 # convenience symlink to .venv (local only)
 /venv
+
+# ring-curation intermediate (regenerable via make_shortlist.py pool)
+util/ring_curation/pool.csv
