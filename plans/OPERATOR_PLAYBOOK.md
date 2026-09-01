@@ -132,11 +132,12 @@ instrument.
    no `expected.*` field is moved to match current behavior.
 
 **Group 2 — the coarse-lock family.** One family, best done as one campaign:
-**#504** (the pooled inlier veto discarding correct B-ring fits), **#476**
-(RingEdgeNav re-locking under a planted shift), **#346** (three frames locked
-onto the wrong ring feature) and **#373** (the coarse seed against competing
-edge populations). These gate the Track A study, which consumes ensemble
-output at scale.
+**#476** (RingEdgeNav re-locking under a planted shift), **#346** (three
+frames locked onto the wrong ring feature) and **#373** (the coarse seed
+against competing edge populations). These gate the Track A study, which
+consumes ensemble output at scale. The Saturn routing decision (annulus
+composite at and above 25 km/px radial resolution, per-edge fit below)
+reduces the family's exposure to the sub-25 km/px regime.
 
 **Group 3 — parallel fill, any order, any number at once.**
 
@@ -193,7 +194,7 @@ closes.
 | N1853392805 (highly-irregular exclusion discards the terminator fit) | #338 |
 | N1484593951, N1686349893 (resolved-body ~2 px offset misses) | #350 |
 | N1487595731_1 (multi_body: expects BodyDiscCorrelateNav primary, gets BodyLimbNav) | #483 |
-| N1633925572_1 (ring_plus_body: expects the medium tier, gets low) | #504 / #476 |
+| N1633925572_1 (ring_plus_body: expects the medium tier, gets low) | #476 |
 
 **After any navigation-affecting merge, compare against `main` rather than
 against the table:**
@@ -360,10 +361,10 @@ Independent review before done; all CI gates; one PR."
   reconstructed Cassini kernels, with an orphan branch behind it) and #468
   (the New Horizons pointing family) are operator decisions, not
   dispatchable work — Section 0.1.
-- **Navigation correctness, in order**: #504 (RingEdgeNav's pooled inlier-fraction
-  veto discards correct ring fits on real B-ring scenes) and #476 (RingEdgeNav
-  re-locks onto the wrong ring edge under a planted shift), which belong
-  with #346 and #373 as one coarse-lock family. `N1633925572_1_CALIB` is the
+- **Navigation correctness, in order**: #476 (RingEdgeNav
+  re-locks onto the wrong ring edge under a planted shift), which belongs
+  with #346 and #373 as one coarse-lock family, now scoped to sub-25 km/px
+  Saturn scenes by the routing decision. `N1633925572_1_CALIB` is the
   cleanest reproducer in the library: two techniques agree to 0.08 px while
   RingEdgeNav lands 39 px away on 6.7% of its points, so a fix is verifiable
   without operator adjudication and the frame's tier returns on its own.
@@ -464,11 +465,8 @@ deferred until an instrument fits rotation again; a test fails if one does.
 - **#476** RingEdgeNav is not shift-equivariant: a planted shift re-locks it
   onto the wrong ring edge — the same coarse-lock family as #346 and #373,
   seen from the round-trip side; measured as an alias lattice that polarity
-  does not break, so it waits on #373
-- **#504** RingEdgeNav's pooled inlier-fraction veto discards *correct* ring
-  fits on real B-ring scenes, so the cost appears as a smaller cohort rather
-  than as a failure; the cause is a residual scale finer than the evidence,
-  and what remains is telling correct fits from aliased ones
+  does not break, so it waits on #373; exposure is limited to sub-25 km/px
+  Saturn scenes by the routing decision
 - **#482** BodyDiscCorrelateNav misses by up to ~1 px on a weakly-constrained
   axis, the residual left after PR #484 closes #447
 - **#394** shape-lock veto suppression trusts a star fix that could itself be

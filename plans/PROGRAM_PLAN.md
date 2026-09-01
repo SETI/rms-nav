@@ -232,19 +232,19 @@ The known open defects:
 
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature. Standing library reds.
-- **#504** — RingEdgeNav's pooled inlier-fraction veto discards correct ring
-  fits on real B-ring scenes: a veto that fires on good answers costs
-  coverage in exactly the scene class the Saturn cohorts are made of. Its
-  cause is settled -- the fit used a catalog sigma a hundred times finer
-  than the binary edge mask it measures against, so the robust weighting
-  read sub-pixel phase instead of model agreement -- and repairing that
-  takes the 71-image B-ring cohort from 15 navigations to 68. Separating
-  the correct fits from the aliased ones remains open and needs #373.
+  Exposure is reduced to sub-25 km/px Saturn scenes by the ring routing
+  decision: at and above 25 km/px radial resolution the whole Saturn system
+  feeds the annulus composite, which a 131-frame clean-truth head-to-head
+  measured wrong on zero accepted answers while the per-edge fit ran
+  5% / 13% / 56% / 100% wrong-when-accepted in the 0-25 / 25-100 /
+  100-300 / 300-1000 km/px bands.
+  The annulus-gate recalibration (accepting more of its correct answers)
+  and a correlation-picks-basin / edge-polishes hybrid remain future work.
 - **#476** — RingEdgeNav is not shift-equivariant either: a planted shift
   re-locks onto the wrong ring edge. Same family as #346 and #373 seen
   from the round-trip side; the coarse score surface is an alias lattice
   whose members score within 1 % of each other, and polarity does not
-  separate them.
+  separate them. Same reduced sub-25 km/px exposure as #346.
 - **#482** — BodyDiscCorrelateNav misses by up to ~1 px on a
   weakly-constrained axis. The residual left after the shift-equivariance
   fix (#447) closes the coarse-grid and boundary-pinning halves.
@@ -301,7 +301,7 @@ The known open defects:
   mergeable and green, and it is fifty commits behind `main`.
 
 **Parallelism:** parallel with Track A, except that the coarse-lock family
-(#346, #476, #504) gates the agreement study -- a technique that reports a
+(#346, #476) gates the agreement study -- a technique that reports a
 confidently wrong answer moves the cross-technique disagreement WS-1 measures
 -- and #288 gates reading any Track A cohort with confidence.
 
@@ -577,27 +577,27 @@ library votes and the decision gates, not by any implementation.
 
 ## 7. Issue index (open work by track)
 
-Every open issue, listed exactly once by the track that owns it. 241 issues
-as of 2026-08-27; the counts are given so a reader can tell a stale index
+Every open issue, listed exactly once by the track that owns it. 240 issues
+as of 2026-08-31; the counts are given so a reader can tell a stale index
 from a current one at a glance.
 
 | Track | Count | Issues |
 |---|---|---|
 | A — validation & calibration | 51 | #84, #153, #172, #174, #176, #223, #225, #226, #227, #229, #230, #232, #233, #234, #235, #290, #309, #310, #311, #316, #319, #321, #322, #324, #325, #329, #330, #331, #332, #333, #334, #335, #336, #341, #342, #343, #344, #345, #355, #358, #359, #360, #361, #377, #380, #399, #405, #407, #409, #426, #561 |
-| B — navigation correctness | 24 | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #447, #476, #482, #504, #521, #557, #558 |
+| B — navigation correctness | 23 | #25, #128, #130, #150, #239, #282, #283, #338, #346, #350, #373, #394, #400, #401, #402, #403, #404, #447, #476, #482, #521, #557, #558 |
 | C — statistics & QA | 4 | #240, #340, #533, #535 (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | 73 | #28, #30, #47, #53, #54, #55, #57, #63, #66, #67, #69, #71, #72, #73, #74, #75, #76, #77, #79, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #433, #434, #435, #436, #437, #440, #444, #448, #455, #459, #462, #464, #465, #466, #467, #468, #472, #486, #493, #495, #496, #497, #501, #512, #513, #514, #515, #519, #520, #528, #531, #534, #536, #538, #540, #541, #542 |
 | E — test & docs debt | 27 | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446, #470, #471, #473, #483, #516, #524, #525, #530, #545, #547, #548, #549, #554, #562 |
 | F — instruments, features, hardening | 62 | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428, #494, #518, #552 |
 
-Priority census across all six tracks: no Critical, 21 Essential, 65
+Priority census across all six tracks: no Critical, 20 Essential, 65
 Important, 108 Useful, 35 Minor, 12 Defer. Every open issue carries exactly
 one Priority and one Effort label and at least one each of A-type and
 B-location.
 
 Cross-listed items (listed once above, noted here): #150/#128 sit in Track B
 and also serve Track A's limb-bias workstream (WS-10); the confident-wrong
-ring-lock family (#346, #476, #504) sits in Track B but gates the Track A
+ring-lock family (#346, #476) sits in Track B but gates the Track A
 study; #103/#134/#126 serve both Track D performance and Track F
 hardening; #513 and #520 are results-index work in Track D that lands in the kernel
 writer and the reprojection package respectively; #521 is a kernel-facing

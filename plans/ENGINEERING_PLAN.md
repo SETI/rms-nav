@@ -172,44 +172,34 @@ private helper in #564. What it filed rather than fixed: RingEdgeNav is not
 shift-equivariant either and a planted shift re-locks it onto the wrong ring
 edge (#476, same family as #346 and #373 seen from the round-trip side, and
 now measured down to an alias lattice whose members score within 1 % of each
-other and which polarity does not separate); `BodyDiscCorrelateNav` still misses by
+other and which polarity does not separate -- with exposure reduced to
+sub-25 km/px Saturn scenes now that coarser ones route to the annulus
+composite); `BodyDiscCorrelateNav` still misses by
 up to ~1 px on a weakly-constrained axis (#482); and the library pins the fix
 moves need re-ratcheting (#483, which cannot be done honestly until #288 is
 reconciled).
 
-### #504 — RingEdgeNav's pooled inlier-fraction veto
+### The ring routing decision, and #346 — the remaining confident-wrong ring-lock
 
-The veto discards correct ring fits on real B-ring scenes. A veto that fires
-on good answers costs coverage in exactly the scene class the Saturn cohorts
-are made of, and it does so silently, so the cost does not appear as a
-failure anywhere -- it appears as a smaller cohort.
-
-Its cause is settled: `RingEdgeNav` used each vertex's catalog radial sigma
-as the residual scale of its robust fit, and on a low-resolution ring frame
-that sigma is a thousandth of a pixel while the evidence is a binary edge
-mask quantized to the integer grid. The Tukey redescender could then keep
-only the vertices sitting exactly on a mask pixel, so the fit never left its
-integer coarse seed, the gradient-ridge pass had nothing it was allowed to
-move, the reported sigma was not an uncertainty, and the fraction the veto
-read counted sub-pixel phase rather than model agreement. Combining the two
-uncertainties in quadrature takes the 71-image B-ring cohort from 15
-navigations (5 within 2 px of the bundle's published pointing) to 68 (28
-within 2 px).
-
-What remains open is the half the issue actually asks for: *separating* the
-correct fits from the aliased ones. Nine candidate discriminators were
-measured against two independently labelled sets -- the B-ring cohort against
-published pointing, the ring-class library frames against sidecar ground
-truth -- and every statistic that separates within one set inverts on the
-other, because an alignment one ringlet spacing away still puts most of the
-model on an image edge. That is an acquisition problem, so #504's remaining
-half and #476 both wait on #373 rather than on any post-fit statistic.
-
-### #346 — the remaining confident-wrong ring-lock
+Ring routing for Saturn is decided and shipped: every scene at or above
+25 km/px radial resolution feeds the annulus composite
+(`feature_emission.ring_annulus.planets.SATURN.kmpp_threshold`), and the
+per-edge DT fit receives only sub-25 km/px scenes. The basis is a 131-frame
+clean-truth head-to-head (operator-audited, bundle defect lists applied)
+that measured the edge fit wrong-when-accepted at 5% / 13% / 56% / 100% in
+the 0-25 / 25-100 / 100-300 / 300-1000 km/px bands while the annulus fit was
+wrong on zero accepted answers at every band: the edge fit mislocks onto the
+ring alias lattice, which the annulus's rendered-brightness template
+disambiguates. The threshold is Saturn-measured only. Two follow-ons remain
+future work: recalibrating the annulus gates so more of its correct answers
+are accepted (today they veto many right answers, which costs coverage, not
+correctness), and a hybrid in which the correlation fit picks the basin and
+the edge fit polishes within it.
 
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature; standing library reds, tied
-  to the coarse-lock calibration (#373).
+  to the coarse-lock calibration (#373). Exposure is reduced to the
+  sub-25 km/px regime by the routing decision above.
 
 ### #350 — post-recalibration resolved-body red
 
