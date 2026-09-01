@@ -606,6 +606,31 @@ techniques:
       spurious_waiver_sigma_floor_px: 3.0
       # See ``BodyLimbNav.spurious_max_lm_displacement_px``.
       spurious_max_lm_displacement_px: 4.0
+      # Localization sigma (px) of the image edge the fit measures
+      # against, added in quadrature to each vertex's model sigma to form
+      # the residual scale the robust fit actually uses.
+      #
+      # A ring edge's model sigma is its catalog radial uncertainty
+      # divided by the radial km/px, and ring orbits are solved to a
+      # fraction of a km while a WAC pixel spans ~100 km, so that sigma
+      # routinely lands at 0.001 px.  The evidence cannot support such a
+      # scale: the fit measures distance to a BINARY edge mask, whose
+      # distance transform is quantized to the integer pixel grid.  With
+      # a 0.001 px scale the Tukey redescender's rejection radius is
+      # 4.685 * 0.001 = 0.005 px, so the only vertices it keeps are the
+      # ones sitting exactly on a mask pixel (DT == 0), which is
+      # reachable only at an integer offset.  The fit then never leaves
+      # the integer coarse-NCC seed, reports a sub-milli-pixel sigma
+      # that is not an uncertainty, and hands the inlier-fraction gate a
+      # fraction that counts pixel phase rather than model agreement.
+      #
+      # Half a pixel is the half-cell of the mask's own quantization,
+      # which is the floor on how well a binary mask can place an edge.
+      # Only RingEdgeNav declares this: BodyLimbNav and
+      # BodyTerminatorNav derive their per-vertex sigmas from body shape
+      # and pole uncertainty, which measure 0.5 to 3 px on real frames
+      # and so already exceed what the mask can resolve.
+      edge_localization_sigma_px: 0.5
       # See ``BodyLimbNav.lm_trust_region_px``.
       lm_trust_region_px: 1.0
       # See ``BodyLimbNav.lm_tikhonov_alpha``.
@@ -1170,12 +1195,34 @@ feature_emission:
       kmpp_threshold: 1000.0
     planets:
       SATURN:
-        # Saturn's main rings span ~75000-140000 km (~65000 km wide).
-        # At km/px > 1000 the entire system is < 65 px wide and
-        # individual edges within rings (gaps, ringlets) are sub-pixel
-        # apart — annulus path wins.
+        # At or above 25 km/px radial resolution the whole Saturn
+        # system routes to the RING_ANNULUS composite (the rendered-brightness
+        # NCC fit); the per-edge DT fit receives only sub-25 km/px
+        # scenes.  Measured, not geometric: a 131-frame clean-truth
+        # head-to-head (operator-audited, bundle defect lists applied)
+        # put the per-edge fit's wrong-when-accepted rate at 5% / 13% /
+        # 56% / 100% in the 300-1000 / 100-300 / 25-100 / 0-25 km/px
+        # bands, while the annulus fit was wrong on zero accepted
+        # answers at every band -- so the annulus route covers the
+        # regimes that comparison validates, everything at or above
+        # 25 km/px.  The per-edge
+        # fit degrades toward FINE resolution: as resolution improves,
+        # the ring alias lattice resolves -- many similar concentric
+        # ringlet edges separate into distinct image edges -- and the
+        # shape-only DT fit locks onto the wrong one, which the
+        # rendered-brightness template disambiguates because relative
+        # ring brightness is part of the match.  Below 25 km/px the
+        # trustworthy evidence is three frames on which NEITHER
+        # technique is validated (the edge path re-locks
+        # catastrophically on all three; the annulus near-misses twice
+        # and fails once), so the threshold stops where the evidence
+        # stops, not where the edge fit is known good; the sub-25
+        # confident-wrong exposure remains open (#346, #476).  This
+        # threshold is Saturn-measured only; the default and other
+        # planets' entries keep their geometric values because no
+        # equivalent measurement exists for them.
         max_radial_px: 5.0
-        kmpp_threshold: 1000.0
+        kmpp_threshold: 25.0
       JUPITER:
         # Jupiter's main ring spans ~122500-129000 km (~6500 km wide,
         # ~10x narrower than Saturn).  Lower kmpp threshold so

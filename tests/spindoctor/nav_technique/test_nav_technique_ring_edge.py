@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 from tests.spindoctor.nav_technique.conftest import (
@@ -1154,3 +1156,132 @@ def test_ring_edge_nav_healthy_scene_clears_the_coarse_gate(
     assert isinstance(result.diagnostics, RingEdgeDiagnostics)
     assert result.diagnostics.coarse_peak_fraction > 0.05
     assert result.spurious is False
+
+
+def test_ring_edge_nav_fits_sub_pixel_when_the_model_sigma_is_tiny(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A catalog sigma far below a pixel does not collapse the robust scale.
+
+    Ring orbits are solved to a fraction of a km, so on a coarse frame an
+    edge's per-vertex sigma is thousandths of a pixel.  The fit measures
+    distance to a binary edge mask quantized to the integer grid, so a
+    residual scale that small leaves the Tukey redescender keeping only the
+    vertices sitting exactly on a mask pixel -- reachable only at an integer
+    offset.  Combining the catalog sigma with the mask's own localization
+    scale keeps the sub-pixel plant recoverable.
+    """
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 32.0)
+    vertices, outward = circle_polyline((100.0 - 0.4, 100.0 + 0.6), 32.0, 120)
+    feature = make_ring_feature(
+        'outer',
+        vertices=vertices,
+        outward_normals=outward,
+        is_straight_line=False,
+        sigma_radial_px=0.001,
+    )
+    result = RingEdgeNav().navigate([feature], make_nav_context(image))
+    assert result.offset_px[0] == pytest.approx(0.4, abs=0.05)
+    assert result.offset_px[1] == pytest.approx(-0.6, abs=0.05)
+    assert result.spurious is False
+
+
+def test_ring_edge_nav_answer_does_not_depend_on_a_sub_mask_catalog_sigma(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """Shrinking the catalog sigma below the mask scale changes nothing.
+
+    The same scene fitted with a 0.5 px catalog sigma and with a 0.001 px one
+    must return the same offset and a comparable reported sigma: below the
+    mask's own localization scale the catalog number carries no information
+    the evidence can support, so it must not move either the answer or the
+    uncertainty claimed for it.
+    """
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 32.0)
+    vertices, outward = circle_polyline((100.0 - 0.4, 100.0 + 0.6), 32.0, 120)
+    context = make_nav_context(image)
+    results = []
+    for sigma_radial_px in (0.5, 0.001):
+        feature = make_ring_feature(
+            'outer',
+            vertices=vertices,
+            outward_normals=outward,
+            is_straight_line=False,
+            sigma_radial_px=sigma_radial_px,
+        )
+        results.append(RingEdgeNav().navigate([feature], context))
+    coarse, fine = results
+    assert fine.offset_px[0] == pytest.approx(coarse.offset_px[0], abs=0.01)
+    assert fine.offset_px[1] == pytest.approx(coarse.offset_px[1], abs=0.01)
+    sigma_coarse = float(np.sqrt(coarse.covariance_px2[0, 0]))
+    sigma_fine = float(np.sqrt(fine.covariance_px2[0, 0]))
+    assert sigma_fine == pytest.approx(sigma_coarse, rel=0.5)
+
+
+def test_ring_edge_nav_rejects_a_negative_edge_localization_sigma(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A negative localization sigma fails at construction, not silently.
+
+    ``hypot`` squares its arguments, so a negative value would behave as its
+    absolute value and the misconfiguration would never surface.
+    """
+    bad_tuning = dict(RingEdgeNav.tuning)
+    bad_tuning['edge_localization_sigma_px'] = -0.5
+    monkeypatch.setattr(RingEdgeNav, 'tuning', bad_tuning)
+    with pytest.raises(ValueError, match='edge_localization_sigma_px must be a finite number > 0'):
+        RingEdgeNav()
+
+
+def test_ring_edge_nav_rejects_a_zero_edge_localization_sigma(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A zero localization sigma fails at construction.
+
+    Zero is physically meaningless against a half-pixel-quantized edge mask
+    and lets a zero catalog sigma reach the LM refine as a zero residual
+    scale.
+    """
+    bad_tuning = dict(RingEdgeNav.tuning)
+    bad_tuning['edge_localization_sigma_px'] = 0.0
+    monkeypatch.setattr(RingEdgeNav, 'tuning', bad_tuning)
+    with pytest.raises(ValueError, match='edge_localization_sigma_px must be a finite number > 0'):
+        RingEdgeNav()
+
+
+def test_ring_edge_nav_rejects_a_null_edge_localization_sigma(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-numeric localization sigma (YAML null) raises ValueError.
+
+    The error names the config key rather than surfacing as a bare
+    ``TypeError`` from ``float(None)`` far from the config that caused it.
+    """
+    bad_tuning: dict[str, Any] = dict(RingEdgeNav.tuning)
+    bad_tuning['edge_localization_sigma_px'] = None
+    monkeypatch.setattr(RingEdgeNav, 'tuning', bad_tuning)
+    with pytest.raises(ValueError, match='edge_localization_sigma_px must be a finite number > 0'):
+        RingEdgeNav()
+
+
+def test_ring_edge_nav_rejects_an_overflowing_edge_localization_sigma(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An int too large for a float raises ValueError naming the key.
+
+    ``float()`` raises ``OverflowError`` for such an int, which would
+    otherwise escape the documented ValueError contract.
+    """
+    bad_tuning: dict[str, Any] = dict(RingEdgeNav.tuning)
+    bad_tuning['edge_localization_sigma_px'] = 10**10000
+    monkeypatch.setattr(RingEdgeNav, 'tuning', bad_tuning)
+    with pytest.raises(ValueError, match='edge_localization_sigma_px must be a finite number > 0'):
+        RingEdgeNav()

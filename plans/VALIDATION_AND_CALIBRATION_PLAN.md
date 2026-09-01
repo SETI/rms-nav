@@ -485,7 +485,7 @@ need.
 workstream's product is cross-technique *disagreement*, and a technique that
 reports a confidently wrong answer contributes a disagreement that is a property of
 the defect rather than of the scene. The confidently-wrong ring locks
-(#346, #476, #504) are the known case: on `N1633925572_1_CALIB`, measured 2026-08-26, a body fit
+(#346, #476) are the known case: on `N1633925572_1_CALIB`, measured 2026-08-26, a body fit
 and a star fit agree to 0.08 px while `RingEdgeNav` converges 39 px away on 452 of
 6786 inliers, is not flagged spurious, and enters the combine. Feeding that frame to
 this workstream does not merely add noise -- it moves the anchor WS-5 then
