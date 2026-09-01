@@ -29,6 +29,27 @@ non-empty edge is sufficient — even an all-flat scene produces a useful rank-1
 Feasibility fails when every offered ``RING_EDGE`` is empty (a ring system entirely outside the
 extended FOV or below the per-pixel resolution threshold).
 
+Which scenes reach this technique is decided upstream, by the rings model's per-planet
+km/px threshold (``feature_emission.ring_annulus.planets.SATURN.kmpp_threshold``): for
+Saturn, only scenes finer than 25 km/px radial resolution emit ``RING_EDGE`` features at
+all, and everything at or above that routes to the
+:doc:`annulus composite <dev_guide_techniques_ring_annulus>` instead. The routing is
+measured, not geometric. A 131-frame clean-truth head-to-head put this technique's
+wrong-when-accepted rate at 5% / 13% / 56% / 100% in the 300-1000 / 100-300 / 25-100 /
+0-25 km/px bands while the annulus fit was wrong on zero accepted answers at every band.
+The annulus route covers the regimes that comparison validates -- everything at or above
+25 km/px. The degradation toward fine resolution is the ring alias lattice: as resolution
+improves, many similar concentric ringlet edges separate into distinct image edges, and a
+distance-transform fit against edge shape alone can lock onto the wrong one, while the
+annulus's rendered-brightness template disambiguates the lattice because relative ring
+brightness is part of the match. The 0-25 km/px band's own numbers set the boundary
+rather than claim superiority for either side there: its trustworthy evidence is three
+frames on which neither technique is validated -- the edge path re-locked catastrophically
+on all three (the 100% above), the annulus near-missed twice and failed once -- so the
+threshold marks the bottom of the measured regime, not a regime where this technique is
+known good, and a sub-25 km/px ring-edge answer still carries the known wrong-lock
+exposure.
+
 Theory
 ======
 
@@ -36,6 +57,39 @@ The technique fits a per-image translation by minimising the weighted squared di
 the model ring-edge polylines to the image edges, exactly as the limb fit does — see
 :doc:`dev_guide_techniques_dt_fitting` for the cost function, the LM mechanics, and the
 Tukey biweight (the polarity filter is disabled for ring edges; see below).
+
+The residual scale
+------------------
+
+The robust fit needs a scale for its residuals, and that residual is the distance from a
+model vertex to the nearest *image* edge -- so its scale carries two uncertainties, not
+one. The first is the catalog's: each vertex's ``sigma_radial_per_vertex_px`` is the ring
+edge's radial uncertainty in km divided by the frame's radial km/px. The second is the
+evidence's: the fit measures against a *binary* edge mask, whose distance transform is
+quantized to the integer pixel grid, so half a pixel is the floor on how precisely that
+mask can place an edge at all.
+
+The two are on very different footings for rings. Ring orbits are solved to a fraction of
+a km while a Cassini WAC pixel spans of order 100 km, so the catalog term routinely lands
+at 0.001 px -- a hundred times finer than the evidence can resolve. Used alone it is not
+a residual scale but a claim the measurement cannot support, and the consequences are
+mechanical: the Tukey redescender's rejection radius becomes
+:math:`4.685 \times 0.001 = 0.005` px, so the only vertices it keeps are the ones sitting
+exactly on a mask pixel where the DT is zero. That set is reachable only at an integer
+offset, so the fit never leaves its integer coarse-NCC seed, the gradient-ridge pass finds
+no vertex it is allowed to move, the reported sigma comes back in the thousandths of a
+pixel, and the inlier fraction the spurious gate reads measures sub-pixel phase rather
+than model agreement.
+
+The technique therefore combines the two in quadrature before fitting: the per-vertex
+scale is :math:`\sqrt{\sigma_{\mathrm{catalog}}^{2} + \sigma_{\mathrm{edge}}^{2}}` with
+:math:`\sigma_{\mathrm{edge}}` the configured ``edge_localization_sigma_px``. Where the
+catalog sigma already exceeds the mask scale the term is nearly inert; where it falls far
+below, the scale becomes the mask's own and the fit measures what the image can actually
+tell it. Only ``RingEdgeNav`` declares the term: ``BodyLimbNav`` and
+``BodyTerminatorNav`` derive their per-vertex sigmas from body shape and pole
+uncertainty, which run from about half a pixel to three pixels on real frames and so
+already sit above what the mask resolves.
 
 Rank-deficient covariance
 -------------------------
@@ -203,9 +257,21 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
   M-estimator covariance is uninformative; the result is flagged spurious.
 - ``spurious_min_inlier_fraction`` — float, default ``0.5`` (dimensionless). A Tukey inlier
   fraction (inliers over aggregated model vertices) below this marks the result spurious.
-  This is the wrong-ringlet mis-convergence detector: a fit locked onto the wrong ring
-  anchors a minority of the model vertices, while a correct fit whose faintest edge is
-  simply undetectable in the image still anchors a large majority.
+  It catches a fit that explains almost none of its model: one anchored on a handful of
+  vertices while the rest sit nowhere near a detected edge.
+
+  It does not separate a correct fit from one locked onto the wrong member of a
+  concentric family. Measured over 71 Cassini B-ring frames with independently published
+  pointing, with the inlier fractions computed under the corrected residual scale
+  described in `The residual scale`_: fits landing within 2 px of that pointing and fits
+  missing it by more than 5 px both run inlier fractions from roughly 0.3 to 0.95,
+  overlapping across the whole range: an alignment one ringlet spacing away still puts
+  most of the model on *an* image edge, which is what makes the family aliased in the
+  first place. The truth source for that measurement is bundle-published pointing
+  predating the pointing-defect audit, which supports right-versus-wrong classification
+  at the couple-of-pixel level only (about a fifth of unfiltered bundle pointing was
+  later found unrefined); the overlap conclusion survives that coarseness. Distinguishing
+  the two is an acquisition problem, not something the converged fit's residuals record.
 - **Absent-edge waiver.** In a multi-edge fusion, a low aggregate inlier fraction can be
   fully explained by an edge that is *absent* from the image (a faint edge nothing in the
   frame can match) rather than *misaligned* (a wrong-ring lock). The two are separable by
@@ -232,6 +298,12 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
   can offer alias alignments the DT cannot rule out; the floor sits above the medium
   tier's 2 px sigma cap so a waived fit surfaces as a low-tier result and cannot outweigh
   a full-support fit in the ensemble.
+- ``edge_localization_sigma_px`` — float, default ``0.5`` px. Localization sigma of the
+  image edge the fit measures against, combined in quadrature with each vertex's catalog
+  sigma to form the residual scale the robust fit uses. Half a pixel is the half-cell of
+  the binary edge mask's own quantization. See `The residual scale`_ for why a ring's
+  catalog sigma alone is not a usable scale. Must be a finite number greater than zero;
+  construction raises otherwise.
 - ``spurious_max_lm_displacement_px`` — float, default ``4.0`` px. If the LM moves more
   than this many pixels from the integer coarse-NCC seed, flag spurious. Defensive: with
   the trust region below the LM cannot leave the coarse basin, so this guard normally
@@ -245,10 +317,11 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
 - ``gradient_ridge_refine`` — int flag, default ``1`` (ON). Final continuous
   gradient-ridge sub-pixel refinement after the DT LM converges. The binary edge mask
   quantises detected edges to the integer pixel grid, so on dense real ring scenes many
-  model vertices land exactly on edge pixels (DT of zero, zero gradient) and the DT-LM
-  step stalls at the integer coarse-NCC seed; the continuous pass refines against the
-  un-thresholded gradient magnitude, recovering the sub-pixel offset the quantized DT
-  discards.
+  model vertices land exactly on edge pixels, where the DT is zero and carries no
+  gradient to step along; the continuous pass refines against the un-thresholded gradient
+  magnitude, recovering the sub-pixel offset the quantized DT discards. The pass shares
+  the fit's residual scale, so it moves nothing while that scale is below the mask's own
+  localization -- see `The residual scale`_.
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
   converged rotation magnitude trips

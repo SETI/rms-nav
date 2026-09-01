@@ -21,7 +21,7 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-Ordering within the track: the confidently-wrong defects (#346, #504, #476, #350), because the agreement study consumes
+Ordering within the track: the confidently-wrong defects (#346, #476, #350), because the agreement study consumes
 ensemble output at scale and several curated library frames pin these as
 standing red regressions. Then the coarse-lock calibration (#373), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
@@ -167,27 +167,46 @@ where the upsampled-DFT refinement argmax lands on the window boundary and
 the old code reported a pinned +-0.5 px.
 
 The PR is green, mergeable, and fifty commits behind `main`. What it filed
-rather than fixed: RingEdgeNav is not shift-equivariant either and a planted
-shift re-locks it onto the wrong ring edge (#476, same family as #346
-and #373 seen from the round-trip side); `BodyDiscCorrelateNav` still misses by
+rather than fixed: RingEdgeNav is not
+shift-equivariant either and a planted shift re-locks it onto the wrong ring
+edge (#476, same family as #346 and #373 seen from the round-trip side, and
+now measured down to an alias lattice whose members score within 1% of each
+other and which polarity does not separate -- with exposure reduced to
+sub-25 km/px Saturn scenes now that coarser ones route to the annulus
+composite); `BodyDiscCorrelateNav` still misses by
 up to ~1 px on a weakly-constrained axis (#482); and the library pins the fix
 moves need re-ratcheting (#483, which cannot be done honestly until #288 is
 reconciled).
 
-### #504 — RingEdgeNav's pooled inlier-fraction veto
+### The ring routing decision, and #346 — the remaining confident-wrong ring-lock
 
-The veto discards correct ring fits on real B-ring scenes. A veto that fires
-on good answers costs coverage in exactly the scene class the Saturn cohorts
-are made of, and it does so silently, so the cost does not appear as a
-failure anywhere -- it appears as a smaller cohort. Essential, and it
-interacts with #346/#373/#476: the same coarse-lock weakness that produces
-wrong locks is what the veto is compensating for.
-
-### #346 — the remaining confident-wrong ring-lock
+Ring routing for Saturn is decided and shipped: every scene at or above
+25 km/px radial resolution feeds the annulus composite
+(`feature_emission.ring_annulus.planets.SATURN.kmpp_threshold`), and the
+per-edge DT fit receives only sub-25 km/px scenes. The basis is a 131-frame
+clean-truth head-to-head (operator-audited, bundle defect lists applied)
+that measured the edge fit wrong-when-accepted at 5% / 13% / 56% / 100% in
+the 300-1000 / 100-300 / 25-100 / 0-25 km/px bands while the annulus fit was
+wrong on zero accepted answers at every band, so the annulus route covers the
+regimes that comparison validates, everything at or above 25 km/px. The edge
+fit degrades toward fine
+resolution, where the ring alias lattice resolves into many distinct similar
+concentric edges and the shape-only fit locks the wrong one -- which the
+rendered-brightness template disambiguates. Below 25 km/px the trustworthy
+evidence is three frames on which neither technique is validated (the edge
+path re-locks catastrophically on all three; the annulus near-misses twice
+and fails once), so the threshold stops where the evidence stops and the
+sub-25 confident-wrong exposure stays open under #346/#476. The threshold is
+Saturn-measured only. Two follow-ons are filed: recalibrating the annulus
+gates so more of its correct answers are accepted (#566 -- today they veto
+many right answers, which costs coverage, not correctness), and a hybrid in
+which the correlation fit picks the basin and the edge fit polishes within
+it (#567).
 
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature; standing library reds, tied
-  to the coarse-lock calibration (#373).
+  to the coarse-lock calibration (#373). Exposure is reduced to the
+  sub-25 km/px regime by the routing decision above.
 
 ### #350 — post-recalibration resolved-body red
 

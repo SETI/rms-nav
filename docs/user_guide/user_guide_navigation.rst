@@ -867,28 +867,42 @@ honest rank-deficient covariance; the ensemble combine fuses it with any
 orthogonal-axis result (a star, body limb, body blob) before declaring a
 final answer.
 
-Best for: scenes containing bright ring edges (typical Cassini ISS
-Saturn-rings imagery).
+Best for: close-range ring scenes.  For Saturn the rings model emits
+per-edge features only below 25 km/px radial resolution and routes
+everything coarser to ``RingAnnulusNav``, which a 131-frame
+operator-audited head-to-head measured wrong on zero accepted answers
+in every resolution band it was measured.  At fine resolution the
+ring's many similar concentric ringlet edges resolve individually and
+a shape-only edge fit can lock onto the wrong one, and below 25 km/px
+neither ring technique is yet validated at scale, so a sub-25 km/px
+ring-edge answer that no other technique corroborates warrants care.
 
 ``RingAnnulusNav``
 ^^^^^^^^^^^^^^^^^^
 
 Pyramid-NCC fit on every ``RING_ANNULUS`` feature.  ``RING_ANNULUS``
-features are emitted by the rings model in two regimes: when adjacent
-ring edges compress radially below the per-planet
+features are emitted by the rings model in two regimes: when a curved
+(non-straight) ring edge compresses radially to at most the per-planet
 ``feature_emission.ring_annulus.max_radial_px`` threshold in
-``config_510_techniques.yaml`` (individual edges no longer separable),
-and when the per-planet km/px threshold fires on a low-resolution
-ring scene where the entire ring system spans only a handful of
-pixels.  In either case the rings model collapses every surviving
-ring into a single composite annulus per planet.  Multi-planet scenes
+``config_510_techniques.yaml`` (individual edges no longer separable;
+a straight-line compressed edge stays a rank-1 ``RING_EDGE`` instead),
+and when the scene's radial resolution is at or above the per-planet
+km/px threshold -- 25 km/px for Saturn, so the whole Saturn system is
+annulus-class at that resolution and coarser.  Under the system-level
+gate every surviving ring collapses into a single composite annulus
+per planet; below it a scene can emit a mix, with ``RING_EDGE``
+features alongside one composite for the edges that compressed below
+``max_radial_px``.  Multi-planet scenes
 (rare) emit one ``RING_ANNULUS`` per ring system; the technique fuses
 them via Z-buffer paint and runs one joint NCC.
 ``use_gradient='auto'`` self-selects raw vs gradient mode per image.
 
-Best for: low-resolution ring scenes where ``RingEdgeNav`` cannot
-separate individual edges (distant Cassini ring views; potential
-NHLORRI Pluto/Charon ring geometries).
+Best for: ring scenes at or above the per-planet km/px threshold: a
+131-frame operator-audited head-to-head measured it wrong on zero
+accepted answers at every resolution band, and its
+rendered-brightness template disambiguates similar concentric edges
+that a shape-only fit can confuse (distant Cassini ring views;
+potential NHLORRI Pluto/Charon ring geometries).
 
 ``NavTechniqueManual``
 ^^^^^^^^^^^^^^^^^^^^^^

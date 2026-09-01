@@ -237,7 +237,9 @@ def test_ring_annulus_emission_params_loads_saturn_block() -> None:
     config = Config()
     max_radial_px, kmpp_threshold = _ring_annulus_emission_params(config, 'SATURN')
     assert max_radial_px == pytest.approx(5.0)
-    assert kmpp_threshold == pytest.approx(1000.0)
+    # Saturn routes every scene at or above 25 km/px radial resolution to
+    # the annulus composite; the measured basis is in the bundled YAML.
+    assert kmpp_threshold == pytest.approx(25.0)
 
 
 def test_ring_annulus_emission_params_loads_jupiter_block() -> None:
