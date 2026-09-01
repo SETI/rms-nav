@@ -21,7 +21,7 @@ fields to match current behavior.
 
 ## Track B — Navigation correctness
 
-Ordering within the track: the confidently-wrong defects (#346, #504, #476, #350), because the agreement study consumes
+Ordering within the track: the confidently-wrong defects (#346, #476, #350), because the agreement study consumes
 ensemble output at scale and several curated library frames pin these as
 standing red regressions. Then the coarse-lock calibration (#373), then the
 investigation/design items (#25, #128/#150), with the smaller decision items
@@ -166,12 +166,11 @@ and a per-axis NCC-quadratic fallback in `evaluate_candidate` for the case
 where the upsampled-DFT refinement argmax lands on the window boundary and
 the old code reported a pinned +-0.5 px.
 
-The PR is green, mergeable, and fifty commits behind `main`; its sweep tool
-no longer imports against `main`, because `apply_offset_to_obs` became a
-private helper in #564. What it filed rather than fixed: RingEdgeNav is not
+The PR is green, mergeable, and fifty commits behind `main`. What it filed
+rather than fixed: RingEdgeNav is not
 shift-equivariant either and a planted shift re-locks it onto the wrong ring
 edge (#476, same family as #346 and #373 seen from the round-trip side, and
-now measured down to an alias lattice whose members score within 1 % of each
+now measured down to an alias lattice whose members score within 1% of each
 other and which polarity does not separate -- with exposure reduced to
 sub-25 km/px Saturn scenes now that coarser ones route to the annulus
 composite); `BodyDiscCorrelateNav` still misses by
@@ -197,10 +196,11 @@ evidence is three frames on which neither technique is validated (the edge
 path re-locks catastrophically on all three; the annulus near-misses twice
 and fails once), so the threshold stops where the evidence stops and the
 sub-25 confident-wrong exposure stays open under #346/#476. The threshold is
-Saturn-measured only. Two follow-ons remain future work: recalibrating the annulus gates so more of its correct answers
-are accepted (today they veto many right answers, which costs coverage, not
-correctness), and a hybrid in which the correlation fit picks the basin and
-the edge fit polishes within it.
+Saturn-measured only. Two follow-ons are filed: recalibrating the annulus
+gates so more of its correct answers are accepted (#566 -- today they veto
+many right answers, which costs coverage, not correctness), and a hybrid in
+which the correlation fit picks the basin and the edge fit polishes within
+it (#567).
 
 - **#346** — three library frames (N1492091163, N1867601758, N1867602424)
   lock confidently onto the wrong ring feature; standing library reds, tied

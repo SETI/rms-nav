@@ -260,10 +260,15 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
 
   It does not separate a correct fit from one locked onto the wrong member of a
   concentric family. Measured over 71 Cassini B-ring frames with independently published
-  pointing, fits landing within 2 px of that pointing and fits missing it by more than
-  5 px both run inlier fractions from roughly 0.3 to 0.95, overlapping across the whole
-  range: an alignment one ringlet spacing away still puts most of the model on *an*
-  image edge, which is what makes the family aliased in the first place. Distinguishing
+  pointing, with the inlier fractions computed under the corrected residual scale
+  described in `The residual scale`_: fits landing within 2 px of that pointing and fits
+  missing it by more than 5 px both run inlier fractions from roughly 0.3 to 0.95,
+  overlapping across the whole range: an alignment one ringlet spacing away still puts
+  most of the model on *an* image edge, which is what makes the family aliased in the
+  first place. The truth source for that measurement is bundle-published pointing
+  predating the pointing-defect audit, which supports right-versus-wrong classification
+  at the couple-of-pixel level only (about a fifth of unfiltered bundle pointing was
+  later found unrefined); the overlap conclusion survives that coarseness. Distinguishing
   the two is an acquisition problem, not something the converged fit's residuals record.
 - **Absent-edge waiver.** In a multi-edge fusion, a low aggregate inlier fraction can be
   fully explained by an edge that is *absent* from the image (a faint edge nothing in the
@@ -295,7 +300,7 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
   image edge the fit measures against, combined in quadrature with each vertex's catalog
   sigma to form the residual scale the robust fit uses. Half a pixel is the half-cell of
   the binary edge mask's own quantization. See `The residual scale`_ for why a ring's
-  catalog sigma alone is not a usable scale. Must be finite and non-negative;
+  catalog sigma alone is not a usable scale. Must be a finite number greater than zero;
   construction raises otherwise.
 - ``spurious_max_lm_displacement_px`` — float, default ``4.0`` px. If the LM moves more
   than this many pixels from the integer coarse-NCC seed, flag spurious. Defensive: with

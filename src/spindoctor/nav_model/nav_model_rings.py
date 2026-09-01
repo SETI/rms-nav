@@ -661,8 +661,8 @@ class NavModelRings(NavModelRingsBase):
                     'rings.orbit_radial_sigma_correlated_fraction must be in [0, 1]; '
                     f'got {correlated_fraction!r}'
                 )
-            # System-level annulus gate: above the per-planet km/px
-            # threshold the whole ring system routes to the annulus
+            # System-level annulus gate: at or above the per-planet
+            # km/px threshold the whole ring system routes to the annulus
             # composite and every surviving feature is emitted as part
             # of it.  The threshold values and their rationale (for
             # Saturn, a measured head-to-head in which the annulus fit

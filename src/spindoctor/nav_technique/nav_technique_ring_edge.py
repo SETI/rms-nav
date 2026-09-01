@@ -146,9 +146,11 @@ class RingEdgeNav(NavTechnique):
         Raises:
             KeyError: If any tuning key is missing, so a config typo fails
                 at process startup rather than mid-image.
-            ValueError: If ``edge_localization_sigma_px`` is negative or not
-                finite, which would silently corrupt the residual scale
-                rather than fail.
+            ValueError: If ``edge_localization_sigma_px`` is not a finite
+                number greater than zero (zero is physically meaningless
+                against a half-pixel-quantized edge mask, and a
+                non-numeric value would otherwise fail far from the
+                config that caused it).
         """
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
@@ -167,13 +169,20 @@ class RingEdgeNav(NavTechnique):
         self._spurious_max_lm_displacement_px = float(
             self.tuning['spurious_max_lm_displacement_px']
         )
-        self._edge_localization_sigma_px = float(self.tuning['edge_localization_sigma_px'])
+        raw_edge_sigma = self.tuning['edge_localization_sigma_px']
+        try:
+            self._edge_localization_sigma_px = float(raw_edge_sigma)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                'RingEdgeNav.edge_localization_sigma_px must be a finite number > 0; '
+                f'got {raw_edge_sigma!r}'
+            ) from err
         if not math.isfinite(self._edge_localization_sigma_px) or (
-            self._edge_localization_sigma_px < 0.0
+            self._edge_localization_sigma_px <= 0.0
         ):
             raise ValueError(
-                'RingEdgeNav.edge_localization_sigma_px must be finite and >= 0; got '
-                f'{self._edge_localization_sigma_px!r}'
+                'RingEdgeNav.edge_localization_sigma_px must be a finite number > 0; '
+                f'got {self._edge_localization_sigma_px!r}'
             )
         self._lm_trust_region_px = float(self.tuning['lm_trust_region_px'])
         self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
@@ -355,19 +364,23 @@ class RingEdgeNav(NavTechnique):
             # the LM converges to a local minimum where one edge fits
             # cleanly and the rest are wholly mis-aligned, Tukey rejects
             # the bad-edge vertices and ``rms_px`` collapses to near
-            # zero — a textbook mis-convergence the ``rms_px > floor``
-            # threshold cannot detect (Cassini Tethys N1572471790 is the
-            # calibration case; the LM converged on the wrong ring of
-            # three, anchoring the fit on a third of the model vertices).
-            # No residual statistic separates that from a correct fit
-            # whose faintest edge simply is not detectable in the image —
-            # in both, one edge's residuals sit at the ringlet spacing
-            # (Keeler-gap ansa frames run 9-30 px; issue #203).  What does
-            # separate them is how much of the model the fit explains:
-            # the Tukey inlier fraction is ~1/3 for the wrong-ring lock
-            # and >0.8 for a correct flat fit with one undetected edge,
-            # so the gate is a minimum inlier fraction over the aggregated
-            # vertices.
+            # zero -- a mis-convergence the ``rms_px > floor`` threshold
+            # cannot detect.  The gate is therefore a minimum Tukey
+            # inlier fraction over the aggregated vertices, and it is a
+            # FLOOR against degenerate fits: one anchored on a handful
+            # of vertices while the rest of the residuals sit within
+            # scale of NO detected edge at all (Cassini Tethys
+            # N1572471790 is the historical calibration case for the
+            # floor -- the LM anchored a fit on a third of the model
+            # vertices).  With a physical residual scale the pooled
+            # fraction does NOT separate a correct fit from a lock onto
+            # the wrong member of a concentric ring family: measured
+            # over 71 Cassini B-ring frames, correct fits and
+            # wrong-member locks both run pooled inlier fractions of
+            # roughly 0.3 to 0.95, because an alignment one ringlet
+            # spacing away still puts most of the model on AN image
+            # edge.  Telling those apart is an acquisition problem, not
+            # something this gate can read from converged residuals.
             #
             # The aggregate fraction alone over-reaches on a multi-edge
             # fusion where the vertex count is dominated by edges that

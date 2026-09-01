@@ -1195,8 +1195,8 @@ feature_emission:
       kmpp_threshold: 1000.0
     planets:
       SATURN:
-        # Above 25 km/px radial resolution the whole Saturn system
-        # routes to the RING_ANNULUS composite (the rendered-brightness
+        # At or above 25 km/px radial resolution the whole Saturn
+        # system routes to the RING_ANNULUS composite (the rendered-brightness
         # NCC fit); the per-edge DT fit receives only sub-25 km/px
         # scenes.  Measured, not geometric: a 131-frame clean-truth
         # head-to-head (operator-audited, bundle defect lists applied)

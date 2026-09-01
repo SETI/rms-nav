@@ -240,12 +240,13 @@ The known open defects:
   25-100 / 0-25 km/px bands; below 25 km/px the trusted evidence is three
   frames validating neither technique, so the threshold stops where the
   measurement stops.
-  The annulus-gate recalibration (accepting more of its correct answers)
-  and a correlation-picks-basin / edge-polishes hybrid remain future work.
+  The annulus-gate recalibration (accepting more of its correct answers,
+  #566) and a correlation-picks-basin / edge-polishes hybrid (#567) are
+  filed follow-ons.
 - **#476** — RingEdgeNav is not shift-equivariant either: a planted shift
   re-locks onto the wrong ring edge. Same family as #346 and #373 seen
   from the round-trip side; the coarse score surface is an alias lattice
-  whose members score within 1 % of each other, and polarity does not
+  whose members score within 1% of each other, and polarity does not
   separate them. Same reduced sub-25 km/px exposure as #346.
 - **#482** — BodyDiscCorrelateNav misses by up to ~1 px on a
   weakly-constrained axis. The residual left after the shift-equivariance

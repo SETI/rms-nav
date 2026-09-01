@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 from tests.spindoctor.nav_technique.conftest import (
@@ -1235,7 +1237,48 @@ def test_ring_edge_nav_rejects_a_negative_edge_localization_sigma() -> None:
     original_tuning = RingEdgeNav.tuning
     try:
         RingEdgeNav.tuning = bad_tuning
-        with pytest.raises(ValueError, match='edge_localization_sigma_px must be finite'):
+        with pytest.raises(
+            ValueError, match='edge_localization_sigma_px must be a finite number > 0'
+        ):
+            RingEdgeNav()
+    finally:
+        RingEdgeNav.tuning = original_tuning
+
+
+def test_ring_edge_nav_rejects_a_zero_edge_localization_sigma() -> None:
+    """A zero localization sigma fails at construction.
+
+    Zero is physically meaningless against a half-pixel-quantized edge mask
+    and lets a zero catalog sigma reach the LM refine as a zero residual
+    scale.
+    """
+    bad_tuning = dict(RingEdgeNav.tuning)
+    bad_tuning['edge_localization_sigma_px'] = 0.0
+    original_tuning = RingEdgeNav.tuning
+    try:
+        RingEdgeNav.tuning = bad_tuning
+        with pytest.raises(
+            ValueError, match='edge_localization_sigma_px must be a finite number > 0'
+        ):
+            RingEdgeNav()
+    finally:
+        RingEdgeNav.tuning = original_tuning
+
+
+def test_ring_edge_nav_rejects_a_null_edge_localization_sigma() -> None:
+    """A non-numeric localization sigma (YAML null) raises ValueError.
+
+    The error names the config key rather than surfacing as a bare
+    ``TypeError`` from ``float(None)`` far from the config that caused it.
+    """
+    bad_tuning: dict[str, Any] = dict(RingEdgeNav.tuning)
+    bad_tuning['edge_localization_sigma_px'] = None
+    original_tuning = RingEdgeNav.tuning
+    try:
+        RingEdgeNav.tuning = bad_tuning
+        with pytest.raises(
+            ValueError, match='edge_localization_sigma_px must be a finite number > 0'
+        ):
             RingEdgeNav()
     finally:
         RingEdgeNav.tuning = original_tuning
