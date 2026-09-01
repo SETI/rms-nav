@@ -187,8 +187,9 @@ per-edge DT fit receives only sub-25 km/px scenes. The basis is a 131-frame
 clean-truth head-to-head (operator-audited, bundle defect lists applied)
 that measured the edge fit wrong-when-accepted at 5% / 13% / 56% / 100% in
 the 300-1000 / 100-300 / 25-100 / 0-25 km/px bands while the annulus fit was
-wrong on zero accepted answers at every band, so every regime where annulus
-superiority is measured routes to it. The edge fit degrades toward fine
+wrong on zero accepted answers at every band, so the annulus route covers the
+regimes that comparison validates, everything at or above 25 km/px. The edge
+fit degrades toward fine
 resolution, where the ring alias lattice resolves into many distinct similar
 concentric edges and the shape-only fit locks the wrong one -- which the
 rendered-brightness template disambiguates. Below 25 km/px the trustworthy

@@ -256,45 +256,50 @@ def test_to_features_emits_edge_when_kmpp_below_planet_threshold(
     assert features[0].feature_type is NavFeatureType.RING_EDGE
 
 
-def test_to_features_routes_mid_resolution_saturn_scene_to_annulus(
+@pytest.mark.parametrize(
+    ('km_per_pixel_radial', 'expected_type', 'absent_type'),
+    [
+        pytest.param(
+            10.0, NavFeatureType.RING_EDGE, NavFeatureType.RING_ANNULUS, id='below-threshold'
+        ),
+        pytest.param(
+            25.0, NavFeatureType.RING_ANNULUS, NavFeatureType.RING_EDGE, id='at-threshold'
+        ),
+        pytest.param(
+            100.0, NavFeatureType.RING_ANNULUS, NavFeatureType.RING_EDGE, id='above-threshold'
+        ),
+    ],
+)
+def test_to_features_routes_by_saturn_kmpp_threshold(
     fake_obs: FakeObs,
+    km_per_pixel_radial: float,
+    expected_type: NavFeatureType,
+    absent_type: NavFeatureType,
 ) -> None:
-    """A 100 km/px Saturn scene routes to the annulus composite.
+    """Saturn routing by radial km/px: edge below 25, annulus at and above.
 
-    100 km/px sits well inside the annulus-routed regime, where the
-    head-to-head measured the annulus fit wrong on zero accepted
-    answers, so the Saturn threshold routes the whole system to the
-    RING_ANNULUS template there.
+    The 25 km/px case pins the inclusive boundary: the system-level gate is
+    ``km_per_pixel_radial >= kmpp_threshold``, so a scene exactly at the
+    threshold routes to the annulus composite. 100 km/px sits well inside
+    the annulus-routed regime, where the head-to-head measured the annulus
+    fit wrong on zero accepted answers; a 10 km/px scene keeps emitting a
+    RING_EDGE polyline for the distance-transform fit.
+
+    Parameters:
+        fake_obs: Injected small observation fixture.
+        km_per_pixel_radial: Scene radial resolution under test.
+        expected_type: Feature type the routing must emit at that scale.
+        absent_type: Feature type the routing must not emit at that scale.
     """
     model = _build_rings(
         obs=fake_obs,
         edge_mask=_curved_edge_mask((110, 110)),
-        km_per_pixel_radial=100.0,
+        km_per_pixel_radial=km_per_pixel_radial,
     )
     features = model.to_features(cast(Any, None))
     types = {f.feature_type for f in features}
-    assert NavFeatureType.RING_ANNULUS in types
-    assert NavFeatureType.RING_EDGE not in types
-
-
-def test_to_features_routes_high_resolution_saturn_scene_to_edge(
-    fake_obs: FakeObs,
-) -> None:
-    """A 10 km/px Saturn scene keeps the per-edge fit.
-
-    Below the 25 km/px Saturn threshold the system-level gate stays
-    off, so a well-resolved curved edge still emits a RING_EDGE
-    polyline for the distance-transform fit.
-    """
-    model = _build_rings(
-        obs=fake_obs,
-        edge_mask=_curved_edge_mask((110, 110)),
-        km_per_pixel_radial=10.0,
-    )
-    features = model.to_features(cast(Any, None))
-    types = {f.feature_type for f in features}
-    assert NavFeatureType.RING_EDGE in types
-    assert NavFeatureType.RING_ANNULUS not in types
+    assert expected_type in types
+    assert absent_type not in types
 
 
 def test_to_features_skips_empty_edge_info_list(fake_obs: FakeObs) -> None:

@@ -162,17 +162,22 @@ Feature-emission tunables (per-planet)
 
 The upstream rings model decides whether to emit ``RING_ANNULUS`` or ``RING_EDGE`` features based on
 ``feature_emission.ring_annulus`` in ``src/spindoctor/config_files/config_510_techniques.yaml``.
-The model emits a ``RING_ANNULUS`` template whenever a single ring edge has compressed below the
-per-polyline radial-pixel threshold, or when the per-planet km-per-pixel scale meets or exceeds the
-per-planet threshold.
+Two gates route an edge to the annulus template. The system-level gate is inclusive:
+``km_per_pixel_radial >= kmpp_threshold`` forces every surviving edge in the scene into the
+composite, so a scene exactly at the threshold is annulus-class. Below the threshold a per-edge
+gate applies: an edge joins the composite when ``radial_extent_px <= max_radial_px and not
+straight`` -- a compressed polyline that is flagged straight-line stays on the per-edge path as a
+rank-1 ``RING_EDGE`` rather than joining the composite. A sub-threshold scene can therefore emit
+a mix: ``RING_EDGE`` features for well-extended or straight edges alongside one ``RING_ANNULUS``
+composite for the edges that compressed below ``max_radial_px``.
 
 For Saturn the km/px threshold routes by measured reliability, not by pixel span: at or above
 25 km/px radial resolution the whole Saturn system routes to the annulus composite, and the
 per-edge distance-transform fit receives only sub-25 km/px scenes. A 131-frame clean-truth
 head-to-head measured the per-edge fit wrong-when-accepted at 5% / 13% / 56% / 100% in the
 300-1000 / 100-300 / 25-100 / 0-25 km/px bands, while the annulus fit was wrong on zero
-accepted answers at every band -- so every regime where that superiority is measured routes to
-the annulus. The per-edge fit degrades toward fine resolution, where the ring alias lattice
+accepted answers at every band -- so the annulus route covers the regimes that comparison
+validates, everything at or above 25 km/px. The per-edge fit degrades toward fine resolution, where the ring alias lattice
 resolves into many distinct similar concentric edges and a shape-only fit locks onto the wrong
 one; the rendered-brightness template disambiguates the lattice because relative ring
 brightness is part of the match. Below 25 km/px the trustworthy evidence is three frames on

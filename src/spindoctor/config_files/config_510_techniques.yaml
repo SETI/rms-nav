@@ -1203,8 +1203,9 @@ feature_emission:
         # put the per-edge fit's wrong-when-accepted rate at 5% / 13% /
         # 56% / 100% in the 300-1000 / 100-300 / 25-100 / 0-25 km/px
         # bands, while the annulus fit was wrong on zero accepted
-        # answers at every band -- so every regime where annulus
-        # superiority is measured routes to the annulus.  The per-edge
+        # answers at every band -- so the annulus route covers the
+        # regimes that comparison validates, everything at or above
+        # 25 km/px.  The per-edge
         # fit degrades toward FINE resolution: as resolution improves,
         # the ring alias lattice resolves -- many similar concentric
         # ringlet edges separate into distinct image edges -- and the

@@ -304,7 +304,7 @@ The known open defects:
   mergeable and green, and it is fifty commits behind `main`.
 
 **Parallelism:** parallel with Track A, except that the coarse-lock family
-(#346, #476) gates the agreement study -- a technique that reports a
+(#346, #476, #373) gates the agreement study -- a technique that reports a
 confidently wrong answer moves the cross-technique disagreement WS-1 measures
 -- and #288 gates reading any Track A cohort with confidence.
 

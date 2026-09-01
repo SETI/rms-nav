@@ -881,15 +881,18 @@ ring-edge answer that no other technique corroborates warrants care.
 ^^^^^^^^^^^^^^^^^^
 
 Pyramid-NCC fit on every ``RING_ANNULUS`` feature.  ``RING_ANNULUS``
-features are emitted by the rings model in two regimes: when adjacent
-ring edges compress radially below the per-planet
+features are emitted by the rings model in two regimes: when a curved
+(non-straight) ring edge compresses radially to at most the per-planet
 ``feature_emission.ring_annulus.max_radial_px`` threshold in
-``config_510_techniques.yaml`` (individual edges no longer separable),
-and when the scene's radial resolution meets or exceeds the per-planet
+``config_510_techniques.yaml`` (individual edges no longer separable;
+a straight-line compressed edge stays a rank-1 ``RING_EDGE`` instead),
+and when the scene's radial resolution is at or above the per-planet
 km/px threshold -- 25 km/px for Saturn, so the whole Saturn system is
-annulus-class at that resolution and coarser.  In either case the
-rings model collapses every surviving ring into a single composite
-annulus per planet.  Multi-planet scenes
+annulus-class at that resolution and coarser.  Under the system-level
+gate every surviving ring collapses into a single composite annulus
+per planet; below it a scene can emit a mix, with ``RING_EDGE``
+features alongside one composite for the edges that compressed below
+``max_radial_px``.  Multi-planet scenes
 (rare) emit one ``RING_ANNULUS`` per ring system; the technique fuses
 them via Z-buffer paint and runs one joint NCC.
 ``use_gradient='auto'`` self-selects raw vs gradient mode per image.

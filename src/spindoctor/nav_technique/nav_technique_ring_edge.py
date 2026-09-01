@@ -172,10 +172,12 @@ class RingEdgeNav(NavTechnique):
         raw_edge_sigma = self.tuning['edge_localization_sigma_px']
         try:
             self._edge_localization_sigma_px = float(raw_edge_sigma)
-        except (TypeError, ValueError) as err:
+        except (TypeError, ValueError, OverflowError) as err:
+            # Name the type, not the value: an oversized int's repr can
+            # itself exceed the interpreter's integer-string digit limit.
             raise ValueError(
                 'RingEdgeNav.edge_localization_sigma_px must be a finite number > 0; '
-                f'got {raw_edge_sigma!r}'
+                f'got an unconvertible {type(raw_edge_sigma).__name__} value'
             ) from err
         if not math.isfinite(self._edge_localization_sigma_px) or (
             self._edge_localization_sigma_px <= 0.0
