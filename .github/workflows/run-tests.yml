@@ -81,28 +81,11 @@ jobs:
         run: |
           export PDS3_HOLDINGS_DIR=https://pds-rings.seti.org/holdings
           export PDS4_HOLDINGS_DIR=https://pds-rings.seti.org/pds4
-          # OOPS_RESOURCES / UCAC4_PATH / YBSC_PATH are deliberately NOT set:
-          # the SPICE and star-catalog trees live in cloud buckets whose bulk
-          # egress is prohibitively expensive, so public access is off and
-          # automated runs must not download them. Tests marked
-          # REQUIRES_EXTERNAL_DATA (tests/config.py) skip without
-          # OOPS_RESOURCES; run them locally against a local copy of the
-          # oops resources directory.
-          # loadfile keeps each test file on one xdist worker; PyQt6 + default load
-          # scheduling has caused worker crashes when tests from the same file ran
-          # in different processes.
-          # The marker expression restates the default from addopts, because a
-          # -m flag replaces addopts' own rather than adding to it.  It skips
-          # two tiers.  The integration tier reaches real archive holdings; the
-          # operator-curated image-library regression tests are one part of it,
-          # and it needs a populated $PDS3_HOLDINGS_DIR, the oops resources and
-          # SPICE kernels under $OOPS_RESOURCES, and the $UCAC4_PATH / $YBSC_PATH
-          # star catalogs -- slow, and unavailable to this job, whose buckets are
-          # closed for egress cost.  The postgres tier needs a PostgreSQL server
-          # named by SPINDOCTOR_TEST_POSTGRES_URL, and CI runs no service
-          # container for one.  Run both locally before merging: the integration
-          # tier against that environment, the postgres tier against a local
-          # server.
+          # OOPS_RESOURCES / UCAC4_PATH / YBSC_PATH deliberately unset: those
+          # buckets are closed to bulk egress; REQUIRES_EXTERNAL_DATA tests skip.
+          # --dist=loadfile: default scheduling crashes PyQt6 xdist workers.
+          # -m replaces addopts' marker filter, so the default is restated; the
+          # integration and postgres tiers run locally before merging.
           python -m pytest --cov --cov-report=xml -n auto --dist=loadfile \
             -m "not integration and not postgres"
 
