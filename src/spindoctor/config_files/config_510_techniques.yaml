@@ -1195,12 +1195,23 @@ feature_emission:
       kmpp_threshold: 1000.0
     planets:
       SATURN:
-        # Saturn's main rings span ~75000-140000 km (~65000 km wide).
-        # At km/px > 1000 the entire system is < 65 px wide and
-        # individual edges within rings (gaps, ringlets) are sub-pixel
-        # apart — annulus path wins.
+        # Above 25 km/px radial resolution the whole Saturn system
+        # routes to the RING_ANNULUS composite (the rendered-brightness
+        # NCC fit); the per-edge DT fit receives only sub-25 km/px
+        # scenes.  Measured, not geometric: a 131-frame clean-truth
+        # head-to-head (operator-audited, bundle defect lists applied)
+        # put the per-edge fit's wrong-when-accepted rate at 5% / 13% /
+        # 56% / 100% in the 0-25 / 25-100 / 100-300 / 300-1000 km/px
+        # bands, while the annulus fit was wrong on zero accepted
+        # answers at every band.  The per-edge fit mislocks onto the
+        # ring alias lattice -- concentric similar edges spaced about a
+        # ringlet spacing apart -- which the rendered-brightness
+        # template disambiguates because relative ring brightness is
+        # part of the match.  This threshold is Saturn-measured only;
+        # the default and other planets' entries keep their geometric
+        # values because no equivalent measurement exists for them.
         max_radial_px: 5.0
-        kmpp_threshold: 1000.0
+        kmpp_threshold: 25.0
       JUPITER:
         # Jupiter's main ring spans ~122500-129000 km (~6500 km wide,
         # ~10x narrower than Saturn).  Lower kmpp threshold so

@@ -166,7 +166,7 @@ def test_to_features_emits_annulus_when_kmpp_above_planet_threshold(
 
     Even when the per-edge polyline's radial extent would otherwise
     classify as a RING_EDGE, the planet-specific kmpp threshold
-    (``feature_emission.ring_annulus.planets.SATURN.kmpp_threshold = 1000``)
+    (``feature_emission.ring_annulus.planets.SATURN.kmpp_threshold = 25``)
     forces annulus emission for the entire ring system.
     """
     model = _build_rings(
@@ -250,10 +250,50 @@ def test_to_features_emits_edge_when_kmpp_below_planet_threshold(
     model = _build_rings(
         obs=fake_obs,
         edge_mask=_curved_edge_mask((110, 110)),
-        km_per_pixel_radial=50.0,
+        km_per_pixel_radial=10.0,
     )
     features = model.to_features(cast(Any, None))
     assert features[0].feature_type is NavFeatureType.RING_EDGE
+
+
+def test_to_features_routes_mid_resolution_saturn_scene_to_annulus(
+    fake_obs: FakeObs,
+) -> None:
+    """A 100 km/px Saturn scene routes to the annulus composite.
+
+    100 km/px sits well inside the resolution range where the per-edge
+    fit mislocks onto the ring alias lattice, so the Saturn threshold
+    routes the whole system to the RING_ANNULUS template there.
+    """
+    model = _build_rings(
+        obs=fake_obs,
+        edge_mask=_curved_edge_mask((110, 110)),
+        km_per_pixel_radial=100.0,
+    )
+    features = model.to_features(cast(Any, None))
+    types = {f.feature_type for f in features}
+    assert NavFeatureType.RING_ANNULUS in types
+    assert NavFeatureType.RING_EDGE not in types
+
+
+def test_to_features_routes_high_resolution_saturn_scene_to_edge(
+    fake_obs: FakeObs,
+) -> None:
+    """A 10 km/px Saturn scene keeps the per-edge fit.
+
+    Below the 25 km/px Saturn threshold the system-level gate stays
+    off, so a well-resolved curved edge still emits a RING_EDGE
+    polyline for the distance-transform fit.
+    """
+    model = _build_rings(
+        obs=fake_obs,
+        edge_mask=_curved_edge_mask((110, 110)),
+        km_per_pixel_radial=10.0,
+    )
+    features = model.to_features(cast(Any, None))
+    types = {f.feature_type for f in features}
+    assert NavFeatureType.RING_EDGE in types
+    assert NavFeatureType.RING_ANNULUS not in types
 
 
 def test_to_features_skips_empty_edge_info_list(fake_obs: FakeObs) -> None:

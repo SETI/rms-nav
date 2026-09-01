@@ -29,6 +29,19 @@ non-empty edge is sufficient — even an all-flat scene produces a useful rank-1
 Feasibility fails when every offered ``RING_EDGE`` is empty (a ring system entirely outside the
 extended FOV or below the per-pixel resolution threshold).
 
+Which scenes reach this technique is decided upstream, by the rings model's per-planet
+km/px threshold (``feature_emission.ring_annulus.planets.SATURN.kmpp_threshold``): for
+Saturn, only scenes finer than 25 km/px radial resolution emit ``RING_EDGE`` features at
+all, and everything at or above that routes to the
+:doc:`annulus composite <dev_guide_techniques_ring_annulus>` instead. The routing is
+measured, not geometric. A 131-frame clean-truth head-to-head put this technique's
+wrong-when-accepted rate at 5% / 13% / 56% / 100% in the 0-25 / 25-100 / 100-300 /
+300-1000 km/px bands while the annulus fit was wrong on zero accepted answers at every band:
+a ring system presents concentric similar edges spaced about a ringlet spacing apart, and
+a distance-transform fit against edge shape alone can lock one lattice spacing off, while
+the annulus's rendered-brightness template disambiguates the lattice because relative
+ring brightness is part of the match.
+
 Theory
 ======
 

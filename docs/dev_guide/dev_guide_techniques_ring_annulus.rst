@@ -163,8 +163,18 @@ Feature-emission tunables (per-planet)
 The upstream rings model decides whether to emit ``RING_ANNULUS`` or ``RING_EDGE`` features based on
 ``feature_emission.ring_annulus`` in ``src/spindoctor/config_files/config_510_techniques.yaml``.
 The model emits a ``RING_ANNULUS`` template whenever a single ring edge has compressed below the
-per-polyline radial-pixel threshold, or when the per-planet km-per-pixel scale exceeds the
-per-planet threshold (the entire ring system is below the per-edge resolution limit).
+per-polyline radial-pixel threshold, or when the per-planet km-per-pixel scale meets or exceeds the
+per-planet threshold.
+
+For Saturn the km/px threshold routes by measured reliability, not by pixel span: at or above
+25 km/px radial resolution the whole Saturn system routes to the annulus composite, and the
+per-edge distance-transform fit receives only sub-25 km/px scenes. A 131-frame clean-truth
+head-to-head measured the per-edge fit wrong-when-accepted at 5% / 13% / 56% / 100% in the
+0-25 / 25-100 / 100-300 / 300-1000 km/px bands, while the annulus fit was wrong on zero
+accepted answers at every band. The per-edge fit mislocks onto the ring alias lattice --
+concentric similar edges spaced about a ringlet spacing apart -- which the rendered-brightness
+template disambiguates because relative ring brightness is part of the match. The threshold is
+Saturn-measured only; the other planets' entries keep geometric values.
 
 - ``feature_emission.ring_annulus.default.max_radial_px`` — float, default ``5.0`` px.
   Maximum per-edge polyline radial extent below which the rings model emits a ``RING_ANNULUS``
@@ -176,8 +186,8 @@ per-planet threshold (the entire ring system is below the per-edge resolution li
 - ``feature_emission.ring_annulus.planets.SATURN.max_radial_px`` — float, default
   ``5.0`` px.
 - ``feature_emission.ring_annulus.planets.SATURN.kmpp_threshold`` — float, default
-  ``1000.0`` km/px. Saturn's main rings span ~75,000-140,000 km; at km/px > 1000 the
-  entire system is < 65 px wide and individual edges are sub-pixel apart.
+  ``25.0`` km/px. Measured routing threshold: at or above 25 km/px the whole Saturn
+  system is annulus-class; the per-edge fit receives only sub-25 km/px scenes.
 - ``feature_emission.ring_annulus.planets.JUPITER.max_radial_px`` — float, default
   ``5.0`` px.
 - ``feature_emission.ring_annulus.planets.JUPITER.kmpp_threshold`` — float, default

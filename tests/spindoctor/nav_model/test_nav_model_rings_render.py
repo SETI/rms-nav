@@ -126,7 +126,7 @@ def _ramp_ring(
     *,
     r0: float = 100_000.0,
     slope: float = 100.0,
-    res: float = 100.0,
+    res: float = 10.0,
     mask: NDArrayBoolType | None = None,
     res_array: np.ndarray | None = None,
 ) -> RingBackplaneData:
@@ -139,7 +139,9 @@ def _ramp_ring(
     Parameters:
         r0: Ring radius at the leftmost column (km).
         slope: Radius increase per pixel column (km/px).
-        res: Constant radial resolution (km/px).
+        res: Constant radial resolution (km/px). The default sits below
+            every planet's system-level annulus km/px threshold so scenes
+            built from it exercise the per-edge emission path.
         mask: Optional ring-plane mask; defaults to all-True.
         res_array: Optional explicit per-pixel resolution array overriding
             the constant ``res``.
@@ -402,16 +404,17 @@ def test_edge_sigma_radial_from_catalog_rms(monkeypatch: pytest.MonkeyPatch) -> 
     """Radial sigma is the feature's max edge RMS over the radial km/px.
 
     The dev guide specifies the conservative maximum of the two edge RMS
-    values (20 km here) divided by the per-image radial scale (100 km/px),
+    values (20 km here) divided by the per-image radial scale (10 km/px,
+    below the Saturn annulus threshold so the per-edge path emits),
     broadcast across every vertex of both edge polylines.
     """
     config = _ring_config({'TESTR': _ringlet(103_000.0, 107_000.0, rms_inner=10.0, rms_outer=20.0)})
-    model, obs = _make_model(monkeypatch, _ramp_ring(res=100.0), config)
+    model, obs = _make_model(monkeypatch, _ramp_ring(res=10.0), config)
     model.create_model()
     for feature in _features(model, obs):
         geometry = feature.geometry
         assert isinstance(geometry, RingEdgePolyline)
-        assert bool(np.all(geometry.sigma_radial_per_vertex_px == pytest.approx(0.2)))
+        assert bool(np.all(geometry.sigma_radial_per_vertex_px == pytest.approx(2.0)))
 
 
 def test_edge_sigma_along_is_constant(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -439,8 +442,11 @@ def test_edge_normals_unit_length(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_curved_edge_not_flagged_straight(monkeypatch: pytest.MonkeyPatch) -> None:
     """An edge arcing across the FOV escapes the straight-line rank-1 flag."""
-    config = _ring_config({'TESTG': _gap_inner(104_000.0)})
-    model, obs = _make_model(monkeypatch, _arc_ring(), config)
+    # scale=20 keeps the scene below the Saturn annulus km/px threshold
+    # while preserving the same 130 px contour curvature the default
+    # geometry drew (2600 km at 20 km/px = 104000 km at 800 km/px).
+    config = _ring_config({'TESTG': _gap_inner(2_600.0)})
+    model, obs = _make_model(monkeypatch, _arc_ring(scale=20.0), config)
     model.create_model()
     features = _features(model, obs)
     assert len(features) == 1
@@ -458,8 +464,9 @@ def test_curved_edge_not_flagged_straight(monkeypatch: pytest.MonkeyPatch) -> No
 def test_annulus_forced_at_low_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     """Above the per-planet km/px threshold a single RING_ANNULUS is emitted.
 
-    Saturn's ``feature_emission.ring_annulus`` threshold is 1000 km/px; a
-    1500 km/px scene must collapse every edge into one composite annulus.
+    A 1500 km/px scene sits far above Saturn's
+    ``feature_emission.ring_annulus`` threshold, so every edge must
+    collapse into one composite annulus.
     """
     config = _ring_config({'TESTR': _ringlet(80_000.0, 110_000.0)})
     ring = _ramp_ring(r0=50_000.0, slope=1500.0, res=1500.0)

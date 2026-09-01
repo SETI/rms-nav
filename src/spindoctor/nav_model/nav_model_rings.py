@@ -661,11 +661,14 @@ class NavModelRings(NavModelRingsBase):
                     'rings.orbit_radial_sigma_correlated_fraction must be in [0, 1]; '
                     f'got {correlated_fraction!r}'
                 )
-            # System-level annulus gate: at very low ring resolution the
-            # entire ring system spans only a handful of pixels, so even
-            # a "well-traceable" per-edge polyline carries too little
-            # information for the per-edge DT fit.  Force annulus
-            # emission for every surviving feature in that regime.
+            # System-level annulus gate: above the per-planet km/px
+            # threshold the whole ring system routes to the annulus
+            # composite and every surviving feature is emitted as part
+            # of it.  The threshold values and their rationale (for
+            # Saturn, measured wrong-when-accepted rates showing where
+            # the per-edge DT fit mislocks onto the ring alias lattice)
+            # live with the ``feature_emission.ring_annulus`` block in
+            # config_510_techniques.yaml.
             force_annulus = self._km_per_pixel_radial >= kmpp_threshold
             if force_annulus:
                 self._logger.debug(

@@ -867,8 +867,11 @@ honest rank-deficient covariance; the ensemble combine fuses it with any
 orthogonal-axis result (a star, body limb, body blob) before declaring a
 final answer.
 
-Best for: scenes containing bright ring edges (typical Cassini ISS
-Saturn-rings imagery).
+Best for: well-resolved ring edges, finer than 25 km/px radial
+resolution for Saturn.  Coarser Saturn ring scenes route to
+``RingAnnulusNav`` instead: on those a shape-only edge fit can lock
+onto the wrong member of the ring system's many concentric similar
+edges, so the rings model does not emit per-edge features there.
 
 ``RingAnnulusNav``
 ^^^^^^^^^^^^^^^^^^
@@ -878,17 +881,19 @@ features are emitted by the rings model in two regimes: when adjacent
 ring edges compress radially below the per-planet
 ``feature_emission.ring_annulus.max_radial_px`` threshold in
 ``config_510_techniques.yaml`` (individual edges no longer separable),
-and when the per-planet km/px threshold fires on a low-resolution
-ring scene where the entire ring system spans only a handful of
-pixels.  In either case the rings model collapses every surviving
-ring into a single composite annulus per planet.  Multi-planet scenes
+and when the scene's radial resolution meets or exceeds the per-planet
+km/px threshold -- 25 km/px for Saturn, so the whole Saturn system is
+annulus-class at that resolution and coarser.  In either case the
+rings model collapses every surviving ring into a single composite
+annulus per planet.  Multi-planet scenes
 (rare) emit one ``RING_ANNULUS`` per ring system; the technique fuses
 them via Z-buffer paint and runs one joint NCC.
 ``use_gradient='auto'`` self-selects raw vs gradient mode per image.
 
-Best for: low-resolution ring scenes where ``RingEdgeNav`` cannot
-separate individual edges (distant Cassini ring views; potential
-NHLORRI Pluto/Charon ring geometries).
+Best for: ring scenes at or above the per-planet km/px threshold,
+where the rendered-brightness template disambiguates the ring
+system's concentric similar edges (distant Cassini ring views;
+potential NHLORRI Pluto/Charon ring geometries).
 
 ``NavTechniqueManual``
 ^^^^^^^^^^^^^^^^^^^^^^
