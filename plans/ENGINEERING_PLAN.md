@@ -187,11 +187,17 @@ Ring routing for Saturn is decided and shipped: every scene at or above
 per-edge DT fit receives only sub-25 km/px scenes. The basis is a 131-frame
 clean-truth head-to-head (operator-audited, bundle defect lists applied)
 that measured the edge fit wrong-when-accepted at 5% / 13% / 56% / 100% in
-the 0-25 / 25-100 / 100-300 / 300-1000 km/px bands while the annulus fit was
-wrong on zero accepted answers at every band: the edge fit mislocks onto the
-ring alias lattice, which the annulus's rendered-brightness template
-disambiguates. The threshold is Saturn-measured only. Two follow-ons remain
-future work: recalibrating the annulus gates so more of its correct answers
+the 300-1000 / 100-300 / 25-100 / 0-25 km/px bands while the annulus fit was
+wrong on zero accepted answers at every band, so every regime where annulus
+superiority is measured routes to it. The edge fit degrades toward fine
+resolution, where the ring alias lattice resolves into many distinct similar
+concentric edges and the shape-only fit locks the wrong one -- which the
+rendered-brightness template disambiguates. Below 25 km/px the trustworthy
+evidence is three frames on which neither technique is validated (the edge
+path re-locks catastrophically on all three; the annulus near-misses twice
+and fails once), so the threshold stops where the evidence stops and the
+sub-25 confident-wrong exposure stays open under #346/#476. The threshold is
+Saturn-measured only. Two follow-ons remain future work: recalibrating the annulus gates so more of its correct answers
 are accepted (today they veto many right answers, which costs coverage, not
 correctness), and a hybrid in which the correlation fit picks the basin and
 the edge fit polishes within it.

@@ -665,9 +665,10 @@ class NavModelRings(NavModelRingsBase):
             # threshold the whole ring system routes to the annulus
             # composite and every surviving feature is emitted as part
             # of it.  The threshold values and their rationale (for
-            # Saturn, measured wrong-when-accepted rates showing where
-            # the per-edge DT fit mislocks onto the ring alias lattice)
-            # live with the ``feature_emission.ring_annulus`` block in
+            # Saturn, a measured head-to-head in which the annulus fit
+            # was wrong on zero accepted answers in every regime it
+            # was measured) live with the
+            # ``feature_emission.ring_annulus`` block in
             # config_510_techniques.yaml.
             force_annulus = self._km_per_pixel_radial >= kmpp_threshold
             if force_annulus:

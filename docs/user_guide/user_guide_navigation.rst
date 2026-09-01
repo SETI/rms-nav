@@ -867,11 +867,15 @@ honest rank-deficient covariance; the ensemble combine fuses it with any
 orthogonal-axis result (a star, body limb, body blob) before declaring a
 final answer.
 
-Best for: well-resolved ring edges, finer than 25 km/px radial
-resolution for Saturn.  Coarser Saturn ring scenes route to
-``RingAnnulusNav`` instead: on those a shape-only edge fit can lock
-onto the wrong member of the ring system's many concentric similar
-edges, so the rings model does not emit per-edge features there.
+Best for: close-range ring scenes.  For Saturn the rings model emits
+per-edge features only below 25 km/px radial resolution and routes
+everything coarser to ``RingAnnulusNav``, which a 131-frame
+operator-audited head-to-head measured wrong on zero accepted answers
+in every resolution band it was measured.  At fine resolution the
+ring's many similar concentric ringlet edges resolve individually and
+a shape-only edge fit can lock onto the wrong one, and below 25 km/px
+neither ring technique is yet validated at scale, so a sub-25 km/px
+ring-edge answer that no other technique corroborates warrants care.
 
 ``RingAnnulusNav``
 ^^^^^^^^^^^^^^^^^^
@@ -890,9 +894,11 @@ annulus per planet.  Multi-planet scenes
 them via Z-buffer paint and runs one joint NCC.
 ``use_gradient='auto'`` self-selects raw vs gradient mode per image.
 
-Best for: ring scenes at or above the per-planet km/px threshold,
-where the rendered-brightness template disambiguates the ring
-system's concentric similar edges (distant Cassini ring views;
+Best for: ring scenes at or above the per-planet km/px threshold: a
+131-frame operator-audited head-to-head measured it wrong on zero
+accepted answers at every resolution band, and its
+rendered-brightness template disambiguates similar concentric edges
+that a shape-only fit can confuse (distant Cassini ring views;
 potential NHLORRI Pluto/Charon ring geometries).
 
 ``NavTechniqueManual``

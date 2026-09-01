@@ -236,8 +236,10 @@ The known open defects:
   decision: at and above 25 km/px radial resolution the whole Saturn system
   feeds the annulus composite, which a 131-frame clean-truth head-to-head
   measured wrong on zero accepted answers while the per-edge fit ran
-  5% / 13% / 56% / 100% wrong-when-accepted in the 0-25 / 25-100 /
-  100-300 / 300-1000 km/px bands.
+  5% / 13% / 56% / 100% wrong-when-accepted in the 300-1000 / 100-300 /
+  25-100 / 0-25 km/px bands; below 25 km/px the trusted evidence is three
+  frames validating neither technique, so the threshold stops where the
+  measurement stops.
   The annulus-gate recalibration (accepting more of its correct answers)
   and a correlation-picks-basin / edge-polishes hybrid remain future work.
 - **#476** — RingEdgeNav is not shift-equivariant either: a planted shift

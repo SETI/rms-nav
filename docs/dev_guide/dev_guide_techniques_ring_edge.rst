@@ -35,12 +35,18 @@ Saturn, only scenes finer than 25 km/px radial resolution emit ``RING_EDGE`` fea
 all, and everything at or above that routes to the
 :doc:`annulus composite <dev_guide_techniques_ring_annulus>` instead. The routing is
 measured, not geometric. A 131-frame clean-truth head-to-head put this technique's
-wrong-when-accepted rate at 5% / 13% / 56% / 100% in the 0-25 / 25-100 / 100-300 /
-300-1000 km/px bands while the annulus fit was wrong on zero accepted answers at every band:
-a ring system presents concentric similar edges spaced about a ringlet spacing apart, and
-a distance-transform fit against edge shape alone can lock one lattice spacing off, while
-the annulus's rendered-brightness template disambiguates the lattice because relative
-ring brightness is part of the match.
+wrong-when-accepted rate at 5% / 13% / 56% / 100% in the 300-1000 / 100-300 / 25-100 /
+0-25 km/px bands while the annulus fit was wrong on zero accepted answers at every band,
+so every regime where that superiority is measured routes to the annulus. The degradation
+toward fine resolution is the ring alias lattice: as resolution improves, many similar
+concentric ringlet edges separate into distinct image edges, and a distance-transform fit
+against edge shape alone can lock onto the wrong one, while the annulus's
+rendered-brightness template disambiguates the lattice because relative ring brightness is
+part of the match. Below 25 km/px the trustworthy evidence is three frames on which
+neither technique is validated -- the edge path re-locked catastrophically on all three,
+the annulus near-missed twice and failed once -- so the threshold marks the bottom of the
+measured regime, not a regime where this technique is known good, and a sub-25 km/px
+ring-edge answer still carries the known wrong-lock exposure.
 
 Theory
 ======

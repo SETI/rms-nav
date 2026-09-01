@@ -261,9 +261,10 @@ def test_to_features_routes_mid_resolution_saturn_scene_to_annulus(
 ) -> None:
     """A 100 km/px Saturn scene routes to the annulus composite.
 
-    100 km/px sits well inside the resolution range where the per-edge
-    fit mislocks onto the ring alias lattice, so the Saturn threshold
-    routes the whole system to the RING_ANNULUS template there.
+    100 km/px sits well inside the annulus-routed regime, where the
+    head-to-head measured the annulus fit wrong on zero accepted
+    answers, so the Saturn threshold routes the whole system to the
+    RING_ANNULUS template there.
     """
     model = _build_rings(
         obs=fake_obs,

@@ -170,11 +170,15 @@ For Saturn the km/px threshold routes by measured reliability, not by pixel span
 25 km/px radial resolution the whole Saturn system routes to the annulus composite, and the
 per-edge distance-transform fit receives only sub-25 km/px scenes. A 131-frame clean-truth
 head-to-head measured the per-edge fit wrong-when-accepted at 5% / 13% / 56% / 100% in the
-0-25 / 25-100 / 100-300 / 300-1000 km/px bands, while the annulus fit was wrong on zero
-accepted answers at every band. The per-edge fit mislocks onto the ring alias lattice --
-concentric similar edges spaced about a ringlet spacing apart -- which the rendered-brightness
-template disambiguates because relative ring brightness is part of the match. The threshold is
-Saturn-measured only; the other planets' entries keep geometric values.
+300-1000 / 100-300 / 25-100 / 0-25 km/px bands, while the annulus fit was wrong on zero
+accepted answers at every band -- so every regime where that superiority is measured routes to
+the annulus. The per-edge fit degrades toward fine resolution, where the ring alias lattice
+resolves into many distinct similar concentric edges and a shape-only fit locks onto the wrong
+one; the rendered-brightness template disambiguates the lattice because relative ring
+brightness is part of the match. Below 25 km/px the trustworthy evidence is three frames on
+which neither technique is validated (the edge path re-locked on all three; the annulus
+near-missed twice and failed once), so the threshold stops where the evidence stops. The
+threshold is Saturn-measured only; the other planets' entries keep geometric values.
 
 - ``feature_emission.ring_annulus.default.max_radial_px`` — float, default ``5.0`` px.
   Maximum per-edge polyline radial extent below which the rings model emits a ``RING_ANNULUS``

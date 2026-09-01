@@ -1201,15 +1201,25 @@ feature_emission:
         # scenes.  Measured, not geometric: a 131-frame clean-truth
         # head-to-head (operator-audited, bundle defect lists applied)
         # put the per-edge fit's wrong-when-accepted rate at 5% / 13% /
-        # 56% / 100% in the 0-25 / 25-100 / 100-300 / 300-1000 km/px
+        # 56% / 100% in the 300-1000 / 100-300 / 25-100 / 0-25 km/px
         # bands, while the annulus fit was wrong on zero accepted
-        # answers at every band.  The per-edge fit mislocks onto the
-        # ring alias lattice -- concentric similar edges spaced about a
-        # ringlet spacing apart -- which the rendered-brightness
-        # template disambiguates because relative ring brightness is
-        # part of the match.  This threshold is Saturn-measured only;
-        # the default and other planets' entries keep their geometric
-        # values because no equivalent measurement exists for them.
+        # answers at every band -- so every regime where annulus
+        # superiority is measured routes to the annulus.  The per-edge
+        # fit degrades toward FINE resolution: as resolution improves,
+        # the ring alias lattice resolves -- many similar concentric
+        # ringlet edges separate into distinct image edges -- and the
+        # shape-only DT fit locks onto the wrong one, which the
+        # rendered-brightness template disambiguates because relative
+        # ring brightness is part of the match.  Below 25 km/px the
+        # trustworthy evidence is three frames on which NEITHER
+        # technique is validated (the edge path re-locks
+        # catastrophically on all three; the annulus near-misses twice
+        # and fails once), so the threshold stops where the evidence
+        # stops, not where the edge fit is known good; the sub-25
+        # confident-wrong exposure remains open (#346, #476).  This
+        # threshold is Saturn-measured only; the default and other
+        # planets' entries keep their geometric values because no
+        # equivalent measurement exists for them.
         max_radial_px: 5.0
         kmpp_threshold: 25.0
       JUPITER:
