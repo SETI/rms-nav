@@ -52,6 +52,7 @@ def test_last_image_num_keeps_wac_frames(
 def test_a_galileo_name_outside_the_product_rule_drops_its_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """One unnavigable product drops its row and leaves the enumeration running."""
     # GO_0016's SL9 directory stores a G product beside the R product of each of
     # its images. A G name carries no image number, and reading one raised
     # instead of dropping the row, which ended the enumeration of every

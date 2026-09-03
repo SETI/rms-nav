@@ -239,10 +239,18 @@ def test_camera_from_index_row_without_index() -> None:
     ],
 )
 def test_galileo_img_name_from_filespec(filespec: str, expected: str | None) -> None:
+    """A filespec names an image to navigate, or names something else.
+
+    Parameters:
+        filespec: The label filespec an index row carries.
+        expected: The image name it yields, or None when the product is not
+            one this dataset navigates.
+    """
     assert DataSetPDS3GalileoSSI._get_img_name_from_label_filespec(filespec) == expected
 
 
 def test_galileo_unknown_target_directory_still_raises() -> None:
+    """A directory no rule accounts for stays an error rather than a silent skip."""
     with pytest.raises(ValueError) as exc:
         DataSetPDS3GalileoSSI._get_img_name_from_label_filespec('NOSUCH/C0248806645R.LBL')
     assert 'bad target directory' in str(exc.value)
