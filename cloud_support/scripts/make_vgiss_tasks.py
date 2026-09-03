@@ -75,6 +75,7 @@ def main() -> None:
         parser.error('--planets selected no encounters')
 
     written = []
+    local_root = None
     for planet in planets:
         volumes = planet_volumes(planet)
         output_path = Path(arguments.output_dir) / f'{DATASET_NAME}_tasks_{planet}.json'
@@ -82,15 +83,16 @@ def main() -> None:
             f'Enumerating {planet} ({len(volumes)} volumes, '
             f'{volumes[0]} to {volumes[-1]}) into {output_path}'
         )
-        count = common.write_task_file(
+        task_file = common.write_task_file(
             output_path,
             arguments=arguments,
             dataset_name=DATASET_NAME,
             volumes=volumes,
         )
-        written.append((output_path, count))
+        written.append((output_path, task_file.count))
+        local_root = task_file.local_root or local_root
 
-    common.report_files(written)
+    common.report_files(written, local_root=local_root, holdings_root=arguments.holdings_root)
 
 
 if __name__ == '__main__':

@@ -29,8 +29,12 @@ def main() -> None:
 
     output_path = Path(arguments.output_dir) / f'{DATASET_NAME}_tasks.json'
     print(f'Enumerating {DATASET_NAME} into {output_path}')
-    count = common.write_task_file(output_path, arguments=arguments, dataset_name=DATASET_NAME)
-    common.report_files([(output_path, count)])
+    written = common.write_task_file(output_path, arguments=arguments, dataset_name=DATASET_NAME)
+    common.report_files(
+        [(output_path, written.count)],
+        local_root=written.local_root,
+        holdings_root=arguments.holdings_root,
+    )
 
 
 if __name__ == '__main__':

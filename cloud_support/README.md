@@ -28,9 +28,9 @@ The generators do not enumerate images themselves. Each one runs `sd_offset
 then copies or divides what it wrote. A task file made here is the same document
 `sd_offset` writes directly.
 
-Run them from a checkout with the project virtualenv active, on a machine that
-can read a PDS3 holdings tree (the local mount is fine; the URLs written into
-the file are a separate matter, below).
+Run them from a checkout with the project virtualenv active, on a machine
+configured to read a PDS3 holdings tree the ordinary way -- `PDS3_HOLDINGS_DIR`
+or `environment.pds3_holdings_root` in the configuration.
 
 ```bash
 python cloud_support/scripts/make_nhlorri_tasks.py \
@@ -38,20 +38,32 @@ python cloud_support/scripts/make_nhlorri_tasks.py \
     --output-dir ~/tasks
 ```
 
-`--holdings-root` is required and has no default on purpose. The image and label
-URLs a task carries are absolute and are fixed when the task is written, so they
-must name the holdings the **cloud worker** will read. A task file generated
-against `/local/pds` is useless to an instance that has no such mount, and
-nothing downstream would notice until the tasks started failing.
+`--holdings-root` is required and has no default on purpose, and it governs the
+task file alone. **It does not redirect the enumeration**: `sd_offset` reads the
+holdings this machine is already configured for, which is usually a local mount
+and is the fastest thing to enumerate from. What the flag names is where the
+*workers* will read, and every image and label URL is rewritten under it before
+the file is written.
 
-Because that mistake is invisible until then, the generators check for it: the
-holdings root is handed to `sd_offset` through the environment, which is where
-the dataset layer reads it, and every URL in what came back is checked against
-what was asked for. A configuration file setting
-`environment.pds3_holdings_root` takes precedence over the environment, so if
-`nav_default_config.yaml` (or a `--config-file` passed through) names a root,
-the generator stops and says so rather than writing a file full of unreachable
-URLs.
+The rewrite is a matter of exchanging one holdings root for another: everything
+from the volumes directory onward (`volumes/` for most instruments,
+`calibrated/` for Cassini) identifies the file, and everything before it is the
+root. So an enumeration that produced
+
+```text
+/local/pds/holdings/calibrated/COISS_2xxx/COISS_2001/data/.../N..._CALIB.IMG
+```
+
+is written into the task file as
+
+```text
+gs://my-bucket/holdings/calibrated/COISS_2xxx/COISS_2001/data/.../N..._CALIB.IMG
+```
+
+and each run prints the root it read and the root it wrote. The local root is
+read back from the URLs rather than assumed, and every URL in a file has to
+agree on it; a file whose URLs come from two roots, or one whose URLs lie under
+no volumes directory at all, stops the run rather than being half rewritten.
 
 Anything after a bare `--` is passed through to `sd_offset`, so the usual
 selection options are available. To re-run only what has not been navigated yet:

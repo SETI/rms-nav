@@ -1,7 +1,9 @@
 """Unit tests for the shared machinery behind the cloud-task generators.
 
-Only the volume grouping has anything to decide.  The rest of the module runs
-sd_offset and copies what it wrote, and is exercised by running it.
+Two things here decide something: how volumes are divided into groups, and how
+a URL the enumeration wrote for this machine is re-rooted for the workers.  The
+rest of the module runs sd_offset and copies what it wrote, and is exercised by
+running it.
 
 Run these with ``pytest cloud_support/tests``; the project's default test paths
 cover the package alone.
@@ -104,3 +106,121 @@ def test_a_target_of_zero_is_refused() -> None:
     with pytest.raises(ValueError) as exc:
         common.group_volumes([('A', 10)], 0)
     assert 'must be positive' in str(exc.value)
+
+
+def a_task(*urls: str) -> common.Task:
+    """A task holding one file, with the given image and label URLs.
+
+    Parameters:
+        urls: The image URL and the label URL, in that order.
+
+    Returns:
+        The task.
+    """
+    image_url, label_url = urls
+    return {
+        'task_id': 'a-task-0',
+        'data': {
+            'dataset_name': 'coiss',
+            'files': [{'image_file_url': image_url, 'label_file_url': label_url}],
+        },
+    }
+
+
+LOCAL_IMAGE = '/local/pds/holdings/calibrated/COISS_2xxx/COISS_2001/data/a/N1_CALIB.IMG'
+LOCAL_LABEL = '/local/pds/holdings/calibrated/COISS_2xxx/COISS_2001/data/a/N1_CALIB.LBL'
+
+
+def test_both_urls_of_a_file_are_re_rooted() -> None:
+    tasks = [a_task(LOCAL_IMAGE, LOCAL_LABEL)]
+
+    common.retarget_urls(
+        tasks, volumes_dir='calibrated', holdings_root='gs://bucket/holdings', path=Path('t.json')
+    )
+
+    assert tasks[0]['data']['files'][0]['image_file_url'] == (
+        'gs://bucket/holdings/calibrated/COISS_2xxx/COISS_2001/data/a/N1_CALIB.IMG'
+    )
+    assert tasks[0]['data']['files'][0]['label_file_url'] == (
+        'gs://bucket/holdings/calibrated/COISS_2xxx/COISS_2001/data/a/N1_CALIB.LBL'
+    )
+
+
+def test_the_root_that_was_replaced_is_reported() -> None:
+    tasks = [a_task(LOCAL_IMAGE, LOCAL_LABEL)]
+
+    local_root = common.retarget_urls(
+        tasks, volumes_dir='calibrated', holdings_root='gs://bucket/holdings', path=Path('t.json')
+    )
+
+    assert local_root == '/local/pds/holdings'
+
+
+def test_a_trailing_slash_on_the_target_does_not_double() -> None:
+    tasks = [a_task(LOCAL_IMAGE, LOCAL_LABEL)]
+
+    common.retarget_urls(
+        tasks, volumes_dir='calibrated', holdings_root='gs://bucket/holdings/', path=Path('t.json')
+    )
+
+    assert '//calibrated/' not in tasks[0]['data']['files'][0]['image_file_url']
+
+
+def test_a_local_root_spelled_like_the_volumes_directory_splits_at_the_last_one() -> None:
+    # Nothing below a holdings root repeats the volumes directory, so the last
+    # occurrence is the seam even when the root itself contains the word.
+    image = '/data/volumes/holdings/volumes/GO_0xxx/GO_0002/RAW_CAL/C1R.IMG'
+    label = '/data/volumes/holdings/volumes/GO_0xxx/GO_0002/RAW_CAL/C1R.LBL'
+    tasks = [a_task(image, label)]
+
+    local_root = common.retarget_urls(
+        tasks, volumes_dir='volumes', holdings_root='gs://bucket/h', path=Path('t.json')
+    )
+
+    assert local_root == '/data/volumes/holdings'
+    assert tasks[0]['data']['files'][0]['image_file_url'] == (
+        'gs://bucket/h/volumes/GO_0xxx/GO_0002/RAW_CAL/C1R.IMG'
+    )
+
+
+def test_a_url_under_no_volumes_directory_is_refused() -> None:
+    tasks = [a_task('/somewhere/else/N1_CALIB.IMG', '/somewhere/else/N1_CALIB.LBL')]
+
+    with pytest.raises(SystemExit) as exc:
+        common.retarget_urls(
+            tasks, volumes_dir='calibrated', holdings_root='gs://bucket/h', path=Path('t.json')
+        )
+    assert 'lies under no "calibrated" directory' in str(exc.value)
+
+
+def test_two_local_roots_in_one_file_are_refused() -> None:
+    tasks = [
+        a_task(LOCAL_IMAGE, LOCAL_LABEL),
+        a_task(
+            '/other/holdings/calibrated/COISS_2xxx/COISS_2001/data/a/N2_CALIB.IMG',
+            '/other/holdings/calibrated/COISS_2xxx/COISS_2001/data/a/N2_CALIB.LBL',
+        ),
+    ]
+
+    with pytest.raises(SystemExit) as exc:
+        common.retarget_urls(
+            tasks, volumes_dir='calibrated', holdings_root='gs://bucket/h', path=Path('t.json')
+        )
+    assert 'more than one holdings root' in str(exc.value)
+
+
+def test_no_tasks_re_roots_nothing() -> None:
+    assert (
+        common.retarget_urls(
+            [], volumes_dir='calibrated', holdings_root='gs://bucket/h', path=Path('t.json')
+        )
+        is None
+    )
+
+
+def test_the_volumes_directory_comes_from_the_dataset() -> None:
+    assert common.volumes_dir_name('coiss') == 'calibrated'
+
+
+def test_an_instrument_read_from_the_volumes_tree_says_so() -> None:
+    assert common.volumes_dir_name('gossi') == 'volumes'

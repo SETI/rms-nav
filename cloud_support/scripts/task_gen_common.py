@@ -6,20 +6,22 @@ task JSON, and then copies or divides what that program wrote.  A change to
 the task schema reaches these scripts without their being touched, and a task
 file is the same document whether it was made here or by hand.
 
-Every generator requires the holdings root as an argument.  The image and
-label URLs a task carries are absolute and are fixed when the task is written,
-so they must name the holdings the cloud worker will read, which is rarely the
-holdings the generating workstation reads.
+Every generator requires the holdings root a cloud worker will read, and that
+root governs the task file alone.  Enumeration reads the holdings this machine
+is already configured for, through PDS3_HOLDINGS_DIR or the configuration, the
+same as any other sd_offset run; the URLs that come back are pointed at the
+worker's holdings before the file is written.  The two are rarely the same
+place, and a task carries its URLs absolute, so writing the local ones would
+leave a file of paths no instance can resolve.
 """
 
 import argparse
 import json
-import os
 import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,6 +33,20 @@ from spindoctor.dataset import dataset_name_to_class  # noqa: E402
 
 Task = dict[str, Any]
 """One entry of a cloud-tasks JSON array."""
+
+
+class TaskFile(NamedTuple):
+    """What one written task file amounts to.
+
+    Attributes:
+        count: The number of tasks in it.
+        local_root: The holdings root the enumeration read, which the tasks'
+            URLs were re-rooted away from.  None when the file holds no tasks
+            and nothing was re-rooted.
+    """
+
+    count: int
+    local_root: str | None
 
 
 def volume_names(dataset_name: str) -> tuple[str, ...]:
@@ -56,6 +72,30 @@ def volume_names(dataset_name: str) -> tuple[str, ...]:
     return tuple(volumes)
 
 
+def volumes_dir_name(dataset_name: str) -> str:
+    """The holdings subdirectory a dataset's products live under.
+
+    ``volumes`` for most instruments and ``calibrated`` for Cassini, which is
+    navigated from its calibrated products.  It is the first path segment below
+    the holdings root, and so the seam at which one holdings root can be
+    exchanged for another.
+
+    Parameters:
+        dataset_name: The dataset name, as spelled on an sd_* command line.
+
+    Returns:
+        The subdirectory name.
+
+    Raises:
+        ValueError: If the dataset declares none.
+    """
+    dataset_class = dataset_name_to_class(dataset_name)
+    name: str = getattr(dataset_class, '_VOLUMES_DIR_NAME', '')
+    if not name:
+        raise ValueError(f'Dataset "{dataset_name}" declares no volumes directory')
+    return name
+
+
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the arguments every generator accepts.
 
@@ -67,9 +107,10 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         metavar='URL',
         help="""The PDS3 holdings root the cloud workers will read, for example
-        a gs:// mirror or https://pds-rings.seti.org/holdings.  Required: it is
-        written into every image and label URL in the task file, so a task file
-        made against a local mount is useless to a worker.""",
+        a gs:// mirror or https://pds-rings.seti.org/holdings.  Required, and it
+        governs the task file alone: every image and label URL is written under
+        it, while the enumeration reads the holdings this machine is configured
+        for through PDS3_HOLDINGS_DIR or the configuration.""",
     )
     parser.add_argument(
         '--output-dir',
@@ -111,8 +152,8 @@ def write_task_file(
     arguments: argparse.Namespace,
     dataset_name: str,
     volumes: list[str] | None = None,
-) -> int:
-    """Write one cloud-task file by running sd_offset, and count what it wrote.
+) -> TaskFile:
+    """Write one cloud-task file by running sd_offset, re-rooted for the workers.
 
     Parameters:
         output_path: The task file to write.
@@ -122,24 +163,18 @@ def write_task_file(
             every volume the dataset covers.
 
     Returns:
-        The number of tasks written.
+        The number of tasks written and the holdings root they were enumerated
+        from.
 
     Raises:
-        SystemExit: If sd_offset fails, reporting the command that failed.  A
+        SystemExit: If sd_offset fails, reporting the command that failed -- a
             generator has nothing to write once an enumeration has failed, and
             the command is what an operator needs to see, not a traceback
-            through this module.
+            through this module -- or if the URLs it wrote cannot be re-rooted.
     """
     command = [
         arguments.sd_offset,
         dataset_name,
-        # The dataset layer reads the holdings root from the environment (or
-        # from a configuration file); sd_offset builds its DataSet before it
-        # parses this flag, so the flag alone would leave the enumeration
-        # reading whatever the environment happens to hold.  Both are set to
-        # the same value, and what actually came out is checked below.
-        '--pds3-holdings-root',
-        arguments.holdings_root,
         '--output-cloud-tasks-file',
         str(output_path),
         # Enumeration is the whole job here, and its progress is reported by
@@ -157,51 +192,84 @@ def write_task_file(
     command += list(arguments.sd_offset_args)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    environment = os.environ | {'PDS3_HOLDINGS_DIR': arguments.holdings_root}
-    result = subprocess.run(command, check=False, env=environment)
+    result = subprocess.run(command, check=False)
     if result.returncode != 0:
         printable = ' '.join(shlex.quote(part) for part in command)
         raise SystemExit(
             f'sd_offset exited with status {result.returncode}; the command was:\n  {printable}'
         )
     tasks = read_task_file(output_path)
-    check_holdings_root(tasks, output_path, arguments.holdings_root)
-    return len(tasks)
+    local_root = retarget_urls(
+        tasks,
+        volumes_dir=volumes_dir_name(dataset_name),
+        holdings_root=arguments.holdings_root,
+        path=output_path,
+    )
+    save_task_file(tasks, output_path)
+    return TaskFile(count=len(tasks), local_root=local_root)
 
 
-def check_holdings_root(tasks: list[Task], path: Path, holdings_root: str) -> None:
-    """Fail unless every URL in a task file names the requested holdings root.
+def retarget_urls(
+    tasks: list[Task],
+    *,
+    volumes_dir: str,
+    holdings_root: str,
+    path: Path,
+) -> str | None:
+    """Point every URL in the tasks at the holdings a cloud worker reads.
 
-    The dataset layer resolves the holdings root from the configuration first
-    and the environment second, so a configuration file naming a root of its
-    own wins over what a generator asks for, and the tasks would carry URLs
-    the cloud worker cannot read.  Nothing downstream would notice: the file
-    is well formed, and only the workers, hours later, would find out.
+    The enumeration reads this machine's holdings and writes their paths into
+    the tasks.  A worker reads neither, so each URL is re-rooted here: the part
+    from the volumes directory onward is what identifies the file, and the part
+    before it is one holdings root being exchanged for another.
+
+    The local root is read back from the URLs rather than resolved from the
+    configuration, so it is what the enumeration actually did and not what this
+    script believes it should have done.  Every URL has to agree on it; two
+    roots in one file would mean the run enumerated from somewhere this cannot
+    account for, and re-rooting only some of them would produce a file that is
+    half wrong and looks whole.
 
     Parameters:
-        tasks: The tasks that were written.
-        path: The file they were written to, named in the message.
-        holdings_root: The holdings root the generator was asked for.
+        tasks: The tasks to re-root, modified in place.
+        volumes_dir: The holdings subdirectory the dataset's products live
+            under, which is where the root ends.
+        holdings_root: The holdings root to write.
+        path: The file the tasks came from, named in any message.
+
+    Returns:
+        The local holdings root that was replaced, or None if there were no
+        tasks to re-root.
 
     Raises:
-        SystemExit: If any image or label URL is somewhere else.
+        SystemExit: If a URL does not lie under a volumes directory, or if the
+            URLs do not agree on one local root.
     """
-    expected = holdings_root.rstrip('/')
+    marker = f'/{volumes_dir}/'
+    target = holdings_root.rstrip('/')
+    local_roots: set[str] = set()
     for task in tasks:
         for task_file in task['data']['files']:
             for key in ('image_file_url', 'label_file_url'):
                 url = str(task_file[key])
-                if not url.startswith(f'{expected}/'):
+                # From the right: a holdings root may itself contain a path
+                # segment spelled like the volumes directory, while nothing
+                # below one ever does.
+                local_root, separator, remainder = url.rpartition(marker)
+                if not separator:
                     raise SystemExit(
-                        f'{path} names images under a different holdings root than the '
-                        f'--holdings-root asked for:\n'
-                        f'  asked for: {expected}\n'
-                        f'  written:   {url}\n'
-                        'A configuration file is setting environment.pds3_holdings_root, '
-                        'which the dataset layer reads before the environment; remove that '
-                        'setting (nav_default_config.yaml, or a --config-file passed through) '
-                        'and generate again.'
+                        f'{path} holds a URL that lies under no "{volumes_dir}" '
+                        f'directory, so its holdings root cannot be told from the '
+                        f'rest of it:\n  {url}'
                     )
+                local_roots.add(local_root)
+                task_file[key] = f'{target}{marker}{remainder}'
+    if len(local_roots) > 1:
+        raise SystemExit(
+            f'{path} holds URLs under more than one holdings root, which no single '
+            f'root can replace:\n  ' + '\n  '.join(sorted(local_roots))
+        )
+    return local_roots.pop() if local_roots else None
 
 
 def read_task_file(path: Path) -> list[Task]:
@@ -316,17 +384,28 @@ def group_volumes(volume_counts: list[tuple[str, int]], target: int) -> list[tup
     return groups
 
 
-def report_files(written: list[tuple[Path, int]]) -> None:
+def report_files(
+    written: list[tuple[Path, int]],
+    *,
+    local_root: str | None = None,
+    holdings_root: str | None = None,
+) -> None:
     """Print what was written, one line per file plus a total.
 
     Parameters:
         written: Each file written, with the number of tasks in it.
+        local_root: The holdings root the enumeration read.
+        holdings_root: The holdings root the tasks were written under.
     """
     if not written:
         print('No task files written (the selection matched no images)')
         return
     width = max(len(path.name) for path, _ in written)
     print()
+    if local_root is not None and holdings_root is not None:
+        print(f'Enumerated from {local_root}')
+        print(f'URLs written as {holdings_root.rstrip("/")}')
+        print()
     print('Task files written:')
     for path, count in written:
         print(f'  {path.name:<{width}}  {count:>7,} tasks  ({path.parent})')

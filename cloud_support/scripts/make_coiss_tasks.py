@@ -92,19 +92,21 @@ def main() -> None:
         keep_work_dir = True
 
     try:
-        volume_counts = _enumerate_volumes(volumes, arguments=arguments, work_dir=work_dir)
+        volume_counts, local_root = _enumerate_volumes(
+            volumes, arguments=arguments, work_dir=work_dir
+        )
         groups = common.group_volumes(volume_counts, arguments.group_size)
         written = _write_groups(groups, arguments=arguments, work_dir=work_dir)
     finally:
         if not keep_work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
 
-    common.report_files(written)
+    common.report_files(written, local_root=local_root, holdings_root=arguments.holdings_root)
 
 
 def _enumerate_volumes(
     volumes: list[str], *, arguments: argparse.Namespace, work_dir: Path
-) -> list[tuple[str, int]]:
+) -> tuple[list[tuple[str, int]], str | None]:
     """Enumerate each volume into its own task file and count its images.
 
     Parameters:
@@ -114,23 +116,27 @@ def _enumerate_volumes(
 
     Returns:
         Each volume with the number of images enumerated for it, in the order
-        the volumes were given.
+        the volumes were given, and the holdings root they were enumerated
+        from.
     """
     volume_counts: list[tuple[str, int]] = []
+    local_root = None
     running_total = 0
     for index, volume in enumerate(volumes, start=1):
-        count = common.write_task_file(
+        task_file = common.write_task_file(
             work_dir / f'{volume}.json',
             arguments=arguments,
             dataset_name=arguments.dataset,
             volumes=[volume],
         )
-        volume_counts.append((volume, count))
-        running_total += count
+        volume_counts.append((volume, task_file.count))
+        local_root = task_file.local_root or local_root
+        running_total += task_file.count
         print(
-            f'  [{index:>3}/{len(volumes)}] {volume}: {count:>6,} images ({running_total:,} so far)'
+            f'  [{index:>3}/{len(volumes)}] {volume}: {task_file.count:>6,} images '
+            f'({running_total:,} so far)'
         )
-    return volume_counts
+    return volume_counts, local_root
 
 
 def _write_groups(
