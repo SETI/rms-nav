@@ -7,7 +7,9 @@ holdings layout predicts; an index row names the camera that took the image, in
 a spelling that differs per instrument and may be masked or absent altogether.
 Each of those readings has to answer None rather than raise when the value is
 not there, because an image whose camera the index does not name is still an
-image the enumeration yields.
+image the enumeration yields.  A row's filespec is read the same way: it names
+an image, or it names a product the instrument's dataset does not navigate,
+and only a filespec whose shape no rule accounts for is an error.
 """
 
 from collections.abc import Callable
@@ -221,3 +223,34 @@ def test_camera_from_index_row_skips_masked_value() -> None:
 def test_camera_from_index_row_without_index() -> None:
     """An image not enumerated from an index has no camera."""
     assert DataSetPDS3CassiniISS.camera_from_index_row({}) is None
+
+
+# --- filespecs naming a product the dataset does not navigate (issue #17) ---
+
+
+@pytest.mark.parametrize(
+    ('filespec', 'expected'),
+    [
+        ('SL9/C0248806645R.LBL', 'C0248806645R'),
+        ('RAW_CAL/C0059468500S.LBL', 'C0059468500S'),
+        ('REDO/E11/IO/C0420361523R.LBL', 'C0420361523R'),
+        ('SL9/C0248806645G.LBL', None),
+        ('SL9/C0248806645.LBL', None),
+    ],
+)
+def test_galileo_img_name_from_filespec(filespec: str, expected: str | None) -> None:
+    """A filespec names an image to navigate, or names something else.
+
+    Parameters:
+        filespec: The label filespec an index row carries.
+        expected: The image name it yields, or None when the product is not
+            one this dataset navigates.
+    """
+    assert DataSetPDS3GalileoSSI._get_img_name_from_label_filespec(filespec) == expected
+
+
+def test_galileo_unknown_target_directory_still_raises() -> None:
+    """A directory no rule accounts for stays an error rather than a silent skip."""
+    with pytest.raises(ValueError) as exc:
+        DataSetPDS3GalileoSSI._get_img_name_from_label_filespec('NOSUCH/C0248806645R.LBL')
+    assert 'bad target directory' in str(exc.value)

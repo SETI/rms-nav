@@ -42,6 +42,7 @@ from tests.spindoctor.conftest import (
 )
 
 from spindoctor.dataset.dataset import ImageFile
+from spindoctor.dataset.dataset_pds3 import DataSetPDS3
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
 from spindoctor.dataset.results_filter import (
     RESULTS_FILTER_BATCH_SIZE,
@@ -456,7 +457,7 @@ class FakeIndexCache:
 
 
 def install_fake_index(
-    ds: DataSetPDS3CassiniISS,
+    ds: DataSetPDS3,
     monkeypatch: pytest.MonkeyPatch,
     volume_filespecs: dict[str, list[str]],
 ) -> list[str]:
