@@ -65,6 +65,11 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Parameters:
             filespec: The file specification string to parse.
 
+        Returns:
+            The image name if the filespec names an image this dataset
+            navigates. None if the filespec is well formed and names something
+            else, which the caller drops without comment.
+
         Raises:
             ValueError: If the file specification format is invalid.
         """
@@ -129,6 +134,13 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         if not img_name.endswith('.LBL'):
             return None
         img_name = img_name.rsplit('.', maxsplit=1)[0]
+        if not DataSetPDS3GalileoSSI._img_name_valid(img_name):
+            # Only the R and S products are navigated, and a name outside that
+            # rule carries no image number for the enumeration to read.  The
+            # archive holds such names: GO_0016's SL9 directory stores a G
+            # product beside the R product of each of its thirteen images, a
+            # second representation of an image the enumeration already has.
+            return None
         return img_name
 
     @staticmethod

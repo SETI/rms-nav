@@ -723,8 +723,7 @@ same change.
 - **Voyager ISS:** #19 — star navigation broken; overlaps the per-camera
   Voyager distortion split (#355) and limiting-magnitude (#130) work, so
   schedule together. Rotation fitting is currently off for cost (#126).
-- **Galileo SSI:** #18 — star navigation broken (same cluster); #17 —
-  REDO product handling in the dataset layer.
+- **Galileo SSI:** #18 — star navigation broken (same cluster).
 - **New Horizons LORRI:** #2 — PSF sigma calibration; #138 — decide and
   enforce the `_eng` product policy; #33 (deferred) — new instrument
   kernel.

@@ -70,6 +70,12 @@ twelve characters exactly, matched **uppercase only**:
 
    C0349875200R
 
+A filespec whose image name falls outside that rule names a product this
+dataset does not navigate, and its row is dropped without comment. The archive
+holds such products: ``GO_0016``'s ``SL9`` directory stores a ``G`` product
+beside the ``R`` product of each of its thirteen images, a second
+representation of an image the enumeration already yields.
+
 **Image numbering.** The image number is the ten digits between the leading
 ``C`` and the trailing letter. Every image number in a volume exceeds every
 image number in the volumes before it, so ``--last-image-num`` stops scanning
