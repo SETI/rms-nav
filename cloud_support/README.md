@@ -38,6 +38,9 @@ python cloud_support/scripts/make_nhlorri_tasks.py \
     --output-dir ~/tasks
 ```
 
+`--output-dir` may be a cloud URL as readily as a path, since `cloud_tasks run
+--task-file` loads a task file from either.
+
 `--holdings-root` is required and has no default on purpose, and it governs the
 task file alone. **It does not redirect the enumeration**: `sd_offset` reads the
 holdings this machine is already configured for, which is usually a local mount
@@ -120,6 +123,10 @@ star-catalogs/UCAC4     -> UCAC4_PATH
 star-catalogs/YBSC      -> YBSC_PATH
 ```
 
+All three directories are checked once the disk is mounted, so a disk missing
+one of them stops the instance rather than reaching a worker that fails an image
+at a time.
+
 cloud_tasks creates instances with a boot disk and nothing else, so the script
 attaches the data disk itself through the Compute API, using the instance's own
 service account token, and then mounts it `ro,noload`. Three things have to be
@@ -139,7 +146,14 @@ Everything an operator changes is in the settings block at the top of the
 script: the git URL and ref to install, which worker to run
 (`sd_offset_cloud_tasks` by default, but any of the `*_cloud_tasks` programs),
 the disk name and mount point, the results root, and the holdings root. Each is
-`${VAR:-default}`, so a wrapper may export them instead of editing.
+`${VAR:-default}`, so a wrapper may export them instead of editing. A results
+root left at the template's placeholder stops the instance before it installs
+anything.
+
+The ref may name a branch, a tag or a commit: the checkout is detached, so a
+pool can be pinned to the revision it was meant to run rather than to wherever a
+branch has moved since. Whichever is given, the resolved commit is logged before
+installation, so what an instance ran is recoverable from its log.
 
 The script also pins `OMP_NUM_THREADS` and friends to 1. cloud_tasks already
 runs `RMS_CLOUD_TASKS_NUM_TASKS_PER_INSTANCE` tasks at once, one per vCPU;

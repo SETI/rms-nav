@@ -22,6 +22,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from filecache import FCPath
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import task_gen_common as common
@@ -124,7 +126,7 @@ def _enumerate_volumes(
     running_total = 0
     for index, volume in enumerate(volumes, start=1):
         task_file = common.write_task_file(
-            work_dir / f'{volume}.json',
+            FCPath(work_dir / f'{volume}.json'),
             arguments=arguments,
             dataset_name=arguments.dataset,
             volumes=[volume],
@@ -141,7 +143,7 @@ def _enumerate_volumes(
 
 def _write_groups(
     groups: list[tuple[list[str], int]], *, arguments: argparse.Namespace, work_dir: Path
-) -> list[tuple[Path, int]]:
+) -> list[tuple[FCPath, int]]:
     """Merge the per-volume task files of each group into one task file.
 
     Parameters:
@@ -157,11 +159,10 @@ def _write_groups(
     for index, (group_volumes, count) in enumerate(groups, start=1):
         tasks: list[common.Task] = []
         for volume in group_volumes:
-            tasks += common.read_task_file(work_dir / f'{volume}.json')
+            tasks += common.read_task_file(FCPath(work_dir / f'{volume}.json'))
         task_number = common.renumber_tasks(tasks, first_number=task_number)
-        output_path = (
-            Path(arguments.output_dir)
-            / f'{arguments.dataset}_tasks_{index:02d}_{group_volumes[0]}_{group_volumes[-1]}.json'
+        output_path = arguments.output_dir / (
+            f'{arguments.dataset}_tasks_{index:02d}_{group_volumes[0]}_{group_volumes[-1]}.json'
         )
         print(
             f'Group {index}: {len(group_volumes)} volumes, {count:,} images -> {output_path.name}'

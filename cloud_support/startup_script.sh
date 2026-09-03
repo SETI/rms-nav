@@ -79,6 +79,10 @@ die() {
     exit 1
 }
 
+# A git URL may carry a credential, and everything said here reaches the serial
+# console, which is readable by anyone who can describe the instance.
+SPINDOCTOR_GIT_URL_SAFE="$(sed -E 's#://[^/@]*@#://#' <<<"${SPINDOCTOR_GIT_URL}")"
+
 say "Starting on $(hostname), job ${RMS_CLOUD_TASKS_JOB_ID:-unknown}"
 
 ################################################################################
@@ -134,6 +138,10 @@ attach_data_disk() {
 if [[ ${DATA_DISK_NAME} == 'CHANGE-ME' ]]; then
     die 'DATA_DISK_NAME is unset; edit the settings block of this script'
 fi
+if [[ ${NAV_RESULTS_ROOT} == *CHANGE-ME* ]]; then
+    die "NAV_RESULTS_ROOT is still the template's placeholder (${NAV_RESULTS_ROOT});
+    a worker that cannot write its results is worth stopping before it starts"
+fi
 
 attach_data_disk || die "Could not attach ${DATA_DISK_NAME}: check that the disk
     is in zone ${ZONE} (pin \"zone:\" in the job configuration), that no
@@ -165,8 +173,10 @@ else
     say "Mounted ${PARTITION} read-only on ${DATA_DISK_MOUNT}"
 fi
 
-[[ -d ${DATA_DISK_MOUNT}/SPICE ]] ||
-    die "${DATA_DISK_MOUNT} holds no SPICE directory; wrong disk or wrong layout"
+for required in SPICE star-catalogs/UCAC4 star-catalogs/YBSC; do
+    [[ -d ${DATA_DISK_MOUNT}/${required} ]] ||
+        die "${DATA_DISK_MOUNT} holds no ${required} directory; wrong disk or wrong layout"
+done
 
 ################################################################################
 # Install
@@ -193,18 +203,27 @@ apt_get install -y git python3 python3-pip python3-venv || die 'apt-get install 
 if [[ -d ${SPINDOCTOR_DIR}/.git ]]; then
     say "Reusing the checkout in ${SPINDOCTOR_DIR}"
 else
-    say "Cloning ${SPINDOCTOR_GIT_URL} at ${SPINDOCTOR_GIT_REF} into ${SPINDOCTOR_DIR}"
-    git clone --depth 1 --branch "${SPINDOCTOR_GIT_REF}" \
-        "${SPINDOCTOR_GIT_URL}" "${SPINDOCTOR_DIR}" || die 'git clone failed'
+    # Checked out detached rather than cloned at a branch, so that
+    # SPINDOCTOR_GIT_REF may name a commit and a pool can be pinned to the
+    # revision it was meant to run rather than to wherever a branch has moved.
+    say "Cloning ${SPINDOCTOR_GIT_URL_SAFE} at ${SPINDOCTOR_GIT_REF} into ${SPINDOCTOR_DIR}"
+    git clone --filter=blob:none "${SPINDOCTOR_GIT_URL}" "${SPINDOCTOR_DIR}" ||
+        die 'git clone failed'
+    git -C "${SPINDOCTOR_DIR}" checkout --detach "${SPINDOCTOR_GIT_REF}" ||
+        die "No such revision in ${SPINDOCTOR_GIT_URL_SAFE}: ${SPINDOCTOR_GIT_REF}"
 fi
+
+INSTALLED_COMMIT="$(git -C "${SPINDOCTOR_DIR}" rev-parse HEAD)" ||
+    die 'Cannot read the checked-out commit'
+say "Installing commit ${INSTALLED_COMMIT}"
 
 cd "${SPINDOCTOR_DIR}" || die "Cannot enter ${SPINDOCTOR_DIR}"
 python3 -m venv venv || die 'Cannot create the virtual environment'
 source venv/bin/activate
-/seti/newnav/capped-run.sh pip install --upgrade pip || die 'Cannot upgrade pip'
-/seti/newnav/capped-run.sh pip install -e . || die 'Cannot install SpinDoctor'
+pip install --upgrade pip || die 'Cannot upgrade pip'
+pip install -e . || die 'Cannot install SpinDoctor'
 say "Installed $(python3 -c 'import spindoctor; print(spindoctor.__version__)' 2>/dev/null ||
-    echo 'SpinDoctor') from ${SPINDOCTOR_GIT_REF}"
+    echo 'SpinDoctor') at ${INSTALLED_COMMIT}"
 
 ################################################################################
 # Environment for the worker
@@ -219,7 +238,7 @@ export YBSC_PATH="${DATA_DISK_MOUNT}/star-catalogs/YBSC"
 export PDS3_HOLDINGS_DIR
 export NAV_RESULTS_ROOT
 export FILECACHE_CACHE_ROOT
-mkdir -p "${FILECACHE_CACHE_ROOT}"
+mkdir -p "${FILECACHE_CACHE_ROOT}" || die "Cannot create ${FILECACHE_CACHE_ROOT}"
 
 # One task already occupies one core: cloud_tasks runs
 # RMS_CLOUD_TASKS_NUM_TASKS_PER_INSTANCE of them at once.  Left unpinned, each

@@ -31,6 +31,32 @@ PLANET_VOLUME_DIGIT = {
 """The digit of a VGISS volume name that names the encounter."""
 
 
+def selected_planets(names: str) -> list[str]:
+    """The encounters named on the command line, each once, in archive order.
+
+    A name repeated on the command line is one encounter, not two: writing its
+    file twice would leave one file and count its tasks twice.  The order is
+    the archive's rather than the caller's, so that two spellings of the same
+    selection report the same thing.
+
+    Parameters:
+        names: The comma-separated encounter names, as typed.
+
+    Returns:
+        The encounter names, deduplicated, in the order PLANET_VOLUME_DIGIT
+        declares them.
+
+    Raises:
+        ValueError: If a name is not one of the four encounters.
+    """
+    wanted = {name.strip().lower() for name in names.split(',') if name.strip()}
+    unknown = sorted(wanted - set(PLANET_VOLUME_DIGIT))
+    if unknown:
+        valid = ', '.join(PLANET_VOLUME_DIGIT)
+        raise ValueError(f'Unknown planet(s) {", ".join(unknown)}; valid names: {valid}')
+    return [planet for planet in PLANET_VOLUME_DIGIT if planet in wanted]
+
+
 def planet_volumes(planet: str) -> list[str]:
     """The Voyager volumes of one encounter, in archive order.
 
@@ -70,7 +96,10 @@ def main() -> None:
     common.add_common_arguments(parser)
     arguments = parser.parse_args()
 
-    planets = [name.strip().lower() for name in arguments.planets.split(',') if name.strip()]
+    try:
+        planets = selected_planets(arguments.planets)
+    except ValueError as exc:
+        parser.error(str(exc))
     if not planets:
         parser.error('--planets selected no encounters')
 
@@ -78,7 +107,7 @@ def main() -> None:
     local_root = None
     for planet in planets:
         volumes = planet_volumes(planet)
-        output_path = Path(arguments.output_dir) / f'{DATASET_NAME}_tasks_{planet}.json'
+        output_path = arguments.output_dir / f'{DATASET_NAME}_tasks_{planet}.json'
         print(
             f'Enumerating {planet} ({len(volumes)} volumes, '
             f'{volumes[0]} to {volumes[-1]}) into {output_path}'

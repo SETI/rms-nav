@@ -27,7 +27,7 @@ def main() -> None:
     common.add_common_arguments(parser)
     arguments = parser.parse_args()
 
-    output_path = Path(arguments.output_dir) / f'{DATASET_NAME}_tasks.json'
+    output_path = arguments.output_dir / f'{DATASET_NAME}_tasks.json'
     print(f'Enumerating {DATASET_NAME} into {output_path}')
     written = common.write_task_file(output_path, arguments=arguments, dataset_name=DATASET_NAME)
     common.report_files(

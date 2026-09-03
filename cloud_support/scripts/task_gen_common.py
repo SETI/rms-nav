@@ -23,6 +23,8 @@ import sys
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from filecache import FCPath
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Run from a source tree without requiring an installed package, the same way
@@ -64,6 +66,9 @@ def volume_names(dataset_name: str) -> tuple[str, ...]:
 
     Raises:
         ValueError: If the dataset declares no volumes.
+        KeyError: If no dataset goes by that name.  Each generator names its
+            own dataset, so this reports a mistake in a script rather than
+            anything a caller typed.
     """
     dataset_class = dataset_name_to_class(dataset_name)
     volumes: tuple[str, ...] = getattr(dataset_class, '_ALL_VOLUME_NAMES', ())
@@ -88,6 +93,7 @@ def volumes_dir_name(dataset_name: str) -> str:
 
     Raises:
         ValueError: If the dataset declares none.
+        KeyError: If no dataset goes by that name.
     """
     dataset_class = dataset_name_to_class(dataset_name)
     name: str = getattr(dataset_class, '_VOLUMES_DIR_NAME', '')
@@ -105,6 +111,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--holdings-root',
         required=True,
+        type=holdings_root_argument,
         metavar='URL',
         help="""The PDS3 holdings root the cloud workers will read, for example
         a gs:// mirror or https://pds-rings.seti.org/holdings.  Required, and it
@@ -115,8 +122,11 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         '--output-dir',
         default='.',
+        type=FCPath,
         metavar='DIR',
-        help='Directory to write the task file(s) into (default: the current directory)',
+        help="""Directory to write the task file(s) into; a cloud URL is
+        allowed, since a task file is loaded into a queue by URL as readily as
+        by path (default: the current directory)""",
     )
     parser.add_argument(
         '--nav-models',
@@ -147,7 +157,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def write_task_file(
-    output_path: Path,
+    output_path: FCPath,
     *,
     arguments: argparse.Namespace,
     dataset_name: str,
@@ -191,7 +201,7 @@ def write_task_file(
         command += ['--nav-techniques', arguments.nav_techniques]
     command += list(arguments.sd_offset_args)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    make_directory(output_path.parent)
     result = subprocess.run(command, check=False)
     if result.returncode != 0:
         printable = ' '.join(shlex.quote(part) for part in command)
@@ -214,7 +224,7 @@ def retarget_urls(
     *,
     volumes_dir: str,
     holdings_root: str,
-    path: Path,
+    path: FCPath,
 ) -> str | None:
     """Point every URL in the tasks at the holdings a cloud worker reads.
 
@@ -246,7 +256,9 @@ def retarget_urls(
             URLs do not agree on one local root.
     """
     marker = f'/{volumes_dir}/'
-    target = holdings_root.rstrip('/')
+    target = holdings_root.strip().rstrip('/')
+    if not target:
+        raise SystemExit(f'{path} cannot be written under a holdings root that names nowhere')
     local_roots: set[str] = set()
     for task in tasks:
         for task_file in task['data']['files']:
@@ -272,7 +284,41 @@ def retarget_urls(
     return local_roots.pop() if local_roots else None
 
 
-def read_task_file(path: Path) -> list[Task]:
+def make_directory(directory: FCPath) -> None:
+    """Create a local directory, and leave a remote one alone.
+
+    A cloud object store has no directories to create; writing the object is
+    what makes its prefix exist.
+
+    Parameters:
+        directory: The directory to create.
+    """
+    if directory.is_local():
+        Path(directory.as_posix()).mkdir(parents=True, exist_ok=True)
+
+
+def holdings_root_argument(value: str) -> str:
+    """Accept a holdings root that can front a URL.
+
+    Parameters:
+        value: The root as typed.
+
+    Returns:
+        The root with any trailing separator removed.
+
+    Raises:
+        argparse.ArgumentTypeError: If the root is blank.  argparse enforces
+            that the option is given; only this can say that what was given
+            names nowhere, and an empty root would otherwise be written into
+            every URL as no root at all.
+    """
+    root = value.strip().rstrip('/')
+    if not root:
+        raise argparse.ArgumentTypeError('--holdings-root names no holdings')
+    return root
+
+
+def read_task_file(path: FCPath) -> list[Task]:
     """Read a cloud-task file.
 
     Parameters:
@@ -281,12 +327,12 @@ def read_task_file(path: Path) -> list[Task]:
     Returns:
         The tasks it holds.
     """
-    with path.open(encoding='utf-8') as file:
+    with path.open(mode='r', encoding='utf-8') as file:
         tasks: list[Task] = json.load(file)
     return tasks
 
 
-def save_task_file(tasks: list[Task], path: Path) -> None:
+def save_task_file(tasks: list[Task], path: FCPath) -> None:
     """Write tasks as a cloud-tasks JSON file, checking their ids are unique.
 
     A queue addresses a task by its id, so two tasks sharing one is a defect
@@ -302,8 +348,8 @@ def save_task_file(tasks: list[Task], path: Path) -> None:
     task_ids = [task['task_id'] for task in tasks]
     if len(set(task_ids)) != len(task_ids):
         raise ValueError(f'Duplicate task ids in {path}')
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('w', encoding='utf-8') as file:
+    make_directory(path.parent)
+    with path.open(mode='w', encoding='utf-8') as file:
         json.dump(tasks, file, indent=2)
 
 
@@ -385,7 +431,7 @@ def group_volumes(volume_counts: list[tuple[str, int]], target: int) -> list[tup
 
 
 def report_files(
-    written: list[tuple[Path, int]],
+    written: list[tuple[FCPath, int]],
     *,
     local_root: str | None = None,
     holdings_root: str | None = None,
