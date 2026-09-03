@@ -13,6 +13,7 @@ from tests.spindoctor.dataset.conftest import coiss_filespecs, install_fake_inde
 from spindoctor.cli.results_index import ingest_metadata_files
 from spindoctor.dataset.dataset_pds3 import DataSetPDS3
 from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
+from spindoctor.dataset.dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
 from spindoctor.dataset.results_filter import ResultsFilter, SelectionError
 from spindoctor.nav_records import UnlistableDirectoryError
 from spindoctor.results_index import open_index
@@ -46,6 +47,26 @@ def test_last_image_num_keeps_wac_frames(
         'W1000000101',
         'W1000000102',
     ]
+
+
+def test_a_galileo_name_outside_the_product_rule_drops_its_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # GO_0016's SL9 directory stores a G product beside the R product of each of
+    # its images. A G name carries no image number, and reading one raised
+    # instead of dropping the row, which ended the enumeration of every
+    # remaining volume (issue #17).
+    ds = DataSetPDS3GalileoSSI()
+    install_fake_index(
+        ds,
+        monkeypatch,
+        {'GO_0016': ['SL9/C0248806645G.LBL', 'SL9/C0248806645R.LBL']},
+    )
+
+    groups = list(ds.yield_image_files_index(volumes=['GO_0016']))
+
+    assert len(groups) == 1
+    assert groups[0].image_files[0].label_file_name == 'C0248806645R.LBL'
 
 
 def test_scan_stops_after_first_volume_fully_past_range(

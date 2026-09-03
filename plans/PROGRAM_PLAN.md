@@ -481,7 +481,7 @@ Track D so that work lands on tested ground.
 enhancement backlog and code-quality tail are burned down.
 
 - **Instruments** (after Track A proves the Cassini spine): Voyager star
-  navigation (#19), Galileo star navigation and REDO handling (#18, #17),
+  navigation (#19), Galileo star navigation (#18),
   LORRI PSF and product policy (#2, #138, #33), outer-planet ring models
   (#82, #81, #83), rotation-pyramid cost (#126), degradation classifier
   (#181), per-instrument calibration extension (re-run #230 per
@@ -591,10 +591,10 @@ from a current one at a glance.
 | C — statistics & QA | 4 | #240, #340, #533, #535 (plus the standing cross-check and campaign-report practice) |
 | D — capability completion | 73 | #28, #30, #47, #53, #54, #55, #57, #63, #66, #67, #69, #71, #72, #73, #74, #75, #76, #77, #79, #108, #118, #126, #141, #142, #231, #236, #251, #252, #253, #265, #397, #398, #411, #418, #424, #427, #433, #434, #435, #436, #437, #440, #444, #448, #455, #459, #462, #464, #465, #466, #467, #468, #472, #486, #493, #495, #496, #497, #501, #512, #513, #514, #515, #519, #520, #528, #531, #534, #536, #538, #540, #541, #542 |
 | E — test & docs debt | 27 | #122, #129, #177, #241, #242, #243, #288, #379, #391, #429, #438, #443, #446, #470, #471, #473, #483, #516, #524, #525, #530, #545, #547, #548, #549, #554, #562 |
-| F — instruments, features, hardening | 62 | #2, #13, #15, #17, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428, #494, #518, #552 |
+| F — instruments, features, hardening | 61 | #2, #13, #15, #18, #19, #21, #22, #23, #27, #33, #34, #38, #39, #43, #65, #78, #81, #82, #83, #92, #96, #97, #98, #99, #100, #101, #102, #103, #104, #105, #107, #109, #110, #119, #134, #135, #137, #138, #140, #143, #144, #147, #151, #152, #155, #157, #158, #181, #182, #183, #184, #185, #186, #187, #212, #388, #423, #428, #494, #518, #552 |
 
-Priority census across all six tracks: no Critical, 20 Essential, 65
-Important, 108 Useful, 35 Minor, 12 Defer. Every open issue carries exactly
+Priority census across all six tracks: no Critical, 23 Essential, 66
+Important, 107 Useful, 34 Minor, 12 Defer. Every open issue carries exactly
 one Priority and one Effort label and at least one each of A-type and
 B-location.
 
