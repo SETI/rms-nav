@@ -217,6 +217,18 @@ INSTALLED_COMMIT="$(git -C "${SPINDOCTOR_DIR}" rev-parse HEAD)" ||
     die 'Cannot read the checked-out commit'
 say "Installing commit ${INSTALLED_COMMIT}"
 
+# A pool is not created all at once: cloud_tasks replaces preempted instances
+# for as long as the queue has work, so a ref that moves mid-job gives later
+# instances different code than earlier ones, and the results carry no record
+# of which they ran.  A commit cannot move, so say plainly when the ref is not
+# one.
+if [[ ! ${SPINDOCTOR_GIT_REF} =~ ^[0-9a-f]{40}$ ]]; then
+    say "NOTE: ${SPINDOCTOR_GIT_REF} is a moving ref, resolved here to
+    ${INSTALLED_COMMIT}. An instance created later in this job resolves it
+    again and may install a different commit; set SPINDOCTOR_GIT_REF to a
+    40-character commit SHA to pin the whole pool to one revision."
+fi
+
 cd "${SPINDOCTOR_DIR}" || die "Cannot enter ${SPINDOCTOR_DIR}"
 python3 -m venv venv || die 'Cannot create the virtual environment'
 source venv/bin/activate
