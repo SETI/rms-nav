@@ -128,9 +128,11 @@ one of them stops the instance rather than reaching a worker that fails an image
 at a time.
 
 cloud_tasks creates instances with a boot disk and nothing else, so the script
-attaches the data disk itself through the Compute API, using the instance's own
-service account token, and then mounts it `ro,noload`. Three things have to be
-true for that to work:
+attaches the data disk itself with `gcloud compute instances attach-disk`,
+running as the instance service account, and then mounts it `ro,noload`. The
+instance name and zone come from the metadata server rather than being assumed,
+and the Google Cloud CLI is installed first if the boot image does not carry it.
+Three things have to be true for that to work:
 
 - The disk and the instances are in the same zone. cloud_tasks spreads instances
   across a region unless `zone:` is pinned in the job configuration, so pin it.

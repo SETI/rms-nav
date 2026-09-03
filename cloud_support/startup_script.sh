@@ -43,16 +43,16 @@ SPINDOCTOR_WORKER_ARGS="${SPINDOCTOR_WORKER_ARGS:-}"
 # so one disk serves every instance in the pool; it must live in the same zone
 # as the instances, which means the job configuration has to pin "zone:"
 # rather than let cloud_tasks choose one.
-DATA_DISK_NAME="${DATA_DISK_NAME:-CHANGE-ME}"
-DATA_DISK_DEVICE_NAME="${DATA_DISK_DEVICE_NAME:-spindoctor-data}"
-DATA_DISK_MOUNT="${DATA_DISK_MOUNT:-/mnt/pd1}"
+DATA_DISK_NAME="${DATA_DISK_NAME:-ssd-oops-resources-central1-a-1}"
+DATA_DISK_DEVICE_NAME="${DATA_DISK_DEVICE_NAME:-spindoctor-resources}"
+DATA_DISK_MOUNT="${DATA_DISK_MOUNT:-/mnt/spindoctor-resources}"
 
 # Where results go, and where the images the tasks name are read from.  The
 # results root must be writable by the instance service account.  The holdings
 # root is only for programs that enumerate images themselves; the URLs in a
 # task file are absolute and are used as they stand.
-NAV_RESULTS_ROOT="${NAV_RESULTS_ROOT:-gs://CHANGE-ME/nav-offset-results}"
-PDS3_HOLDINGS_DIR="${PDS3_HOLDINGS_DIR:-https://pds-rings.seti.org/holdings}"
+NAV_RESULTS_ROOT="${NAV_RESULTS_ROOT:-gs://spindoctor-results/nav-offset-results-test}"
+PDS3_HOLDINGS_DIR="${PDS3_HOLDINGS_DIR:-gs://rms-node-holdings/pds3-holdings}"
 
 # Scratch space for downloaded images and kernels.  It lives on the boot disk,
 # so size the boot disk in the job configuration for the number of tasks an
@@ -83,6 +83,21 @@ die() {
 # console, which is readable by anyone who can describe the instance.
 SPINDOCTOR_GIT_URL_SAFE="$(sed -E 's#://[^/@]*@#://#' <<<"${SPINDOCTOR_GIT_URL}")"
 
+export DEBIAN_FRONTEND=noninteractive
+
+# Unattended upgrades hold the dpkg lock through the first minutes of a boot,
+# which is exactly when this runs, so a first apt failure means "wait", not
+# "give up".
+apt_get() {
+    local attempt
+    for attempt in 1 2 3 4 5 6; do
+        apt-get "$@" && return 0
+        say "apt-get $1 failed (attempt ${attempt}); the dpkg lock is probably held"
+        sleep 20
+    done
+    return 1
+}
+
 say "Starting on $(hostname), job ${RMS_CLOUD_TASKS_JOB_ID:-unknown}"
 
 ################################################################################
@@ -105,27 +120,36 @@ say "Instance ${INSTANCE_NAME} in ${ZONE} of project ${PROJECT_ID}"
 
 DEVICE_LINK="/dev/disk/by-id/google-${DATA_DISK_DEVICE_NAME}"
 
+ensure_gcloud() {
+    # Present on Google's own images; installed here for any other, so that a
+    # boot image is not a silent prerequisite of this script.
+    command -v gcloud >/dev/null && return 0
+    say 'gcloud is not installed; installing the Google Cloud CLI'
+    snap install google-cloud-cli --classic ||
+        { apt_get update -y && apt_get install -y google-cloud-cli; } ||
+        return 1
+    command -v gcloud >/dev/null
+}
+
 attach_data_disk() {
     # Attaching is best-effort: an instance that already has the disk (a retried
     # startup, or a disk attached at creation) gets an error back that means
     # "nothing to do".  Whether the disk is really there is decided below, by
     # waiting for its device node.
-    local token payload attempt
-    token="$(metadata instance/service-accounts/default/token |
-        python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')" ||
-        die 'Cannot read an access token; the instance has no service account'
-    payload="$(printf '{"source":"projects/%s/zones/%s/disks/%s","deviceName":"%s","mode":"READ_ONLY","type":"PERSISTENT","autoDelete":false}' \
-        "${PROJECT_ID}" "${ZONE}" "${DATA_DISK_NAME}" "${DATA_DISK_DEVICE_NAME}")"
+    local attempt
     for attempt in 1 2 3 4 5; do
         say "Attaching disk ${DATA_DISK_NAME} read-only (attempt ${attempt})"
-        curl --silent --show-error --request POST \
-            --header "Authorization: Bearer ${token}" \
-            --header 'Content-Type: application/json' \
-            --data "${payload}" \
-            "https://compute.googleapis.com/compute/v1/projects/${PROJECT_ID}/zones/${ZONE}/instances/${INSTANCE_NAME}/attachDisk" |
-            sed 's/^/    /'
-        # The API call returns an operation, not a device; the device node is
-        # what the mount needs, so wait for that either way.
+        # --zone names the zone of the *instance*; a disk can only attach to an
+        # instance in its own zone, which is why the job configuration has to
+        # pin one rather than let cloud_tasks spread the pool over a region.
+        gcloud compute instances attach-disk "${INSTANCE_NAME}" \
+            --project "${PROJECT_ID}" \
+            --zone "${ZONE}" \
+            --disk "${DATA_DISK_NAME}" \
+            --device-name "${DATA_DISK_DEVICE_NAME}" \
+            --mode ro 2>&1 | sed 's/^/    /'
+        # The attach reports an operation, not a device; the device node is what
+        # the mount needs, so wait for that either way.
         for _ in $(seq 30); do
             [[ -e ${DEVICE_LINK} ]] && return 0
             sleep 2
@@ -142,6 +166,8 @@ if [[ ${NAV_RESULTS_ROOT} == *CHANGE-ME* ]]; then
     die "NAV_RESULTS_ROOT is still the template's placeholder (${NAV_RESULTS_ROOT});
     a worker that cannot write its results is worth stopping before it starts"
 fi
+
+ensure_gcloud || die 'The Google Cloud CLI is not installed and could not be installed'
 
 attach_data_disk || die "Could not attach ${DATA_DISK_NAME}: check that the disk
     is in zone ${ZONE} (pin \"zone:\" in the job configuration), that no
@@ -181,21 +207,6 @@ done
 ################################################################################
 # Install
 ################################################################################
-
-export DEBIAN_FRONTEND=noninteractive
-
-# Unattended upgrades hold the dpkg lock through the first minutes of a boot,
-# which is exactly when this runs, so a first apt failure means "wait", not
-# "give up".
-apt_get() {
-    local attempt
-    for attempt in 1 2 3 4 5 6; do
-        apt-get "$@" && return 0
-        say "apt-get $1 failed (attempt ${attempt}); the dpkg lock is probably held"
-        sleep 20
-    done
-    return 1
-}
 
 apt_get update -y || die 'apt-get update failed'
 apt_get install -y git python3 python3-pip python3-venv || die 'apt-get install failed'
