@@ -43,7 +43,7 @@ SPINDOCTOR_WORKER_ARGS="${SPINDOCTOR_WORKER_ARGS:-}"
 # so one disk serves every instance in the pool; it must live in the same zone
 # as the instances, which means the job configuration has to pin "zone:"
 # rather than let cloud_tasks choose one.
-DATA_DISK_NAME="${DATA_DISK_NAME:-ssd-oops-resources-central1-a-1}"
+DATA_DISK_NAME="${DATA_DISK_NAME:-ssd-spindoctor-resources-central1-a-1}"
 DATA_DISK_DEVICE_NAME="${DATA_DISK_DEVICE_NAME:-spindoctor-resources}"
 DATA_DISK_MOUNT="${DATA_DISK_MOUNT:-/mnt/spindoctor-resources}"
 
@@ -136,18 +136,32 @@ attach_data_disk() {
     # startup, or a disk attached at creation) gets an error back that means
     # "nothing to do".  Whether the disk is really there is decided below, by
     # waiting for its device node.
-    local attempt
+    local attempt output
     for attempt in 1 2 3 4 5; do
         say "Attaching disk ${DATA_DISK_NAME} read-only (attempt ${attempt})"
         # --zone names the zone of the *instance*; a disk can only attach to an
         # instance in its own zone, which is why the job configuration has to
         # pin one rather than let cloud_tasks spread the pool over a region.
-        gcloud compute instances attach-disk "${INSTANCE_NAME}" \
+        output="$(gcloud compute instances attach-disk "${INSTANCE_NAME}" \
             --project "${PROJECT_ID}" \
             --zone "${ZONE}" \
             --disk "${DATA_DISK_NAME}" \
             --device-name "${DATA_DISK_DEVICE_NAME}" \
-            --mode ro 2>&1 | sed 's/^/    /'
+            --mode ro 2>&1)"
+        [[ -n ${output} ]] && sed 's/^/    /' <<<"${output}"
+
+        # A name that does not resolve now will not resolve in a minute, so
+        # this is reported once rather than four more times: waiting on a disk
+        # that cannot appear costs the instance five minutes and reads in the
+        # log as though something were still being tried.
+        if grep -qiE 'was not found|notFound' <<<"${output}"; then
+            die "No disk ${DATA_DISK_NAME} in zone ${ZONE} of project ${PROJECT_ID}.
+    Check the spelling against \"gcloud compute disks list --project
+    ${PROJECT_ID}\", and that the disk is in this instance's zone -- a disk
+    attaches only within its own zone, and a pool whose configuration does not
+    pin \"zone:\" spreads over the region."
+        fi
+
         # The attach reports an operation, not a device; the device node is what
         # the mount needs, so wait for that either way.
         for _ in $(seq 30); do
@@ -210,6 +224,7 @@ done
 
 apt_get update -y || die 'apt-get update failed'
 apt_get install -y git python3 python3-pip python3-venv || die 'apt-get install failed'
+apt_get install -y fonts-liberation2
 
 if [[ -d ${SPINDOCTOR_DIR}/.git ]]; then
     say "Reusing the checkout in ${SPINDOCTOR_DIR}"
