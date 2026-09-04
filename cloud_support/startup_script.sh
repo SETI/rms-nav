@@ -224,7 +224,7 @@ done
 
 apt_get update -y || die 'apt-get update failed'
 apt_get install -y git python3 python3-pip python3-venv || die 'apt-get install failed'
-apt_get install -y fonts-liberation2
+apt_get install -y fonts-liberation2 || die 'Cannot install fonts-liberation2'
 
 if [[ -d ${SPINDOCTOR_DIR}/.git ]]; then
     say "Reusing the checkout in ${SPINDOCTOR_DIR}"

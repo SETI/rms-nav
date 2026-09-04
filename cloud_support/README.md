@@ -152,10 +152,14 @@ the disk name and mount point, the results root, and the holdings root. Each is
 root left at the template's placeholder stops the instance before it installs
 anything.
 
-The ref may name a branch, a tag or a commit: the checkout is detached, so a
-pool can be pinned to the revision it was meant to run rather than to wherever a
-branch has moved since. Whichever is given, the resolved commit is logged before
-installation, so what an instance ran is recoverable from its log.
+The ref may name a branch, a tag or a commit, and the checkout is detached
+either way. Only a 40-character commit SHA actually pins a pool: a pool is not
+created all at once, since cloud_tasks replaces preempted instances for as long
+as the queue has work, so a branch or tag that moves mid-job gives later
+instances a different commit than earlier ones. A ref that is not a SHA is
+reported as moving in the startup log, together with the commit it resolved to,
+and whichever form is used the resolved commit is logged before installation, so
+what an instance ran is recoverable from its log.
 
 The script also pins `OMP_NUM_THREADS` and friends to 1. cloud_tasks already
 runs `RMS_CLOUD_TASKS_NUM_TASKS_PER_INSTANCE` tasks at once, one per vCPU;

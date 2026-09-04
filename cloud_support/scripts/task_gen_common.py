@@ -186,7 +186,7 @@ def write_task_file(
         arguments.sd_offset,
         dataset_name,
         '--output-cloud-tasks-file',
-        str(output_path),
+        output_path.as_posix(),
         # Enumeration is the whole job here, and its progress is reported by
         # this script; a log file would also demand a results root that a
         # generating run has no other use for.
@@ -294,7 +294,7 @@ def make_directory(directory: FCPath) -> None:
         directory: The directory to create.
     """
     if directory.is_local():
-        Path(directory.as_posix()).mkdir(parents=True, exist_ok=True)
+        directory.mkdir(parents=True, exist_ok=True)
 
 
 def holdings_root_argument(value: str) -> str:
