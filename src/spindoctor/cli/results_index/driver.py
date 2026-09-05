@@ -88,13 +88,21 @@ from spindoctor.results_index import FAILED_FILES, IMAGES
 
 __all__ = ['INGEST_COMMIT_CHUNK_SIZE', 'ingest_metadata_files']
 
-INGEST_COMMIT_CHUNK_SIZE = 512
+INGEST_COMMIT_CHUNK_SIZE = 2048
 """How many images are written per database transaction.
 
 Independent of the retrieval batch size: one bounds a download, the other
 bounds how much work a crash costs and how long a writer holds its lock.  An
 image's own rows are always written inside one transaction, so a concurrent
 worker never sees half of an image.
+
+Independent, but not unrelated: a chunk is retrieved in batches, so a chunk
+smaller than :data:`~spindoctor.nav_records.RETRIEVE_BATCH_SIZE` would cap the
+batch at itself and throw away the download concurrency the batch is sized for.
+This is a small multiple of it, which keeps the pool full across a chunk while
+holding a transaction to something a crash can afford to repeat -- and an
+ingest is repeatable in any case, since a pass that dies leaves the rows it
+committed and re-reads the rest.
 """
 
 

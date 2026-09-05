@@ -110,14 +110,39 @@ __all__ = [
     'NAMES_NO_INSTRUMENT',
     'RECORDS_NO_MIDTIME',
     'RETRIEVE_BATCH_SIZE',
+    'RETRIEVE_THREADS',
     'TreeRecordSource',
 ]
 
-RETRIEVE_BATCH_SIZE = 64
+RETRIEVE_BATCH_SIZE = 1024
 """How many documents are retrieved in one batched download.
 
 A cloud backend downloads a batch in parallel, so the batch size trades peak
-memory and per-request concurrency against the number of round trips.
+memory and per-request concurrency against the number of round trips.  A
+navigation document is a few kilobytes, so peak memory is not what decides it:
+the batch has to be at least as large as :data:`RETRIEVE_THREADS` or the pool
+runs a fraction of the requests it could, and a batch several times that keeps
+the pool full across the whole of it rather than draining at each boundary.
+Measured over the same bucket (2026-09-04), at 64 threads: 131 documents a
+second at a batch of 128, 219 at 256, 347 at 512, 453 at 1024.
+
+An ingest batches within its commit chunk, so this above
+:data:`~spindoctor.cli.results_index.INGEST_COMMIT_CHUNK_SIZE` would be
+silently cut down to it.
+"""
+
+RETRIEVE_THREADS = 64
+"""How many documents are fetched at once within one batch.
+
+Measured against a bucket of 52,101 documents (2026-09-04): the eight threads a
+:class:`~filecache.FileCache` defaults to fetched 48 documents a second, which
+is 18 minutes of round trips for that bucket and almost no bandwidth.  Raising
+this to 64, with a batch large enough to feed it, measured 307 a second -- under
+three minutes, a factor of six.  Past this the rate falls again, and streaming
+the same documents without storing them measured 317, so what is left is the
+service's latency rather than anything the cache is doing.
+
+A local root retrieves without copying, so this costs nothing there.
 """
 
 NAMES_NO_INSTRUMENT = 'names no instrument to attribute it to a mission'
@@ -772,7 +797,8 @@ class TreeRecordSource:
             # latter names a file it never downloads.  exception_on_fail=False
             # keeps one file that never arrived from ending the pass.
             local_paths = cast(
-                list[Path | Exception], root.retrieve(sub_paths, exception_on_fail=False)
+                list[Path | Exception],
+                root.retrieve(sub_paths, exception_on_fail=False, nthreads=RETRIEVE_THREADS),
             )
             for entry, local_path in zip(batch, local_paths, strict=True):
                 found = self._read_of(root, entry.stub, local_path)

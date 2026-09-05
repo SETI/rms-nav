@@ -63,6 +63,7 @@ from spindoctor.nav_records import (
     COULD_NOT_RETRIEVE,
     METADATA_SUFFIX,
     RETRIEVE_BATCH_SIZE,
+    RETRIEVE_THREADS,
     DocumentOrigin,
     ImageFacts,
     ListedRecord,
@@ -142,7 +143,8 @@ def _ingest_chunk(
         # names a file it never downloads.  exception_on_fail=False keeps one
         # unreadable file from ending the run.
         local_paths = cast(
-            list[Path | Exception], root.retrieve(sub_paths, exception_on_fail=False)
+            list[Path | Exception],
+            root.retrieve(sub_paths, exception_on_fail=False, nthreads=RETRIEVE_THREADS),
         )
         for listed, local_path in zip(batch, local_paths, strict=True):
             source = DocumentOrigin(

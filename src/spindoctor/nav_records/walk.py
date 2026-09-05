@@ -42,7 +42,9 @@ results *root* that is a link is a different matter and is handled: a root is
 resolved to the location it names before anything is read.
 """
 
+from collections import deque
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from filecache import FCPath
@@ -52,10 +54,35 @@ from spindoctor.nav_records.document import METADATA_SUFFIX
 from spindoctor.nav_records.record import ListedRecord
 
 __all__ = [
+    'WALK_DIRECTORIES_AT_ONCE',
+    'WALK_THREADS',
     'UnlistableDirectoryError',
     'UnlistableRootError',
     'walk_from',
 ]
+
+WALK_THREADS = 32
+"""How many directories are listed at once.
+
+A listing is one round trip, and on a cloud root it is entirely latency: a
+bucket of 853 directories measured about a tenth of a second each, so listing
+them one after another costs a minute and a half of waiting and no bandwidth at
+all.  That minute is paid by every pass, including one that goes on to read
+nothing because no document changed, which is what a re-ingest is.
+
+A local root pays no such latency, and listing a handful of directories at once
+costs it nothing measurable either.
+"""
+
+WALK_DIRECTORIES_AT_ONCE = 256
+"""How many directories one round of the walk takes off the frontier.
+
+The walk holds the entries of the directories it is listing, so a round over
+everything at one level of a wide tree would hold that whole level in memory at
+once.  Taking a bounded slice keeps the walk streaming -- documents are yielded
+as each round finishes rather than at the end -- while still handing
+:data:`WALK_THREADS` enough work to stay busy.
+"""
 
 
 class UnlistableDirectoryError(Exception):
@@ -223,6 +250,45 @@ def _entries_of(
         raise unlistable(directory.as_posix(), str(exc)) from exc
 
 
+def _claim(
+    directory: FCPath,
+    visited: dict[tuple[int, int], str],
+    logger: PdsLogger,
+) -> bool:
+    """Whether this walk should list a directory, claiming it if so.
+
+    Parameters:
+        directory: The directory the walk is about to list.
+        visited: Where this walk has already listed each directory it has
+            listed, by identity, which this adds the directory to.
+        logger: Logger for a directory reached a second way.
+
+    Returns:
+        True when the directory has not been listed under another name.  A
+        second path to one already listed -- a link back to an ancestor, or one
+        subtree reachable two ways -- is declined: descending would report the
+        same documents again under a second set of stubs, one per document per
+        level until the filesystem stops the loop at its own link limit, and no
+        consumer asks about any of them, because a stub comes from the image's
+        own subtree and filespec, which name the directory once.  The root is
+        still wholly listed, since every document under it is in this listing
+        under the path met first.
+    """
+    identity = _directory_identity(directory)
+    if identity is None:
+        return True
+    listed_as = visited.get(identity)
+    if listed_as is not None:
+        logger.info(
+            'Not listing %s, which is %s reached a second way and already listed',
+            directory.as_posix(),
+            listed_as,
+        )
+        return False
+    visited[identity] = directory.as_posix()
+    return True
+
+
 def walk_from(
     directory: FCPath,
     prefix: str,
@@ -244,56 +310,63 @@ def walk_from(
         logger: Logger for a directory reached a second way.
 
     Yields:
-        One entry per navigation document, in the order the listings return
-        them.  The walk descends the moment it meets a subdirectory, so a
-        directory's own documents and the documents beneath it interleave.
+        One entry per navigation document.  The order is the walk's own and is
+        not defined: directories are listed :data:`WALK_THREADS` at a time,
+        because a listing is a round trip and a tree of them is otherwise a
+        minute of pure latency per pass.  No consumer reads an order from this
+        -- the record seam promises none, and a caller wanting one sorts -- and
+        every document under the root is yielded exactly once either way.
 
     Raises:
         UnlistableDirectoryError: If this directory or any under it could not be
             listed.  The documents beneath it are then documents this walk
             cannot see, and a record's absence is what a consumer reads as an
-            answer, so the walk stops instead of finishing around them.
+            answer, so the walk stops instead of finishing around them.  The
+            directories being listed alongside the refused one are finished
+            first, which costs one round of listings and changes nothing about
+            the refusal: the pass ends either way, having written nothing a
+            later pass will not write again.
     """
-    identity = _directory_identity(directory)
-    if identity is not None:
-        listed_as = visited.get(identity)
-        if listed_as is not None:
-            # A second path to a directory this walk has already listed -- a
-            # link back to an ancestor, or one subtree reachable two ways.
-            # Descending would report the same documents again under a second
-            # set of stubs, one per document per level until the filesystem
-            # stops the loop at its own link limit, and no consumer asks about
-            # any of them: a stub comes from the image's own subtree and
-            # filespec, which name the directory once.  So the walk declines
-            # it, and the root is still wholly listed, because every document
-            # under it is in this listing under the path met first.
-            logger.info(
-                'Not listing %s, which is %s reached a second way and already listed',
-                directory.as_posix(),
-                listed_as,
-            )
-            return
-        visited[identity] = directory.as_posix()
-    for path, entry_metadata in _entries_of(directory, unlistable):
-        name = path.name
-        relative = f'{prefix}{name}'
-        if _is_directory(path, entry_metadata):
-            yield from walk_from(
-                path,
-                f'{relative}/',
-                visited,
-                unlistable=UnlistableDirectoryError,
-                logger=logger,
-            )
-        elif name.endswith(METADATA_SUFFIX):
-            mtime_ns, size_bytes = _metrics_of(entry_metadata)
-            yield ListedRecord(
-                stub=relative[: -len(METADATA_SUFFIX)],
-                path=path,
-                mtime_ns=mtime_ns,
-                size_bytes=size_bytes,
-            )
-        # Every other file is passed over without being counted anywhere.  A
-        # results tree holds the summary picture a navigation that reached a
-        # result drew, and whatever else an operator has put there, and none of
-        # them is a file this walk reads or a gap in what it listed.
+    frontier: deque[tuple[FCPath, str, type[UnlistableDirectoryError]]] = deque(
+        [(directory, prefix, unlistable)]
+    )
+    while frontier:
+        round_directories: list[tuple[FCPath, str, type[UnlistableDirectoryError]]] = []
+        while frontier and len(round_directories) < WALK_DIRECTORIES_AT_ONCE:
+            entry = frontier.popleft()
+            if _claim(entry[0], visited, logger):
+                round_directories.append(entry)
+        if not round_directories:
+            continue
+        if len(round_directories) == 1:
+            listings = [_entries_of(round_directories[0][0], round_directories[0][2])]
+        else:
+            with ThreadPoolExecutor(max_workers=min(WALK_THREADS, len(round_directories))) as pool:
+                # Consuming the iterator raises the first refusal in frontier
+                # order, so which directory ends the pass does not depend on
+                # which thread happened to finish first.
+                listings = list(
+                    pool.map(
+                        lambda item: _entries_of(item[0], item[2]),
+                        round_directories,
+                    )
+                )
+        for (_, entry_prefix, _), entries in zip(round_directories, listings, strict=True):
+            for path, entry_metadata in entries:
+                name = path.name
+                relative = f'{entry_prefix}{name}'
+                if _is_directory(path, entry_metadata):
+                    frontier.append((path, f'{relative}/', UnlistableDirectoryError))
+                elif name.endswith(METADATA_SUFFIX):
+                    mtime_ns, size_bytes = _metrics_of(entry_metadata)
+                    yield ListedRecord(
+                        stub=relative[: -len(METADATA_SUFFIX)],
+                        path=path,
+                        mtime_ns=mtime_ns,
+                        size_bytes=size_bytes,
+                    )
+                # Every other file is passed over without being counted
+                # anywhere.  A results tree holds the summary picture a
+                # navigation that reached a result drew, and whatever else an
+                # operator has put there, and none of them is a file this walk
+                # reads or a gap in what it listed.
