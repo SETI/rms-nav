@@ -91,7 +91,9 @@ def get_nav_results_root(arguments: argparse.Namespace, config: Config) -> str:
     return nav_results_root_str
 
 
-def get_log_root(arguments: argparse.Namespace, config: Config) -> str:
+def get_log_root(
+    arguments: argparse.Namespace, config: Config, *, under_results_root: bool = True
+) -> str:
     """Get the log root from the arguments, configuration, or environment.
 
     First look in ``arguments.log_root``, then in ``config.environment.log_root``,
@@ -103,13 +105,21 @@ def get_log_root(arguments: argparse.Namespace, config: Config) -> str:
     Parameters:
         arguments: The parsed arguments.
         config: The configuration possibly containing the environment section.
+        under_results_root: Whether the navigation results root is an acceptable
+            place for this program's logs when nothing else names one.  False
+            for a program that reads the results tree rather than writing to
+            it: its log would land in the tree it is reading, which on a cloud
+            root means every run adds files to what the next run enumerates,
+            and pays a network write per line to do it.
 
     Returns:
         The log root.
 
     Raises:
         ValueError: If neither a log root nor a navigation results root can be
-            determined.
+            determined, or if none was named and ``under_results_root`` is
+            False.  A caller of the second kind supplies its own local
+            fallback, so the refusal is how it is asked for.
     """
     log_root_str = None
     try:
@@ -124,6 +134,11 @@ def get_log_root(arguments: argparse.Namespace, config: Config) -> str:
     if log_root_str is None:
         log_root_str = os.getenv('NAV_LOG_ROOT')
     if log_root_str is None:
+        if not under_results_root:
+            raise ValueError(
+                'no log root was named, and this program does not write its logs under the '
+                'navigation results root'
+            )
         # FCPath rather than os.path.join: a results root is routinely a cloud
         # URL, and joining those must not depend on the local path separator.
         log_root_str = (FCPath(get_nav_results_root(arguments, config)) / 'logs').as_posix()

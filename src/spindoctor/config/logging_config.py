@@ -812,6 +812,7 @@ def build_run_logging(
     *,
     build_main: bool = True,
     fallback_log_root: str | Path | FCPath | None = None,
+    log_root_under_results_root: bool = True,
 ) -> RunLogging:
     """Resolve this run's logging and configure the main logger.
 
@@ -831,6 +832,10 @@ def build_run_logging(
             root.  For a driver that has somewhere sensible of its own -- a
             cloud task knows its output directory -- this keeps its logs rather
             than dropping them.
+        log_root_under_results_root: Whether the navigation results root is an
+            acceptable default place for this program's logs.  False for a
+            program that reads the results tree, which then falls back to
+            ``fallback_log_root`` instead of writing into the tree it reads.
 
     Returns:
         The resolved :class:`RunLogging`.
@@ -848,7 +853,9 @@ def build_run_logging(
     fallback = FCPath(fallback_log_root) if fallback_log_root is not None else None
     levels = resolve_log_levels(program_name, arguments, config)
     try:
-        log_root = FCPath(get_log_root(arguments, config))
+        log_root = FCPath(
+            get_log_root(arguments, config, under_results_root=log_root_under_results_root)
+        )
     except ValueError as exc:
         if fallback is None:
             # A program with no results root of its own -- bundle summary, say
