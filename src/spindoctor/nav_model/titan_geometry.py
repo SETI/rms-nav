@@ -46,11 +46,26 @@ extfov margin, the same convention every predicted position in the pipeline
 uses (a catalog star's extfov position is ``star.v + extfov_margin_v``).
 Holding to it is what lets a haze offset and a star offset on the same frame
 be compared directly.  Bounding boxes are a separate matter: they are
-integer pixel indices, they only bound where backplanes are evaluated, and
-the ones handed to the backplane are deliberately UNCLIPPED because ``oops``
+integer pixel indices and they only bound where backplanes are evaluated.
+
+A box grows with the body's apparent size, which is unbounded: Titan at
+0.75 km/pixel has an envelope 4300 pixels in radius inside a 1024-pixel
+frame, an 8687-square box covering seventy times the frame's area.  The two
+boxes are bounded differently because they need different things.
+
+The mask box is CLIPPED to the extended field of view, which costs nothing:
+every pixel it computes outside the extfov is discarded downstream, once
+where the box-local mask is embedded and again where the mask is
+intersected with the box region, so clipping first changes no result.
+
+The envelope box the symmetry axis reads stays UNCLIPPED, because ``oops``
 evaluates fine at off-detector pixel coordinates while a clipped box would
 leave zero surface-intercept pixels on exactly the off-edge frames the
-visibility condition exists for.
+visibility condition exists for.  It is bounded by UNDERSAMPLING instead:
+the axis is one angle read off the minimum-incidence pixel, so sampling
+every k-th pixel locates that pixel to within k and moves the angle by at
+most about ``k / r_env`` radians -- vanishing precisely when the box is
+large enough for the stride to exceed one.
 """
 
 from __future__ import annotations
@@ -348,22 +363,92 @@ def _body_scale(obs: Observation, config: Config) -> _BodyScale | None:
     )
 
 
+def _bbox_extent(bbox_nominal: tuple[int, int, int, int]) -> tuple[int, int]:
+    """Return the ``(width, height)`` of a nominal-frame bbox, in pixels."""
+    u_min, u_max, v_min, v_max = bbox_nominal
+    return max(0, u_max - u_min + 1), max(0, v_max - v_min + 1)
+
+
+def _bbox_undersample(bbox_nominal: tuple[int, int, int, int], max_samples: int) -> int:
+    """Return the stride that keeps a box within ``max_samples`` samples.
+
+    A body's apparent size sets the box, and nothing bounds it: a close
+    approach puts a body of thousands of pixels' radius inside a
+    thousand-pixel frame, and a backplane evaluated at one sample per pixel
+    over that box costs hundreds of times what the frame itself costs.
+    Striding the grid bounds that cost by the sample count rather than by
+    the geometry.
+
+    Parameters:
+        bbox_nominal: ``(u_min, u_max, v_min, v_max)`` in pixel indices.
+        max_samples: Largest number of samples the grid may hold; a
+            non-positive value imposes no bound.
+
+    Returns:
+        int: The stride to sample each axis by, never less than 1.  A box
+        already within the bound samples every pixel.
+    """
+    width, height = _bbox_extent(bbox_nominal)
+    samples = width * height
+    if max_samples <= 0 or samples <= max_samples:
+        return 1
+    return max(1, math.ceil(math.sqrt(samples / max_samples)))
+
+
+def _clip_bbox_to_extfov(
+    bbox_nominal: tuple[int, int, int, int],
+    extfov_shape_vu: tuple[int, int],
+    margin_vu: tuple[int, int],
+) -> tuple[int, int, int, int] | None:
+    """Intersect a nominal-frame bbox with the extended field of view.
+
+    Parameters:
+        bbox_nominal: ``(u_min, u_max, v_min, v_max)`` in pixel indices.
+        extfov_shape_vu: ``(rows, cols)`` of the extended frame.
+        margin_vu: ``(margin_v, margin_u)`` extfov margins, so nominal index
+            ``v`` sits at extfov row ``v + margin_v``.
+
+    Returns:
+        The clipped box, or ``None`` when it does not reach the extended
+        frame at all.
+    """
+    u_min, u_max, v_min, v_max = bbox_nominal
+    rows, cols = extfov_shape_vu
+    v_lo = max(v_min, -margin_vu[0])
+    v_hi = min(v_max, rows - margin_vu[0] - 1)
+    u_lo = max(u_min, -margin_vu[1])
+    u_hi = min(u_max, cols - margin_vu[1] - 1)
+    if v_hi < v_lo or u_hi < u_lo:
+        return None
+    return u_lo, u_hi, v_lo, v_hi
+
+
 def _restricted_backplane(
-    obs: Observation, bbox_nominal: tuple[int, int, int, int]
+    obs: Observation, bbox_nominal: tuple[int, int, int, int], *, undersample: int = 1
 ) -> tuple[Backplane, Meshgrid]:
-    """Build a one-sample-per-pixel backplane over a nominal-frame bbox.
+    """Build a backplane over a nominal-frame bbox.
 
     ``bbox_nominal`` is ``(u_min, u_max, v_min, v_max)`` in nominal-frame
     pixel indices, which may run negative inside the extfov margin or past
     the detector: ``oops`` backplanes evaluate at off-detector pixel
     coordinates, and clipping the box would leave zero surface-intercept
     pixels on exactly the off-edge frames the visibility condition targets.
+
+    Parameters:
+        obs: Observation snapshot.
+        bbox_nominal: The box to evaluate over.
+        undersample: Sample every ``undersample``-th pixel along each axis;
+            ``1`` samples every pixel.  The meshgrid reports the pixel
+            coordinate of every sample either way, so a caller reading
+            positions off it needs no correction for the stride, only the
+            knowledge that its answer is quantized by it.
     """
     u_min, u_max, v_min, v_max = bbox_nominal
     meshgrid = Meshgrid.for_fov(
         obs.fov,
         origin=(u_min + 0.5, v_min + 0.5),
         limit=(u_max + 0.5, v_max + 0.5),
+        undersample=max(1, undersample),
         swap=True,
     )
     return Backplane(obs, meshgrid=meshgrid), meshgrid
@@ -376,6 +461,7 @@ def _symmetry_axis(
     margin_vu: tuple[int, int],
     *,
     axis_min_offset_px: float,
+    max_samples: int,
 ) -> tuple[float, bool]:
     """Return ``(theta_rad, axis_degenerate)`` from the incidence backplane.
 
@@ -401,6 +487,13 @@ def _symmetry_axis(
         center_vu: Predicted disc center in extfov coordinates.
         margin_vu: ``(margin_v, margin_u)`` extfov margins.
         axis_min_offset_px: Offset below which the axis is degenerate.
+        max_samples: Largest grid the incidence backplane may be evaluated
+            over.  A box wider than this is strided rather than clipped,
+            because the pixel wanted is the sunward one and it can lie
+            outside the frame.  The stride is the box side over the square
+            root of this, and the side is twice the envelope radius, so the
+            angle quantizes by about ``2 / sqrt(max_samples)`` radians
+            whatever the body's apparent size.
 
     Returns:
         ``(theta_rad, axis_degenerate)``.  A box with no surface-intercept
@@ -408,8 +501,20 @@ def _symmetry_axis(
         frame that shows no lit surface.  A backplane that could not be
         evaluated is reported and re-raised.
     """
+    undersample = _bbox_undersample(bbox_nominal, max_samples)
+    if undersample > 1:
+        width, height = _bbox_extent(bbox_nominal)
+        IMAGE_LOGGER.info(
+            'Titan: envelope box is %d x %d px (%d samples); sampling every %d px '
+            'to stay within %d',
+            width,
+            height,
+            width * height,
+            undersample,
+            max_samples,
+        )
     try:
-        bp, meshgrid = _restricted_backplane(obs, bbox_nominal)
+        bp, meshgrid = _restricted_backplane(obs, bbox_nominal, undersample=undersample)
         incidence = bp.incidence_angle(TITAN_BODY_NAME)
         invalid = np.asarray(incidence.expand_mask().mask, dtype=bool)
         values = np.asarray(incidence.vals, dtype=np.float64)
@@ -653,34 +758,44 @@ def _contaminant_mask(
     mask_bbox = (u_min - pad_int, u_max + pad_int, v_min - pad_int, v_max + pad_int)
     occluder_ext: NDArrayBoolType = np.zeros(extfov_shape_vu, dtype=bool)
     contaminant_ext: NDArrayBoolType = np.zeros(extfov_shape_vu, dtype=bool)
-    try:
-        bp, _ = _restricted_backplane(obs, mask_bbox)
-    except Exception:
-        IMAGE_LOGGER.exception('Titan: mask-box backplane could not be evaluated')
-        raise
-    sibling_ranges = [
-        (name.upper(), float(entry.get('range', float('inf')))) for name, entry in siblings
-    ]
-    body_local = occluder_mask_for_body(
-        bp,
-        TITAN_BODY_NAME,
-        sibling_ranges,
-        subject_range_km,
-        oversample_v=1,
-        oversample_u=1,
-    )
-    planet = getattr(obs, 'closest_planet', None)
-    radii = nav_config['ring_occlusion_radii_km']
-    ring_local = (
-        None
-        if planet is None
-        else _ring_occlusion_local(
-            bp, str(planet), subject_range_km, (float(radii[0]), float(radii[1]))
+    # Clipping here costs nothing and bounds the box by the frame instead of by
+    # the body's apparent size: a mask pixel outside the extended frame is
+    # dropped twice downstream, once by the embed and once by the box region,
+    # so the only thing evaluating it ever bought was the memory it took.
+    clipped_bbox = _clip_bbox_to_extfov(mask_bbox, extfov_shape_vu, margin_vu)
+    bp = None
+    if clipped_bbox is None:
+        IMAGE_LOGGER.info('Titan: mask box lies outside the extended frame; occlusion not masked')
+    else:
+        try:
+            bp, _ = _restricted_backplane(obs, clipped_bbox)
+        except Exception:
+            IMAGE_LOGGER.exception('Titan: mask-box backplane could not be evaluated')
+            raise
+    if bp is not None and clipped_bbox is not None:
+        sibling_ranges = [
+            (name.upper(), float(entry.get('range', float('inf')))) for name, entry in siblings
+        ]
+        body_local = occluder_mask_for_body(
+            bp,
+            TITAN_BODY_NAME,
+            sibling_ranges,
+            subject_range_km,
+            oversample_v=1,
+            oversample_u=1,
         )
-    )
-    for local in (body_local, ring_local):
-        if local is not None:
-            _embed_local(occluder_ext, local, mask_bbox, margin_vu)
+        planet = getattr(obs, 'closest_planet', None)
+        radii = nav_config['ring_occlusion_radii_km']
+        ring_local = (
+            None
+            if planet is None
+            else _ring_occlusion_local(
+                bp, str(planet), subject_range_km, (float(radii[0]), float(radii[1]))
+            )
+        )
+        for local in (body_local, ring_local):
+            if local is not None:
+                _embed_local(occluder_ext, local, clipped_bbox, margin_vu)
     contaminant_ext |= occluder_ext
     _paint_sibling_bboxes(contaminant_ext, siblings, margin_vu)
     _paint_bright_stars(
@@ -844,6 +959,7 @@ def geometry_from_obs(
         center_vu,
         margin_vu,
         axis_min_offset_px=float(config.titan['navigation']['axis_min_offset_px']),
+        max_samples=int(config.titan['navigation']['backplane_max_samples']),
     )
     contaminant = _contaminant_mask(
         obs,
