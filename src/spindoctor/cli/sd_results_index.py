@@ -613,10 +613,11 @@ def main() -> None:
         load_default_and_user_config(arguments, DEFAULT_CONFIG)
     with reporting_logging_errors():
         # This program reads a results tree; it does not write to one. Its log
-        # therefore defaults beside the index it is building rather than under
+        # therefore defaults under the working directory rather than under
         # nav_results_root, which for a cloud root would add files to the very
         # tree the next pass enumerates -- and would pay a network round trip
-        # per line while walking it.
+        # per line while walking it. Not beside the index either: that URL may
+        # name a cloud path, or a database no file sits beside.
         build_run_logging(
             PROGRAM_NAME,
             arguments,

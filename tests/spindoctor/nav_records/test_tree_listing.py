@@ -360,13 +360,7 @@ def test_a_tree_wider_than_one_round_is_still_listed_whole(
 def test_no_directory_is_listed_twice_across_rounds(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A directory carried between rounds could otherwise be listed by each.
-
-    Parameters:
-        tmp_path: Directory the tree lives under.
-        quiet_logger: Logger the walk reports through.
-        monkeypatch: Fixture the bound and the listing are set through.
-    """
+    """A directory carried between rounds could otherwise be listed by each."""
     monkeypatch.setattr(walk_module, 'WALK_DIRECTORIES_AT_ONCE', 2)
     root, _ = _wide_tree(tmp_path, 7)
     listed: list[str] = []
@@ -390,11 +384,6 @@ def test_a_refusal_names_the_same_directory_however_the_threads_finish(
     frontier is made the slower of the two.  A walk reporting whichever thread
     raised first would name the other, and would name a different one whenever
     the timing came out differently.
-
-    Parameters:
-        tmp_path: Directory the tree lives under.
-        quiet_logger: Logger the walk reports through.
-        monkeypatch: Fixture the listing is wrapped through.
     """
     root, _ = _wide_tree(tmp_path, 4)
     real_iterdir = FCPath.iterdir_metadata
@@ -425,11 +414,6 @@ def test_the_walk_lists_a_round_of_directories_at_the_same_time(
     one after another is latency and nothing else.  Overlap is what is under
     test, not a rate: the volumes are made slow to list and the assertion is
     that more than one was inside its listing at once.
-
-    Parameters:
-        tmp_path: Directory the tree lives under.
-        quiet_logger: Logger the walk reports through.
-        monkeypatch: Fixture the listing is wrapped through.
     """
     root, _ = _wide_tree(tmp_path, 4)
     inside = 0
@@ -456,13 +440,7 @@ def test_the_walk_lists_a_round_of_directories_at_the_same_time(
 def test_a_round_of_one_directory_is_listed_without_a_pool(
     tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A tree one directory wide should not pay for a thread pool per round.
-
-    Parameters:
-        tmp_path: Directory the tree lives under.
-        quiet_logger: Logger the walk reports through.
-        monkeypatch: Fixture the pool is replaced through.
-    """
+    """A tree one directory wide should not pay for a thread pool per round."""
 
     class Forbidden:
         """A pool the walk must not build for a round holding one directory."""
@@ -485,11 +463,6 @@ def test_the_root_is_listed_before_any_pool_is_built(
     source there, in a module-level dict filled by an unlocked check-then-set,
     so a pool that ran first would have every thread build a client and all but
     one throw it away.
-
-    Parameters:
-        tmp_path: Directory the tree lives under.
-        quiet_logger: Logger the walk reports through.
-        monkeypatch: Fixture the listing and the pool are wrapped through.
     """
     order: list[str] = []
     real_iterdir = FCPath.iterdir_metadata
