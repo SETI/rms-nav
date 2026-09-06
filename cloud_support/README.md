@@ -161,6 +161,13 @@ reported as moving in the startup log, together with the commit it resolved to,
 and whichever form is used the resolved commit is logged before installation, so
 what an instance ran is recoverable from its log.
 
+An instance that already holds a checkout is brought to the requested ref
+rather than reused as found: its remote is pointed at this run's URL, it is
+fetched, and a branch is resolved through the remote-tracking ref, because a
+fetch moves `refs/remotes/origin/main` and leaves a local `main` where it was.
+Without that a reused instance would install the revision its first run saw
+while logging that commit as the one asked for.
+
 The script also pins `OMP_NUM_THREADS` and friends to 1. cloud_tasks already
 runs `RMS_CLOUD_TASKS_NUM_TASKS_PER_INSTANCE` tasks at once, one per vCPU;
 unpinned, each task's BLAS opens a thread per core on top of that and the

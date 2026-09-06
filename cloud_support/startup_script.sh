@@ -83,6 +83,15 @@ die() {
 # console, which is readable by anyone who can describe the instance.
 SPINDOCTOR_GIT_URL_SAFE="$(sed -E 's#://[^/@]*@#://#' <<<"${SPINDOCTOR_GIT_URL}")"
 
+# What this URL names is installed as root a few lines further down, so it has
+# to arrive over a transport that says who sent it.  Cleartext HTTP does not,
+# and an operator reaching for it has almost certainly mistyped rather than
+# meant it.
+case ${SPINDOCTOR_GIT_URL} in
+    https://* | ssh://* | git@*:*) ;;
+    *) die "SPINDOCTOR_GIT_URL must be an https:// or ssh:// URL: ${SPINDOCTOR_GIT_URL_SAFE}" ;;
+esac
+
 export DEBIAN_FRONTEND=noninteractive
 
 # Unattended upgrades hold the dpkg lock through the first minutes of a boot,
@@ -105,7 +114,14 @@ say "Starting on $(hostname), job ${RMS_CLOUD_TASKS_JOB_ID:-unknown}"
 ################################################################################
 
 metadata() {
+    # Bounded, because every caller below reads this in a "$(...)  || die"
+    # and an unbounded curl never reaches the die: the instance would sit
+    # here until cloud_tasks tore the pool down for want of a keep-alive,
+    # saying nothing about why.  The metadata server is link-local, so a
+    # request that takes seconds is a request that is not going to be
+    # answered.
     curl --silent --fail --header 'Metadata-Flavor: Google' \
+        --connect-timeout 5 --max-time 15 --retry 3 --retry-connrefused \
         "http://metadata.google.internal/computeMetadata/v1/$1"
 }
 
@@ -227,17 +243,40 @@ apt_get install -y git python3 python3-pip python3-venv || die 'apt-get install 
 apt_get install -y fonts-liberation2 || die 'Cannot install fonts-liberation2'
 
 if [[ -d ${SPINDOCTOR_DIR}/.git ]]; then
-    say "Reusing the checkout in ${SPINDOCTOR_DIR}"
+    # A reused checkout sits at whatever ref the run that made it asked for,
+    # and this run may be asking for another, so it is pointed at this run's
+    # repository and brought up to date before anything is checked out.
+    # Reusing it as found would install whatever HEAD happened to be while
+    # reporting that commit as the one that was asked for.
+    say "Reusing the checkout in ${SPINDOCTOR_DIR}, at ${SPINDOCTOR_GIT_REF}"
+    git -C "${SPINDOCTOR_DIR}" remote set-url origin "${SPINDOCTOR_GIT_URL}" ||
+        die "Cannot point the existing checkout at ${SPINDOCTOR_GIT_URL_SAFE}"
+    git -C "${SPINDOCTOR_DIR}" fetch --filter=blob:none --tags --force --prune origin \
+        '+refs/heads/*:refs/remotes/origin/*' ||
+        die "git fetch failed from ${SPINDOCTOR_GIT_URL_SAFE}"
 else
-    # Checked out detached rather than cloned at a branch, so that
-    # SPINDOCTOR_GIT_REF may name a commit and a pool can be pinned to the
-    # revision it was meant to run rather than to wherever a branch has moved.
     say "Cloning ${SPINDOCTOR_GIT_URL_SAFE} at ${SPINDOCTOR_GIT_REF} into ${SPINDOCTOR_DIR}"
     git clone --filter=blob:none "${SPINDOCTOR_GIT_URL}" "${SPINDOCTOR_DIR}" ||
         die 'git clone failed'
-    git -C "${SPINDOCTOR_DIR}" checkout --detach "${SPINDOCTOR_GIT_REF}" ||
-        die "No such revision in ${SPINDOCTOR_GIT_URL_SAFE}: ${SPINDOCTOR_GIT_REF}"
 fi
+
+# A branch name has to be resolved through the remote-tracking ref rather than
+# taken as written.  A fetch moves refs/remotes/origin/main and leaves a local
+# main where it was, and this checkout is detached, so nothing else would ever
+# move it: a reused instance would silently install the revision its first run
+# saw.  A tag or a commit has no remote-tracking name and is taken as written.
+if git -C "${SPINDOCTOR_DIR}" rev-parse --verify --quiet \
+    "refs/remotes/origin/${SPINDOCTOR_GIT_REF}^{commit}" >/dev/null; then
+    SPINDOCTOR_GIT_TARGET="refs/remotes/origin/${SPINDOCTOR_GIT_REF}"
+else
+    SPINDOCTOR_GIT_TARGET="${SPINDOCTOR_GIT_REF}"
+fi
+
+# Checked out detached rather than left on a branch, so that SPINDOCTOR_GIT_REF
+# may name a commit and a pool can be pinned to the revision it was meant to run
+# rather than to wherever a branch has moved.
+git -C "${SPINDOCTOR_DIR}" checkout --detach "${SPINDOCTOR_GIT_TARGET}" ||
+    die "No such revision in ${SPINDOCTOR_GIT_URL_SAFE}: ${SPINDOCTOR_GIT_REF}"
 
 INSTALLED_COMMIT="$(git -C "${SPINDOCTOR_DIR}" rev-parse HEAD)" ||
     die 'Cannot read the checked-out commit'
