@@ -16,6 +16,7 @@ answer rather than a missing feature.
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -472,6 +473,44 @@ def test_a_round_of_one_directory_is_listed_without_a_pool(
     monkeypatch.setattr('spindoctor.nav_records.walk.ThreadPoolExecutor', Forbidden)
     root, stubs = _wide_tree(tmp_path, 1)
     assert stubs_of(tree_source(root, quiet_logger).listing(Selection())) == stubs
+
+
+def test_the_root_is_listed_before_any_pool_is_built(
+    tmp_path: Path, quiet_logger: pdslogger.PdsLogger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which is what warms the backend source cache before threads reach it.
+
+    A walk begins with one directory, so its first listing takes the unpooled
+    path however wide the tree is.  filecache builds and caches its backend
+    source there, in a module-level dict filled by an unlocked check-then-set,
+    so a pool that ran first would have every thread build a client and all but
+    one throw it away.
+
+    Parameters:
+        tmp_path: Directory the tree lives under.
+        quiet_logger: Logger the walk reports through.
+        monkeypatch: Fixture the listing and the pool are wrapped through.
+    """
+    order: list[str] = []
+    real_iterdir = FCPath.iterdir_metadata
+
+    def recording(self: FCPath) -> Any:
+        order.append(f'list {self.name}')
+        yield from real_iterdir(self)
+
+    class Recording(ThreadPoolExecutor):
+        """A pool that says when it was built."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            order.append('pool')
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(FCPath, 'iterdir_metadata', recording)
+    monkeypatch.setattr('spindoctor.nav_records.walk.ThreadPoolExecutor', Recording)
+    root, _ = _wide_tree(tmp_path, 4)
+    list(tree_source(root, quiet_logger).listing(Selection()))
+    assert order[0] == f'list {root.name}'
+    assert order[1] == 'pool'
 
 
 # ---------------------------------------------------------------------------

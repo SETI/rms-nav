@@ -347,6 +347,14 @@ def walk_from(
         if not round_directories:
             continue
         if len(round_directories) == 1:
+            # Not only a saved thread.  A walk always begins with one directory
+            # -- its root -- so the first listing of every walk runs here, and
+            # filecache has built and cached its backend source by the time any
+            # pool starts.  That cache is a module-level dict filled by an
+            # unlocked check-then-set, so a first round of 32 threads would
+            # otherwise have each of them build a client and all but one throw
+            # it away.  Reaching for the pool unconditionally would be slower
+            # on the one round where it matters most.
             listings = [_entries_of(round_directories[0][0], round_directories[0][2])]
         else:
             with ThreadPoolExecutor(max_workers=min(WALK_THREADS, len(round_directories))) as pool:
