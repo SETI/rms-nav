@@ -8,10 +8,10 @@
 # cloud_tasks refuses a startup script whose shebang does not end in "/bash",
 # so "#!/usr/bin/env bash" is rejected.
 #
-# Name it from the job configuration file:
+# Name it from the job configuration file, by a path relative to that file:
 #
 #     gcp:
-#       startup_script_file: cloud_support/startup_script.sh
+#       startup_script_file: startup_script.sh
 #
 # What it does, in order: attaches and mounts the read-only data disk holding
 # the SPICE kernels and star catalogs, installs SpinDoctor from git into a
@@ -29,7 +29,7 @@ set -uo pipefail
 ################################################################################
 
 # Where the code comes from.
-SPINDOCTOR_GIT_URL="${SPINDOCTOR_GIT_URL:-https://github.com/SETI/rms-nav.git}"
+SPINDOCTOR_GIT_URL="${SPINDOCTOR_GIT_URL:-https://github.com/SETI/rms-spindoctor.git}"
 SPINDOCTOR_GIT_REF="${SPINDOCTOR_GIT_REF:-main}"
 SPINDOCTOR_DIR="${SPINDOCTOR_DIR:-/opt/spindoctor}"
 

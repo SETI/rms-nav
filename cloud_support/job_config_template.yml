@@ -6,7 +6,7 @@
 #
 # The numbers below are starting points, not measurements.  Run one small task
 # file first, read the per-task times and memory out of the event log, and set
-# max_runtime, min_memory_per_task and the boot disk sizes from what you see.
+# max_runtime, min_memory_per_task and the boot disk size from what you see.
 
 provider: gcp
 
@@ -24,22 +24,22 @@ gcp:
   # (compute.instances.attachDisk, compute.disks.use) and to write the results
   # bucket.  cloud_tasks gives the instance the cloud-platform scope, so IAM is
   # what decides.
-  service_account: CHANGE-ME@CHANGE-ME.iam.gserviceaccount.com
+  worker_service_account: CHANGE-ME@CHANGE-ME.iam.gserviceaccount.com
 
-  startup_script_file: cloud_support/startup_script.sh
+  # Relative to the location of this file.
+  startup_script_file: startup_script.sh
 
   # Instance shape.  One image is one task and navigation is single-threaded,
   # so tasks and vCPUs go one to one.
-  instance_types: ["^n2-.*", "^n2d-.*", "^c3-.*"]
+  instance_types: ["^n2-.*", "^c3-.*"]
   min_cpu: 8
   max_cpu: 32
   cpus_per_task: 1
-  min_memory_per_task: 4  # GB
+  min_memory_per_task: 8  # GB
 
   # Boot disk carries the venv and the file cache of downloaded images.
   boot_disk_types: pd-balanced
-  boot_disk_base_size: 30  # GB
-  boot_disk_per_task: 5  # GB
+  boot_disk_base_size: 10  # GB
 
   # How much of the job runs at once, and what it may cost.
   max_instances: 10

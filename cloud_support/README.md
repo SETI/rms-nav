@@ -179,4 +179,4 @@ cloud_tasks run --config my_job.yml --task-file ~/tasks/vgiss_tasks_uranus.json
 
 Start with one small task file (Uranus is 6,460 images), read the per-task time
 and memory out of the event log, and set `max_runtime`, `min_memory_per_task`
-and the boot disk sizes from what you measure before starting a Cassini group.
+and the boot disk size from what you measure before starting a Cassini group.
