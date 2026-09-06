@@ -136,8 +136,8 @@ class FakeObs:
         radec_to_uv: Optional callable mapping ``(ra, dec, tfrac)`` to
             ``(u, v)`` for ``uv_from_ra_and_dec``.  When unset every
             star projects onto the FOV centre.
-        boresight_ra_rad: RA returned by ``boresight_ra()``.
-        boresight_dec_rad: DEC returned by ``boresight_dec()``.
+        boresight_ra_rad: RA returned by ``center_ra_dec()``.
+        boresight_dec_rad: DEC returned by ``center_ra_dec()``.
     """
 
     data: np.ndarray
@@ -379,13 +379,19 @@ class FakeObs:
     # SPICE-like surface
     # ------------------------------------------------------------------
 
-    def boresight_ra(self) -> float:
-        """Return the configured boresight RA in radians."""
-        return self.boresight_ra_rad
+    def center_ra_dec(self, *, apparent: bool = True) -> tuple[float, float]:
+        """Return the configured frame-centre RA and DEC.
 
-    def boresight_dec(self) -> float:
-        """Return the configured boresight DEC in radians."""
-        return self.boresight_dec_rad
+        Parameters:
+            apparent: Whether to correct for aberration, as the real
+                observation does.  A planted direction is whatever it was
+                planted as, so this stand-in answers the same either way.
+
+        Returns:
+            ``(ra, dec)`` in radians.
+        """
+        del apparent
+        return self.boresight_ra_rad, self.boresight_dec_rad
 
     def uv_from_ra_and_dec(
         self,

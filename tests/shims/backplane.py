@@ -382,6 +382,34 @@ class FakeBackplane:
         data = self._ring(ring_target)
         return _scalar(data.shadow_array().astype(bool))
 
+    def where_in_front(self, near_target: str, far_target: str) -> polymath.Scalar:
+        """Return a boolean Scalar marking pixels where one surface hides another.
+
+        Nothing occludes anything here: a scene that wants an occluder plants
+        one and answers this itself. The method exists because the renderer
+        calls it unconditionally, and a stand-in that does not answer a call the
+        real backplane answers is a hole in the double rather than a fact about
+        the scene.
+
+        The hidden surface is a ring for the rings model and a sibling body for
+        ``occluder_mask_for_body``, so which registry names it decides the shape
+        of the answer.  Looking only in one of them would make this stand-in
+        raise for half its real callers.
+
+        Parameters:
+            near_target: The surface that might be in front.
+            far_target: The surface that might be hidden.
+
+        Returns:
+            An all-False Scalar shaped like the hidden surface's own mask.
+        """
+        del near_target
+        if far_target.upper() in self.per_body:
+            shape = self._body(far_target).body_mask.shape
+        else:
+            shape = self._ring(far_target).ring_mask.shape
+        return _scalar(np.zeros(shape, dtype=bool))
+
 
 def plant_circular_body(
     *,

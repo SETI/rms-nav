@@ -145,13 +145,20 @@ class _FakeObsForBracket:
         self._du = du
         self._dv = dv
 
-    def boresight_ra(self) -> float:
-        """Return a constant boresight RA (the actual value is unused)."""
-        return 0.0
+    def center_ra_dec(self, *, apparent: bool = True) -> tuple[float, float]:
+        """Return a constant sky direction.
 
-    def boresight_dec(self) -> float:
-        """Return a constant boresight DEC (the actual value is unused)."""
-        return 0.0
+        The projection below is planted, so which direction this is does not
+        reach the answer; that it can be asked for does.
+
+        Parameters:
+            apparent: Whether to correct for aberration; ignored here.
+
+        Returns:
+            ``(ra, dec)`` in radians, always the origin of the sky frame.
+        """
+        del apparent
+        return 0.0, 0.0
 
     def uv_from_ra_and_dec(
         self,

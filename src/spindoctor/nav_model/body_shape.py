@@ -209,11 +209,21 @@ def load_body_shape(body_name: str, config: Any = None) -> BodyShape:
 def _yaml_entry_for(upper_body_name: str, config: Any) -> dict[str, Any] | None:
     """Return the YAML mapping for ``upper_body_name`` if present.
 
-    Resolves ``config.body_shape`` against either an explicit
-    ``Config`` instance or the global ``DEFAULT_CONFIG``.  Returns
-    ``None`` when the body is absent, the YAML block is empty / not a
-    mapping, or the loader has not been run yet (``config.body_shape``
-    raises during early bootstrapping).
+    Resolves ``config.body_shape`` against either an explicit ``Config``
+    instance or the global ``DEFAULT_CONFIG``.  Returns ``None`` when the body
+    is absent from the section, or when the section is not a mapping.
+
+    A configuration that cannot answer for ``body_shape`` at all raises, and
+    the exception reaches the caller: answering ``None`` for it would drop
+    every per-body shape override without a word and navigate against the
+    wrong shape.
+
+    Parameters:
+        upper_body_name: The body name, upper-cased, as the YAML keys it.
+        config: The configuration to read, or None for ``DEFAULT_CONFIG``.
+
+    Returns:
+        The body's mapping of shape overrides, or None where there is none.
     """
     cfg = config
     if cfg is None:
@@ -223,13 +233,12 @@ def _yaml_entry_for(upper_body_name: str, config: Any) -> dict[str, Any] | None:
         from spindoctor.config import DEFAULT_CONFIG
 
         cfg = DEFAULT_CONFIG
-    try:
-        body_shape_section = cfg.body_shape
-    except AttributeError:
-        # ``cfg`` is not a Config-like object exposing ``body_shape`` (e.g. a
-        # duck-typed test stub, or pre-bootstrap).  A genuine config-load /
-        # validation error is a real failure and is left to propagate.
-        return None
+    # Read straight through. A configuration with no body_shape section is a
+    # configuration this code cannot work from, and answering None for one
+    # would drop every per-body override without a word -- silently navigating
+    # against the wrong shape. A test stub that does not expose the section is
+    # an incomplete stub, not a case for production to carry.
+    body_shape_section = cfg.body_shape
     if not isinstance(body_shape_section, dict):
         return None
     entry = body_shape_section.get(upper_body_name)

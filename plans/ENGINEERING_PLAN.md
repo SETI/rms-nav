@@ -751,6 +751,8 @@ realism), sim polish: #84 ring edges/gaps overwrite, #78 CraterMaker
 craters, #151 flux-correct star smear, #152 diffraction spikes, #157
 line-based missing data, #158 smooth-shaded meshes.
 
+The navigation path absorbs no exception. Every stage that catches broadly says what it could not compute and re-raises; the orchestrator catches `NavInternalError` at the top and fails the image with `status_reason=internal_error`, naming the component and the type, rather than letting an offset be produced from the evidence that survived. A static test over `feature`, `nav_model`, `nav_orchestrator`, `nav_technique`, `obs` and `support` reads the source and fails on any broad clause that can be reached to its end -- not only one that returns a value, but one that raises on a single branch, or whose raise an inner handler catches -- and it recognises the catch-everything types under an alias or a module qualifier, so the policy cannot be quietly undone by a file added tomorrow (#104).
+
 ### Hardening / cleanup tail
 
 Mostly small, any time, no ordering: #13 SCET strings, #15 overlay
@@ -759,7 +761,7 @@ filecache config, #39 AttrDict, #43 `--pds3-holdings-root`
 placement, #65 exception class, #92 dependency groups, #96 dead code, #97 oversized
 modules, #98 registry consolidation, #99 orphan report_profile, #100
 root-path getters, #101 ArgumentParser.error, #102 CLI globals, #103
-thread-unsafe caches, #104 broad excepts, #105 typed interop
+thread-unsafe caches, #105 typed interop
 boundaries, #109 safe-path helpers, #110 scalar validation helpers, #119 PNG
 creation location, #135 from_file dedup, #137 dead validation
 helper, #140 geometry-union access, #143 viewer cursor after pan, #144
