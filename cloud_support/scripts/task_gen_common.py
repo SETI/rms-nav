@@ -41,13 +41,13 @@ class TaskFile(NamedTuple):
     """What one written task file amounts to.
 
     Attributes:
-        count: The number of tasks in it.
+        task_count: The number of tasks in it.
         local_root: The holdings root the enumeration read, which the tasks'
             URLs were re-rooted away from.  None when the file holds no tasks
             and nothing was re-rooted.
     """
 
-    count: int
+    task_count: int
     local_root: str | None
 
 
@@ -216,7 +216,7 @@ def write_task_file(
         path=output_path,
     )
     save_task_file(tasks, output_path)
-    return TaskFile(count=len(tasks), local_root=local_root)
+    return TaskFile(task_count=len(tasks), local_root=local_root)
 
 
 def retarget_urls(

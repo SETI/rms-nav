@@ -118,7 +118,7 @@ def main() -> None:
             dataset_name=DATASET_NAME,
             volumes=volumes,
         )
-        written.append((output_path, task_file.count))
+        written.append((output_path, task_file.task_count))
         local_root = task_file.local_root or local_root
 
     common.report_files(written, local_root=local_root, holdings_root=arguments.holdings_root)

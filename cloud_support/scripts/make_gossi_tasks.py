@@ -31,7 +31,7 @@ def main() -> None:
     print(f'Enumerating {DATASET_NAME} into {output_path}')
     written = common.write_task_file(output_path, arguments=arguments, dataset_name=DATASET_NAME)
     common.report_files(
-        [(output_path, written.count)],
+        [(output_path, written.task_count)],
         local_root=written.local_root,
         holdings_root=arguments.holdings_root,
     )

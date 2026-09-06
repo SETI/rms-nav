@@ -131,11 +131,11 @@ def _enumerate_volumes(
             dataset_name=arguments.dataset,
             volumes=[volume],
         )
-        volume_counts.append((volume, task_file.count))
+        volume_counts.append((volume, task_file.task_count))
         local_root = task_file.local_root or local_root
-        running_total += task_file.count
+        running_total += task_file.task_count
         print(
-            f'  [{index:>3}/{len(volumes)}] {volume}: {task_file.count:>6,} images '
+            f'  [{index:>3}/{len(volumes)}] {volume}: {task_file.task_count:>6,} images '
             f'({running_total:,} so far)'
         )
     return volume_counts, local_root
@@ -154,7 +154,7 @@ def _write_groups(
     Returns:
         Each file written, with the number of tasks in it.
     """
-    written: list[tuple[Path, int]] = []
+    written: list[tuple[FCPath, int]] = []
     task_number = 0
     for index, (group_volumes, count) in enumerate(groups, start=1):
         tasks: list[common.Task] = []
