@@ -124,7 +124,7 @@ _RING_TARGET_SUFFIX: str = ':ring'
 OCCLUDER_STRIP_ROWS: int = 128
 """How many rows one sibling-occlusion evaluation covers at a time.
 
-See :func:`_striped_occluder_mask`. The same bound, for the same reason, as
+See ``_striped_occlusion``. The same bound, for the same reason, as
 :data:`~spindoctor.nav_model.nav_model_rings.BACKPLANE_STRIP_ROWS`.
 """
 
@@ -787,7 +787,9 @@ def _striped_occlusion(
     any_ring = False
     for start in range(0, height, OCCLUDER_STRIP_ROWS):
         stop = min(start + OCCLUDER_STRIP_ROWS, height)
-        strip_bp, _ = _restricted_backplane(obs, (u_min, u_max, v_min + start, v_min + stop - 1))
+        strip_bp, strip_meshgrid = _restricted_backplane(
+            obs, (u_min, u_max, v_min + start, v_min + stop - 1)
+        )
         empty = np.zeros((stop - start, width), dtype=bool)
         body = occluder_mask_for_body(
             strip_bp,
@@ -806,7 +808,10 @@ def _striped_occlusion(
         )
         ring_parts.append(empty if ring is None else ring)
         any_ring = any_ring or ring is not None
-        del strip_bp, body, ring
+        # The meshgrid is the other half of the strip and has to go with it:
+        # bound to a throwaway name it outlives the release and is only
+        # replaced once the next strip has been built beside it.
+        del strip_bp, strip_meshgrid, body, ring
         release_transient_memory()
     return (
         np.vstack(body_parts) if any_body else None,
