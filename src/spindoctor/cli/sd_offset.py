@@ -42,6 +42,7 @@ from spindoctor.dataset.results_filter import SelectionError
 from spindoctor.navigate_image_files import navigate_image_files
 from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class, obs_class_to_inst_name
 from spindoctor.support.file import json_as_string
+from spindoctor.support.memory import reset_peak_resident
 from spindoctor.support.misc import log_run_environment
 
 PROGRAM_NAME = SD_OFFSET
@@ -250,7 +251,6 @@ def _run_manual_pass(
         build_timing_section,
         write_summary_png,
     )
-    from spindoctor.support.memory import reset_peak_resident
 
     # Bound the dataset traversal to at most six items: we only need to
     # distinguish the {0, 1, >1} cases and to surface up to five filespecs
@@ -303,8 +303,10 @@ def _run_manual_pass(
             level=run_logging.levels.image_section_level(),
         ):
             # Ahead of any work this image causes, so that the peak the
-            # timing section records is this image's own.
-            reset_peak_resident()
+            # timing section records is this image's own.  A mark that could
+            # not be reset is one about the whole process, and the section is
+            # told so rather than recording it as this image's.
+            peak_measured = reset_peak_resident()
             run_start = datetime.now(UTC)
             obs = cast(ObsSnapshotInst, obs_class.from_file(image_url, **extra_params))
             result = run_manual_nav(obs, config=DEFAULT_CONFIG)
@@ -328,7 +330,9 @@ def _run_manual_pass(
                     camera=obs.camera,
                     shutter_mode=obs.shutter_mode,
                     image_shape=(int(obs.data.shape[0]), int(obs.data.shape[1])),
-                    timing=build_timing_section(run_start, datetime.now(UTC)),
+                    timing=build_timing_section(
+                        run_start, datetime.now(UTC), peak_measured=peak_measured
+                    ),
                 )
                 IMAGE_LOGGER.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
