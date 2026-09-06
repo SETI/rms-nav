@@ -25,8 +25,8 @@ The stacked array is the whole-frame array exactly, not an approximation of it:
 strip boundaries fall on whole rows, and no per-pixel quantity depends on a
 neighbouring row. Tests assert the identity rather than a tolerance.
 
-Two places stripe:
-``NavModelRings._striped_backplane`` for the ring quantities and
+Three places stripe: ``NavModelRings._striped_backplane`` for the ring
+quantities, ``nav_model_body._body_strips`` for a body's oversampled box, and
 ``titan_geometry._striped_occlusion`` for both occlusion masks over one set of
 strips. Each caps a strip at 128 rows.
 
@@ -144,9 +144,17 @@ transform-free evaluation of the same sums.
 Declining early
 ===============
 
-The cheapest backplane is the one never built.
+The cheapest backplane is the one never built. A body whose disc reaches past all
+four corners of the extended frame leaves no sky around it, no limb inside the
+frame, and no measurable extent, so there is nothing a shape-based technique could
+match. :func:`~spindoctor.nav_model.nav_model_body.body_fills_extfov` decides that
+from the inventory alone -- an ellipse against the frame corners, costing no
+backplane -- and the model declines before building anything. The navigation records
+``body_fills_fov`` as its reason, which separates a frame that is unnavigable by
+that body from one that merely failed.
+
 :func:`~spindoctor.nav_model.nav_model_rings.NavModelRings._sparse_visibility_skip`
-is the idea for the rings: a 16 x 16 evaluation rules out the two common cases
+is the same idea for the rings: a 16 x 16 evaluation rules out the two common cases
 -- no ring-plane intersection anywhere in the frame, and a visible radial range
 entirely outside the catalogue's outermost feature -- without paying for a dense
 backplane.
