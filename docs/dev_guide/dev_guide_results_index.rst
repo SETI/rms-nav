@@ -297,6 +297,24 @@ batches. The choice lives inside the seam, so a caller has one way to ask what a
 root holds; two shapes in the callers would be two answers to keep true of each
 other.
 
+**On a cloud root, both halves of a pass are latency rather than bandwidth.** A
+listing is one round trip and a document is another, and neither moves enough
+bytes to matter: a navigation document is a few kilobytes. So the walk lists
+:data:`~spindoctor.nav_records.walk.WALK_THREADS` directories at once, taking
+:data:`~spindoctor.nav_records.walk.WALK_DIRECTORIES_AT_ONCE` off a frontier
+each round so it still streams and still holds only a slice of the tree; and
+retrieval passes ``nthreads=``:data:`~spindoctor.nav_records.RETRIEVE_THREADS`
+with a batch large enough to keep that pool full. On a bucket of 52,101
+documents measured 2026-09-04, the two together took a cold pass from about 21
+minutes to 240 seconds, and a pass with nothing changed --- which pays for the
+listings and reads no document --- from a minute and a half of listings to 13
+seconds. A local root pays neither latency, and neither setting costs it
+anything measurable.
+
+The ceiling is the service, not the settings: streaming the same documents
+without storing them measured 317 a second against ``retrieve()``'s 307, so
+what is left after the concurrency is the round trip itself.
+
 **What a check cannot report is the size and the modification time.** Those come
 from a directory entry, and an entry a check produced carries neither and says
 so through :attr:`~spindoctor.nav_records.ListedRecord.has_metrics`. A consumer
@@ -334,9 +352,9 @@ Two backends, and why the package is split
 ------------------------------------------
 
 :class:`~spindoctor.nav_records.TreeRecordSource` answers from the documents:
-it walks directory by directory, carrying each entry's metrics out of the
-listing, and retrieves documents in batches underneath a stream that yields them
-one at a time. :class:`~spindoctor.results_index.IndexRecordSource` answers from
+it walks the tree a bounded slice of directories at a time, carrying each
+entry's metrics out of the listing, and retrieves documents in batches
+underneath a stream that yields them one at a time. :class:`~spindoctor.results_index.IndexRecordSource` answers from
 the rows, streamed in server-side chunks. The per-image lookup and the listing
 are one query each; a stream of records is two, the images and the files the
 ingest refused; and :meth:`~spindoctor.nav_records.RecordSource.facts` is four,
@@ -644,6 +662,12 @@ separately (``RETRIEVE_BATCH_SIZE``), because one bounds a download and
 the other bounds a transaction. A chunk whose write fails is rewritten one
 image at a time, so a single unstorable document costs itself rather than its
 chunk.
+
+The two are independent but not unrelated: a chunk is retrieved in batches, so
+a commit chunk smaller than a retrieval batch caps the batch at itself and
+throws away the download concurrency the batch is sized for. The chunk is a
+small multiple of the batch, which keeps the download pool full across a whole
+chunk while holding a transaction to something a crash can afford to repeat.
 
 **On SQLite, several local writers are an ordinary case.** The opener turns on
 write-ahead logging and sets ``busy_timeout`` to ``SQLITE_BUSY_TIMEOUT_MS``, so
