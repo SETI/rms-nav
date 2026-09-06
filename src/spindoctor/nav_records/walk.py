@@ -82,6 +82,14 @@ everything at one level of a wide tree would hold that whole level in memory at
 once.  Taking a bounded slice keeps the walk streaming -- documents are yielded
 as each round finishes rather than at the end -- while still handing
 :data:`WALK_THREADS` enough work to stay busy.
+
+What the bound is worth in bytes: one listed entry measured 627 of them, so a
+round is bounded by this many directories times what each holds rather than by
+the tree.  A results tree is wide and shallow -- one directory per volume, and
+every document of that volume in it -- so a Cassini-scale root of 443,177
+documents over 126 volumes falls inside a single round either way, and holds
+about 280 MB while that round runs.  The bound is what stops a deeper or wider
+tree from being unbounded, not something the results trees themselves reach.
 """
 
 
