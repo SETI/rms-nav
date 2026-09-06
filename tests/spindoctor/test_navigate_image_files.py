@@ -74,6 +74,16 @@ class _FakeSnapshot:
         # observation.shutter_mode when the host exposes one.
         self.shutter_mode = shutter_mode
 
+    def reset_all(self) -> None:
+        """Drop cached geometry, as a real snapshot does.
+
+        The orchestrator calls this once every model is built, to give back
+        what the backplanes were holding.  This stand-in caches nothing, so
+        it has nothing to drop -- but it still has to answer, because a
+        stand-in that cannot is an incomplete stand-in rather than evidence
+        that production should not have asked.
+        """
+
     def get_public_metadata(self) -> dict[str, Any]:
         """Describe the image the way a real snapshot does.
 
