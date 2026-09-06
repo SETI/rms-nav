@@ -1,8 +1,11 @@
 # Template cloud_tasks job configuration for a SpinDoctor navigation run.
 #
-# Copy it, fill in every CHANGE-ME, and run one task file through it:
+# Copy it to job_config.yml beside this file, which .gitignore covers because a
+# filled-in copy carries a project and a service account, fill in every
+# CHANGE-ME, and run one task file through it:
 #
-#     cloud_tasks run --config my_job.yml --task-file coiss_tasks_01_...json
+#     cloud_tasks run --config cloud_support/job_config.yml \
+#         --task-file coiss_tasks_01_...json
 #
 # The numbers below are starting points, not measurements.  Run one small task
 # file first, read the per-task times and memory out of the event log, and set

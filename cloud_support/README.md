@@ -171,10 +171,13 @@ A startup failure is visible only on the serial console and in
 to install never reaches the queue. The script logs both places and stops at the
 first step that fails.
 
-Then, with a configuration copied from `job_config_template.yml`:
+Then, with a configuration copied from `job_config_template.yml` to
+`job_config.yml`, which `.gitignore` covers because a filled-in copy carries a
+project and a service account:
 
 ```bash
-cloud_tasks run --config my_job.yml --task-file ~/tasks/vgiss_tasks_uranus.json
+cloud_tasks run --config cloud_support/job_config.yml \
+    --task-file ~/tasks/vgiss_tasks_uranus.json
 ```
 
 Start with one small task file (Uranus is 6,460 images), read the per-task time
