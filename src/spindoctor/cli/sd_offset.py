@@ -250,6 +250,7 @@ def _run_manual_pass(
         build_timing_section,
         write_summary_png,
     )
+    from spindoctor.support.memory import reset_peak_resident
 
     # Bound the dataset traversal to at most six items: we only need to
     # distinguish the {0, 1, >1} cases and to surface up to five filespecs
@@ -301,6 +302,9 @@ def _run_manual_pass(
             handler=local_handlers,
             level=run_logging.levels.image_section_level(),
         ):
+            # Ahead of any work this image causes, so that the peak the
+            # timing section records is this image's own.
+            reset_peak_resident()
             run_start = datetime.now(UTC)
             obs = cast(ObsSnapshotInst, obs_class.from_file(image_url, **extra_params))
             result = run_manual_nav(obs, config=DEFAULT_CONFIG)
