@@ -82,64 +82,125 @@ between strips does not register against it.
 Where it is called
 ------------------
 
-After each strip, in each of the three striped loops, and nowhere else.
+After each strip, in each of the three striped loops; and once more where the
+model stage ends, after the caches it filled have been dropped.
 
-Coarser placements were measured and rejected. Releasing at the boundary between
-whole models, and again between techniques, changed a Voyager Saturn frame's peak
-from 8.70 GB to 8.74 GB and another from 8.60 GB to 8.78 GB: no gain, inside the
-run-to-run spread. The reason is that a navigation's peak is set by the largest
-single stage rather than by an accumulation across stages, so there is nothing at
-a stage boundary for a release to reclaim -- the strips inside that stage have
-already given it back.
+A release on its own reclaims only what has stopped being referenced, so where
+it is called is a claim about what has just stopped being needed. Inside a
+striped loop that is the strip. At the end of the model stage it is the
+backplanes, and only because they are dropped in the same breath -- a release at
+that boundary that dropped nothing was measured at 0.04 GB, which is what a
+release finds when everything around it is still held.
 
-This is also deliberately not wired into a general allocation path. A collection is
+This is deliberately not wired into a general allocation path. A collection is
 cheap against a backplane evaluation and expensive against a small one, so it
-belongs only where a large unit of work has just ended, which is what a strip is.
+belongs only where a large unit of work has just ended.
 
-What a release cannot reach
-===========================
+What the models leave behind
+============================
 
-A ring render leaves roughly four gigabytes of resident size behind on a Voyager
-Saturn frame, and no part of it is held by the program. Dropping the observation's
-cache of computed backplanes returns a third of a gigabyte; dropping the models
-returns nothing; dropping the observation itself returns nothing. What remains is
-resident but free: small live objects are scattered across the allocator's arenas,
-so whole pages cannot be handed back however often the release runs.
+A ring render leaves several gigabytes resident on a Voyager Saturn frame after a
+collection and an arena release have both run, and all of it is held.
 
-This is worth knowing before optimizing. Two placements of
-:func:`~spindoctor.support.memory.release_transient_memory` were tried against this
-floor -- one after the whole-frame ring evaluations, one at each model and technique
-boundary -- and both measured no change, because both were trying to free memory
-that was already free and merely unreturnable.
+Ask the C library and it says so plainly. On the heaviest measured frame, once
+:func:`~spindoctor.support.memory.release_transient_memory` has run, ``mallinfo2``
+reports 0.23 GB free and retained against 3.16 GB handed out and 3.46 GB in
+mappings, and CPython's own small-object allocator holds 0.10 GB across 99 arenas.
+Almost none of it is fragmentation. It is live.
 
-Pinning the C library's mmap threshold, so that large arrays are served by mappings
-that are returned on free rather than from the heap, recovers about a third of a
-gigabyte of it for about six percent more runtime. That is a poor trade and is not
-configured anywhere; it is recorded here so the next reader does not have to
-rediscover the result.
+An ``oops`` ``Backplane`` caches every event, intercept and computed surface it has
+ever been asked for, and it is sized by the meshgrid rather than by the answer, so
+on the extended frame each entry is megabytes and there are hundreds. Emptying them
+one kind at a time on that frame:
 
-The practical consequence is a lower bound. Striping and releasing bound what a
-stage adds on top of this floor, and nothing available inside the models lowers the
-floor itself.
+.. list-table::
+   :header-rows: 1
+   :widths: 34 22 22
+
+   * - Cache
+     - Entries
+     - Returns
+   * - computed backplanes
+     - 237
+     - 1.89 GB
+   * - unmasked intercept events
+     - 2
+     - 1.26 GB
+   * - observation events, with and without line-of-sight derivatives
+     - 2
+     - 1.88 GB
+
+Settled resident size falls from 6.80 GB to 1.77 GB. The observation builds each
+backplane lazily and caches it, so dropping them all -- which is what
+:meth:`~spindoctor.obs.obs_snapshot.ObsSnapshot.reset_all` does -- costs only the
+recomputation of whatever is asked for next.
+
+Nothing asks. The models are the only stage that reads a backplane; no technique,
+and nothing in the orchestrator below them, touches one. So the release goes where
+the model stage ends, after the features have been extracted and the annotations
+drawn, and the techniques run against an observation holding nothing.
+
+Two dead ends, recorded so they are not tried again. Pinning the C library's mmap
+threshold, so large arrays are served by mappings returned on free rather than from
+the heap, moves about a third of a gigabyte for about six percent more runtime.
+Walking ``gc.get_objects()`` for live arrays reports approximately zero against any
+residue at all: numeric NumPy arrays are not tracked by the collector, so that walk
+cannot see them, and a probe built on it will report an empty heap under six
+gigabytes of live data.
 
 Correlation
 ===========
 
-The remaining peak on a wide-margin frame is not in a model at all. It is the
-masked normalized cross-correlation in
-:class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`, which
-transforms the extended frame, zero-padded for linear rather than circular
-correlation. On a Voyager frame that peak stands several gigabytes above the floor
-and is returned in full when the technique exits, which is why releasing between
-techniques does nothing for it: it is one allocation spike, not an accumulation.
+Once the models have given their memory back, the largest thing left in the process
+is the masked normalized cross-correlation in
+:class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`. It
+correlates the extended frame against a template of the same size, zero-padded for
+linear rather than circular correlation, so the surfaces it works on are twice the
+extended frame on each axis: 3600 x 3600 for a Voyager frame, or about a tenth of a
+gigabyte each. It needs six of them at once for the normalization, and everything on
+the way to them is a transform of the same size.
 
-``_masked_ncc_bidir`` needs six spectra, but their
-lifetimes barely overlap: the mask spectrum is finished after the second shift-wise
-sum, the image spectrum after the third, the model-mask spectrum after the fourth.
-Each is therefore built where it is first needed and dropped at its last use, so
-three exist at once rather than six. Every product is the one it always was -- only
-the order of allocation changed -- and tests check the result against a
-transform-free evaluation of the same sums.
+Three things keep that down, none of which changes what is computed.
+
+The transforms are of real fields, so half of a full spectrum is the conjugate of
+the other half. ``_correlate_from_spectra`` uses half-spectrum transforms
+throughout, which halves every spectrum and is also about twice as fast.
+
+The result of a correlation is real by construction, and ``np.real`` of a complex
+array is a strided *view* -- so a surface obtained that way keeps a complex array of
+twice its size alive for as long as the surface is needed, six times over. A
+half-spectrum inverse returns the contiguous real array directly.
+
+Each spectrum is built where it is first needed and dropped at its last use: the
+mask spectrum is finished after the second shift-wise sum, the image spectrum after
+the third, the model-mask spectrum after the fourth. The normalization that follows
+writes into surfaces that have just stopped being needed rather than allocating one
+per step, because a step allocates as much as a whole surface and there are a dozen
+of them.
+
+Measured on one call at Voyager's padded size, against random ring-like fields:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 46 27 27
+
+   * - Correlation surfaces built with
+     - Resident growth
+     - Wall time
+   * - full spectra, real parts as views
+     - 2.16 GB
+     - 18.5 s
+   * - full spectra, real parts copied out
+     - 1.75 GB
+     - 17.9 s
+   * - half spectra
+     - 1.07 GB
+     - 8.6 s
+
+The middle row is bit-identical to the first. The half-spectrum row agrees with it
+to 9e-16 on the correlation surface, marks exactly the same shifts invalid, and puts
+the peak in the same place; the discarded imaginary part was rounding noise. Tests
+check the result against a transform-free evaluation of the same sums.
 
 Declining early
 ===============
