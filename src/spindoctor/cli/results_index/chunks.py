@@ -62,11 +62,11 @@ from spindoctor.cli.results_index.store import _write_chunk
 from spindoctor.nav_records import (
     COULD_NOT_RETRIEVE,
     METADATA_SUFFIX,
-    RETRIEVE_BATCH_SIZE,
     DocumentOrigin,
     ImageFacts,
     ListedRecord,
     MetadataDocumentError,
+    TreeTuning,
     document_or_refusal,
     facts_from_document,
     subtree_of,
@@ -120,6 +120,7 @@ def _ingest_chunk(
     root_url: str,
     counts: IngestCounts,
     logger: PdsLogger,
+    tuning: TreeTuning | None = None,
 ) -> None:
     """Retrieve, read and write one chunk of metadata files.
 
@@ -133,16 +134,20 @@ def _ingest_chunk(
         root_url: Normalized URL of the root, as the rows record it.
         counts: Accumulator this chunk's outcomes are added to.
         logger: Logger for per-file failures.
+        tuning: How much of the retrieval runs at once, or None for the
+            defaults.
     """
+    tuning = TreeTuning() if tuning is None else tuning
     pending: list[ImageFacts] = []
     refused: list[dict[str, Any]] = []
-    for batch in _batched(chunk, RETRIEVE_BATCH_SIZE):
+    for batch in _batched(chunk, tuning.retrieve_batch_size):
         sub_paths: list[str | Path] = [f'{listed.stub}{METADATA_SUFFIX}' for listed in batch]
         # retrieve() rather than get_local_path(): on a cloud root the latter
         # names a file it never downloads.  exception_on_fail=False keeps one
         # unreadable file from ending the run.
         local_paths = cast(
-            list[Path | Exception], root.retrieve(sub_paths, exception_on_fail=False)
+            list[Path | Exception],
+            root.retrieve(sub_paths, exception_on_fail=False, nthreads=tuning.retrieve_threads),
         )
         for listed, local_path in zip(batch, local_paths, strict=True):
             source = DocumentOrigin(

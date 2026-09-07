@@ -164,7 +164,8 @@ directions:
 
 Both are answered by running ``sd_results_index ingest`` again, which is cheap
 over a tree that has barely changed: a document whose size and modification time still
-match is not read at all. Every run that answers from a results index reports
+match is not read at all. Re-ingesting before a run that depends on the answer
+is an ordinary thing to do. Every run that answers from a results index reports
 when the pass that filled it finished and how long ago that was, so the age of
 the answer is in the run log beside the answer.
 
@@ -173,6 +174,107 @@ results index has no row at all for, a document rewritten in place --- the cases
 are enumerated in :doc:`user_guide_navigation` under the selection filters, and
 the reason vocabulary the backplane and reprojection stages report is in
 :doc:`user_guide_backplanes` and :doc:`user_guide_reprojection`.
+
+Tuning a pass for your machine and storage
+------------------------------------------
+
+A pass over a results tree does two things: it lists directories to find out
+what is there, and it reads the documents it found. Against remote storage
+both are dominated by waiting. A listing is one request and a document is
+another, and a navigation document is only a few kilobytes, so a pass done one
+request at a time spends almost all of its time waiting and almost none of it
+moving data or using the processor.
+
+Both halves therefore run several requests at a time, and the ``results_index``
+configuration section is where you say how many. You do not need to set any of
+it: the defaults are chosen to be sensible, and a results tree on a local disk
+is barely affected by any of them, since a local read does not wait on a
+network.
+
+.. code-block:: yaml
+
+   results_index:
+     walk_threads: 32
+     walk_directories_at_once: 256
+     retrieve_threads: 64
+     retrieve_batch_size: 1024
+
+**A note on processor cores.** These are not settings that divide work between
+cores. The threads they create spend their time waiting for storage to answer,
+not computing, so it is normal and correct for them to outnumber your cores
+several times over --- the defaults above will happily run on a four-core
+machine. Adding cores is not by itself a reason to raise them. What decides
+the useful value is your network and what your storage service will do at
+once, and past that point extra requests queue, or the service refuses them,
+and the pass gets slower rather than faster.
+
+The settings
+~~~~~~~~~~~~
+
+``walk_threads`` (default 32)
+   How many directories are listed at the same time. Raise it if your tree has
+   many directories and the finding stage is slow; lower it if your storage
+   service complains about the request rate. It costs almost no memory --- a
+   thread waiting on a request holds very little --- so memory is not the
+   reason to keep it small.
+
+``walk_directories_at_once`` (default 256)
+   **This one is a memory limit, not a speed control.** Listing happens in
+   rounds, and a round holds the full contents of every directory it is
+   listing before moving on. Without a limit, a round over a wide tree would
+   try to hold that entire level of the tree at once. This caps how many
+   directories a round covers, and therefore how much a round holds.
+
+   Raising it does not make a pass faster once there is enough work to keep
+   ``walk_threads`` busy; it only increases the peak memory of the pass. Lower
+   it on a machine short of memory, or if you have an unusually deep or wide
+   tree with very large directories. Raise it only if you have plenty of
+   memory and are certain the finding stage is starved for work. Keep it
+   comfortably above ``walk_threads`` so there is always something for every
+   thread to do.
+
+``retrieve_threads`` (default 64)
+   How many documents are downloaded at the same time. This is the setting
+   that most affects how long a pass takes against remote storage, and the
+   first one to change if reading is slow. Raise it on a fast, high-latency
+   link; lower it if your provider throttles you, returns errors under load,
+   or if you are sharing the connection and want the pass to be less greedy.
+   Downloaded documents are written to the local file cache rather than held
+   in memory, so this costs disk space in the cache rather than RAM.
+
+``retrieve_batch_size`` (default 1024)
+   How many documents are handed to the downloader at a time. Its job is to
+   keep the download threads busy: a batch has to be comfortably larger than
+   ``retrieve_threads``, or threads sit idle at the end of every batch waiting
+   for the next one to start. If you change ``retrieve_threads``, change this
+   with it and keep it several times larger.
+
+   A batch smaller than ``retrieve_threads`` cannot fill the download pool, so
+   a run configured that way stops at startup and says so, rather than running
+   slowly for a reason you would have to go looking for.
+
+Choosing values for your machine
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+*Short of memory.* Lower ``walk_directories_at_once`` first --- it is the only
+one of the four that meaningfully affects how much memory a pass uses. Halving
+it roughly halves the peak of the finding stage. The other three cost little
+memory at any setting.
+
+*Plenty of memory, slow remote storage.* Leave
+``walk_directories_at_once`` alone and raise ``retrieve_threads``, with
+``retrieve_batch_size`` raised alongside it. Raise them together in steps and
+watch whether the pass actually gets faster; when it stops improving, you have
+reached what your link or your provider will give you, and going further tends
+to make things worse.
+
+*A shared or metered connection.* Lower ``retrieve_threads`` and
+``walk_threads``. The pass takes longer and leaves more of the connection for
+everything else.
+
+*A results tree on a local disk.* Leave all four alone. A local read does not
+wait on a network, so there is little for these settings to overlap, and the
+defaults cost a local pass nothing.
 
 How a results index is asked for
 ================================

@@ -297,6 +297,34 @@ batches. The choice lives inside the seam, so a caller has one way to ask what a
 root holds; two shapes in the callers would be two answers to keep true of each
 other.
 
+**On a cloud root, both halves of a pass are latency rather than bandwidth.** A
+listing is one round trip and a document is another, and neither moves enough
+bytes to matter: a navigation document is a few kilobytes. Both halves
+therefore run in parallel, which is what makes a pass over a cloud root routine
+rather than something to plan around. The walk lists several directories at
+once, taking a bounded slice off a frontier each round so it still streams and
+still holds only part of the tree; retrieval fetches several documents at once,
+with a batch large enough to keep that pool full. A local root pays neither
+latency, and neither costs it anything.
+
+**How much of it runs at once is not a property of this program.** It belongs
+to a machine, its link to the root, and what the service will do concurrently:
+where the useful value stops rising is where that particular round trip becomes
+what is left, and another provider or another link puts it somewhere else. So
+the numbers are configuration rather than constants.
+:class:`~spindoctor.nav_records.TreeTuning` carries them,
+:class:`~spindoctor.nav_records.TreeRecordSource` takes one, and the shipped
+values -- tuned on one machine against one bucket -- are its defaults. The
+``results_index`` section of the configuration is where a machine says
+otherwise, and a value that would stop a pass rather than tune it, such as a
+batch too small to fill the download pool, is refused at startup naming the
+setting.
+
+The library does not read the configuration itself:
+:mod:`spindoctor.nav_records` answers about documents and roots and depends on
+nothing that decides policy, so the program that has a configuration reads it
+and passes what it says.
+
 **What a check cannot report is the size and the modification time.** Those come
 from a directory entry, and an entry a check produced carries neither and says
 so through :attr:`~spindoctor.nav_records.ListedRecord.has_metrics`. A consumer
@@ -334,9 +362,9 @@ Two backends, and why the package is split
 ------------------------------------------
 
 :class:`~spindoctor.nav_records.TreeRecordSource` answers from the documents:
-it walks directory by directory, carrying each entry's metrics out of the
-listing, and retrieves documents in batches underneath a stream that yields them
-one at a time. :class:`~spindoctor.results_index.IndexRecordSource` answers from
+it walks the tree a bounded slice of directories at a time, carrying each
+entry's metrics out of the listing, and retrieves documents in batches
+underneath a stream that yields them one at a time. :class:`~spindoctor.results_index.IndexRecordSource` answers from
 the rows, streamed in server-side chunks. The per-image lookup and the listing
 are one query each; a stream of records is two, the images and the files the
 ingest refused; and :meth:`~spindoctor.nav_records.RecordSource.facts` is four,
@@ -644,6 +672,12 @@ separately (``RETRIEVE_BATCH_SIZE``), because one bounds a download and
 the other bounds a transaction. A chunk whose write fails is rewritten one
 image at a time, so a single unstorable document costs itself rather than its
 chunk.
+
+The two are independent but not unrelated: a chunk is retrieved in batches, so
+a commit chunk smaller than a retrieval batch caps the batch at itself and
+throws away the download concurrency the batch is sized for. The chunk is a
+small multiple of the batch, which keeps the download pool full across a whole
+chunk while holding a transaction to something a crash can afford to repeat.
 
 **On SQLite, several local writers are an ordinary case.** The opener turns on
 write-ahead logging and sets ``busy_timeout`` to ``SQLITE_BUSY_TIMEOUT_MS``, so

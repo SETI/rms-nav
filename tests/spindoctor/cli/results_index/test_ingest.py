@@ -32,9 +32,8 @@ from tests.spindoctor.conftest import (
 )
 
 from spindoctor.cli.results_index import INGEST_COMMIT_CHUNK_SIZE, ingest_metadata_files
-from spindoctor.cli.results_index import chunks as chunks_module
 from spindoctor.cli.results_index import driver as driver_module
-from spindoctor.nav_records import METADATA_SUFFIX, RETRIEVE_BATCH_SIZE
+from spindoctor.nav_records import METADATA_SUFFIX, RETRIEVE_BATCH_SIZE, TreeTuning
 from spindoctor.results_index import (
     IMAGES,
     INGEST_RUNS,
@@ -754,7 +753,13 @@ def test_a_chunk_boundary_is_crossed_mid_run(
 ) -> None:
     """More images than one transaction holds must all still arrive."""
     monkeypatch.setattr(driver_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
-    monkeypatch.setattr(chunks_module, 'RETRIEVE_BATCH_SIZE', 2)
+    # The batch is configuration now, so a small one is asked for the way an
+    # operator would ask for it rather than by rebinding a module global.
+    monkeypatch.setattr(
+        driver_module,
+        '_tuning_from_config',
+        lambda: TreeTuning(retrieve_batch_size=2, retrieve_threads=2),
+    )
     root = tmp_path / 'results'
     for index in range(7):
         write_metadata(
@@ -772,7 +777,13 @@ def test_a_chunk_boundary_leaves_every_row_readable(
 ) -> None:
     """Counting is not the same as having committed."""
     monkeypatch.setattr(driver_module, 'INGEST_COMMIT_CHUNK_SIZE', 3)
-    monkeypatch.setattr(chunks_module, 'RETRIEVE_BATCH_SIZE', 2)
+    # The batch is configuration now, so a small one is asked for the way an
+    # operator would ask for it rather than by rebinding a module global.
+    monkeypatch.setattr(
+        driver_module,
+        '_tuning_from_config',
+        lambda: TreeTuning(retrieve_batch_size=2, retrieve_threads=2),
+    )
     root = tmp_path / 'results'
     for index in range(7):
         write_metadata(
@@ -791,7 +802,17 @@ def test_a_chunk_boundary_leaves_every_row_readable(
 
 def test_the_batch_and_chunk_sizes_are_independent() -> None:
     """One bounds a download and the other a transaction; neither implies the other."""
-    assert (RETRIEVE_BATCH_SIZE, INGEST_COMMIT_CHUNK_SIZE) == (64, 512)
+    assert (RETRIEVE_BATCH_SIZE, INGEST_COMMIT_CHUNK_SIZE) == (1024, 2048)
+
+
+def test_a_retrieval_batch_fits_inside_a_commit_chunk() -> None:
+    """Or the chunk would cap the batch, and the download concurrency with it.
+
+    An ingest batches its retrievals within one commit chunk, so a batch larger
+    than the chunk is not the batch it says it is: every download would be cut
+    down to the chunk, and the sizing measured for the batch would never happen.
+    """
+    assert RETRIEVE_BATCH_SIZE <= INGEST_COMMIT_CHUNK_SIZE
 
 
 def _cloud_style_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stubs: list[str]) -> Path:

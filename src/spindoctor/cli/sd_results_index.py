@@ -66,6 +66,7 @@ schema are six tables SpinDoctor created.
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import sqlalchemy
 from filecache import FCPath
@@ -611,7 +612,19 @@ def main() -> None:
     with reporting_logging_errors():
         load_default_and_user_config(arguments, DEFAULT_CONFIG)
     with reporting_logging_errors():
-        build_run_logging(PROGRAM_NAME, arguments, DEFAULT_CONFIG)
+        # This program reads a results tree; it does not write to one. Its log
+        # therefore defaults under the working directory rather than under
+        # nav_results_root, which for a cloud root would add files to the very
+        # tree the next pass enumerates -- and would pay a network round trip
+        # per line while walking it. Not beside the index either: that URL may
+        # name a cloud path, or a database no file sits beside.
+        build_run_logging(
+            PROGRAM_NAME,
+            arguments,
+            DEFAULT_CONFIG,
+            log_root_under_results_root=False,
+            fallback_log_root=Path.cwd() / 'logs',
+        )
 
     # A level that names the index with an empty value is a different failure from
     # naming none at all, and its message names that level, so it is reported as

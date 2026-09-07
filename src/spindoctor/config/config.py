@@ -202,6 +202,7 @@ class Config:
         self._config_backplanes = AttrDict(self._config_dict.get('backplanes', {}))
         self._config_pds4 = AttrDict(self._config_dict.get('pds4', {}))
         self._config_orchestrator = AttrDict(self._config_dict.get('orchestrator', {}))
+        self._config_results_index = AttrDict(self._config_dict.get('results_index', {}))
 
     def _load_yaml(self, config_path: str | Path) -> dict[str, Any]:
         """Loads a YAML file and returns a dictionary mapping.
@@ -576,6 +577,21 @@ class Config:
 
         self.read_config()
         return self._config_orchestrator
+
+    @property
+    def results_index(self) -> Any:
+        """Returns how much of a pass over a results tree runs at once.
+
+        Holds ``walk_threads``, ``walk_directories_at_once``,
+        ``retrieve_threads`` and ``retrieve_batch_size``.  The shipped values
+        were tuned on one machine against one bucket; the useful ones belong to
+        a machine and its network, which is why they are configuration rather
+        than constants.  :class:`~spindoctor.nav_records.TreeTuning` is what
+        reads this section and what refuses a value that would stop a pass.
+        """
+
+        self.read_config()
+        return self._config_results_index
 
     @property
     def backplanes(self) -> Any:

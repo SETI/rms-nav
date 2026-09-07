@@ -87,6 +87,7 @@ from spindoctor.cli.results_index.driver import (
     _files_to_read,
     _listing_of_root,
     _prune_missing,
+    _tuning_from_config,
 )
 from spindoctor.cli.results_index.runs import (
     _finish_run,
@@ -575,6 +576,7 @@ def ingest_task_share(
         has_file_metrics=share.has_file_metrics,
     )
     counts.files_skipped = len(share.files) - len(to_read)
+    tuning = _tuning_from_config()
     for chunk in _batched(to_read, INGEST_COMMIT_CHUNK_SIZE):
         _ingest_chunk(
             engine,
@@ -583,6 +585,7 @@ def ingest_task_share(
             root_url=share.root_url,
             counts=counts,
             logger=logger,
+            tuning=tuning,
         )
     return {
         'status': 'ok',
