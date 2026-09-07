@@ -570,6 +570,7 @@ class NavOrchestrator(NavBase):
         model_metadata = self._collect_model_metadata(built_models)
         annotations = self._collect_annotations(context, built_models)
         if not all_features:
+            # _fail substitutes body_fills_fov when a body covers the frame.
             return self._fail(
                 status_reason=NavStatusReason.NO_FEATURES_EXTRACTED,
                 image_classifier=image_classifier,
@@ -627,6 +628,7 @@ class NavOrchestrator(NavBase):
             annotations=annotations,
         )
         if pass1_ensemble.status == 'failed':
+            pass1_ensemble = self._failed_ensemble(pass1_ensemble, model_metadata)
             self._log_status_reason(pass1_ensemble.status_reason)
             return pass1_ensemble
         if pass1_ensemble.offset_px is not None:
@@ -680,6 +682,8 @@ class NavOrchestrator(NavBase):
             model_metadata=model_metadata,
             annotations=annotations,
         )
+        if final.status == 'failed':
+            final = self._failed_ensemble(final, model_metadata)
         self._log_final_result(final)
         self._log_status_reason(final.status_reason)
         return final
@@ -810,6 +814,72 @@ class NavOrchestrator(NavBase):
             )
         return kept, gated
 
+    def _reason_for_a_covering_body(
+        self,
+        status_reason: NavStatusReason,
+        model_metadata: dict[str, dict[str, Any]] | None,
+    ) -> NavStatusReason:
+        """Substitute ``BODY_FILLS_FOV`` when a body covers the extended frame.
+
+        A body that covers the frame decides the reason whatever else happened,
+        so every failed result passes through here and not only the ones this
+        class builds itself: an ensemble that failed for its own reason
+        describes a symptom, and the covering body is the cause.
+
+        The exception is a defect.  An internal error or a contract violation
+        is about this code, and must never be filed under a fact about the
+        geometry.
+
+        Parameters:
+            status_reason: The reason the failure would otherwise carry.
+            model_metadata: Per-model metadata, read for ``fills_extfov``.
+
+        Returns:
+            ``BODY_FILLS_FOV`` where a body covers the frame and the reason is
+            not a defect, and the reason unchanged otherwise.
+        """
+        if status_reason in (
+            NavStatusReason.INTERNAL_ERROR,
+            NavStatusReason.CONTRACT_VIOLATION,
+        ):
+            return status_reason
+        covering = sorted(
+            name
+            for name, meta in (model_metadata or {}).items()
+            if isinstance(meta, dict) and meta.get('fills_extfov')
+        )
+        if not covering:
+            return status_reason
+        if status_reason is not NavStatusReason.BODY_FILLS_FOV:
+            self._logger.info(
+                'Reporting body_fills_fov rather than %s: %s covers the extended frame',
+                status_reason.value,
+                ', '.join(covering),
+            )
+        return NavStatusReason.BODY_FILLS_FOV
+
+    def _failed_ensemble(
+        self, result: NavResult, model_metadata: dict[str, dict[str, Any]]
+    ) -> NavResult:
+        """Return a failed ensemble result under the reason a covering body sets.
+
+        The ensemble reports why the techniques did not agree; it does not know
+        that a body covers the frame, which is the reason a reader wants.  The
+        rest of the result -- ``per_technique``, the annotations, the feature
+        inventory -- is the ensemble's and is kept.
+
+        Parameters:
+            result: The failed ``NavResult`` the ensemble produced.
+            model_metadata: Per-model metadata, read for ``fills_extfov``.
+
+        Returns:
+            The result, with its status reason substituted where one applies.
+        """
+        reason = self._reason_for_a_covering_body(result.status_reason, model_metadata)
+        if reason is result.status_reason:
+            return result
+        return dataclasses.replace(result, status_reason=reason)
+
     def _fail(
         self,
         *,
@@ -826,7 +896,17 @@ class NavOrchestrator(NavBase):
         Wraps ``NavResult.failed`` so every short-circuit and gate emits
         the per-status-reason INFO log lines defined in
         :data:`STATUS_REASON_INFO_TEMPLATE`.
+
+        A body covering the extended frame decides the reason whatever else
+        happened. It occludes the stars and stands in front of the rings, so
+        features from those are not evidence that the frame was navigable:
+        whichever of them survived to be gated, the image is all body and no
+        sky, and reporting the gate would describe a symptom while hiding the
+        cause. The exception is a defect -- an internal error or a contract
+        violation is about this code and must never be filed under a fact about
+        the geometry.
         """
+        status_reason = self._reason_for_a_covering_body(status_reason, model_metadata)
         self._log_status_reason(status_reason)
         return NavResult.failed(
             status_reason=status_reason,

@@ -43,6 +43,7 @@ The feature-by-feature emission rules:
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -80,6 +81,7 @@ from spindoctor.nav_model.nav_model_body_base import (
 from spindoctor.nav_model.stars.predicted_snr import psf_sigma_px
 from spindoctor.support.constants import HALFPI
 from spindoctor.support.image import filter_downsample, shift_array
+from spindoctor.support.memory import release_transient_memory
 from spindoctor.support.time import now_dt
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -89,6 +91,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from spindoctor.nav_orchestrator.nav_context import NavContext
 
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
+
+BODY_STRIP_ROWS: int = 128
+"""Rows of a body's oversampled grid evaluated in one backplane call.
+
+A body larger than the frame has its box clipped to the frame, so its grid is
+the whole extended frame; oops sizes its intermediates by the grid, so that is
+what the stage costs. Striping bounds it by the strip. The same figure, for the
+same reason, as the ring and Titan strips.
+"""
 
 __all__ = [
     'BODY_BLOB_MIN_DIAMETER_PX',
@@ -246,6 +257,137 @@ def bodies_in_extfov(
             continue
         out.append((body_name, entry))
     return out
+
+
+def _strip_bounds(rows: int, oversample_v: int) -> Iterator[tuple[int, int]]:
+    """Yield ``(start, stop)`` row bounds covering a box, one strip at a time.
+
+    A strip is handed to the caller's downsample, which divides its rows by the
+    oversample factor and refuses a count that does not divide exactly.  The
+    whole box always divides -- it is that many output rows by construction --
+    but a fixed :data:`BODY_STRIP_ROWS` strip only does when the factor divides
+    that constant, so each strip is instead the largest multiple of the factor
+    that fits inside it.  The last strip is whatever remains, which divides for
+    the same reason the box does.
+
+    Parameters:
+        rows: Rows of the oversampled box.
+        oversample_v: Vertical oversample factor; each strip is a whole number
+            of this many rows.
+
+    Yields:
+        ``(start, stop)`` half-open row bounds, in order, covering ``rows``.
+    """
+    step = max(oversample_v, (max(1, BODY_STRIP_ROWS) // oversample_v) * oversample_v)
+    for start in range(0, rows, step):
+        yield start, min(start + step, rows)
+
+
+def _body_strips(
+    obs: Observation,
+    *,
+    u_range: tuple[float, float],
+    v_range: tuple[float, float],
+    oversample: tuple[int, int],
+) -> Iterator[Backplane]:
+    """Yield a backplane per strip of rows of a body's oversampled box.
+
+    Every quantity a caller needs from one strip must be taken while that
+    strip's backplane is the one being yielded: the point of the strips is that
+    only one exists at a time, and asking again later would build the whole box
+    after all.
+
+    Strip boundaries fall on whole rows of the oversampled grid, so quantities
+    stacked from the strips are the arrays a whole-box evaluation gives, and a
+    caller's downsample sees what it saw before.
+
+    Parameters:
+        obs: Observation snapshot.
+        u_range: ``(min, max)`` of the oversampled grid's horizontal extent.
+        v_range: ``(min, max)`` of its vertical extent.
+        oversample: ``(u, v)`` oversample factors of the grid.
+
+    Yields:
+        One :class:`~oops.backplane.Backplane` per strip, in row order.
+    """
+    oversample_u, oversample_v = oversample
+    v_min, v_max = v_range
+    rows = round((v_max - v_min) * oversample_v) + 1
+    for start, stop in _strip_bounds(rows, oversample_v):
+        yield Backplane(
+            obs,
+            meshgrid=Meshgrid.for_fov(
+                obs.fov,
+                origin=(u_range[0], v_min + start / oversample_v),
+                limit=(u_range[1], v_min + (stop - 1) / oversample_v),
+                oversample=(oversample_u, oversample_v),
+                swap=True,
+            ),
+        )
+
+
+def _stack(parts: list[Any]) -> Any:
+    """Stack per-strip masked arrays back into the whole-box array.
+
+    Parameters:
+        parts: One masked array per strip, in row order, each covering the
+            full width of the box.
+
+    Returns:
+        The array a whole-box evaluation would have produced, or the single
+        part unchanged when there was only one strip.
+    """
+    if len(parts) == 1:
+        return parts[0]
+    return np.ma.concatenate(parts, axis=0)
+
+
+def body_fills_extfov(obs: Observation, inventory: dict[str, Any]) -> bool:
+    """Whether a body's disc covers every corner of the extended frame.
+
+    A body whose disc reaches past all four corners leaves no sky around it:
+    the limb is off the edge on every side, the disc has no measurable extent,
+    and there is nothing in the image a shape-based technique can match. The
+    frame is unnavigable by that body.
+
+    Saying so from the inventory alone is the point. The backplane over such a
+    body's box is the largest one a navigation ever asks for -- on a Voyager
+    frame it is the whole extended frame -- and it is built to render a
+    silhouette that fills the image and carries no edge.
+
+    The disc is the ellipse the inventory's pixel sizes describe, centred where
+    the inventory puts it, and the question is where the frame's corners fall
+    against it. The bounding box will not do: a corner inside the box can still
+    be outside the limb, which is precisely the case where the image does show
+    sky and is navigable. An ellipse is convex, so covering the four corners is
+    covering the frame.
+
+    Parameters:
+        obs: Observation snapshot, for the extended frame's bounds.
+        inventory: The body's inventory record.
+
+    Returns:
+        True when every corner of the extended frame lies inside the disc.
+        False when the record does not carry what the test needs, because a
+        body that cannot be measured has to be looked at rather than dismissed.
+    """
+    try:
+        centre = inventory['center_uv']
+        u_c = float(centre[0])
+        v_c = float(centre[1])
+        semi_u = float(inventory['u_pixel_size']) / 2.0
+        semi_v = float(inventory['v_pixel_size']) / 2.0
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+    if not (semi_u > 0.0 and semi_v > 0.0):
+        return False
+    if not all(math.isfinite(x) for x in (u_c, v_c, semi_u, semi_v)):
+        return False
+    return all(
+        ((u - u_c) / semi_u) ** 2 + ((v - v_c) / semi_v) ** 2 <= 1.0
+        for u in (obs.extfov_u_min, obs.extfov_u_max)
+        for v in (obs.extfov_v_min, obs.extfov_v_max)
+    )
 
 
 def occluder_mask_for_body(
@@ -436,7 +578,14 @@ class NavModelBody(NavModelBodyBase):
         return out
 
     def create_model(self) -> None:
-        """Render the silhouette, masks, and polylines used by ``to_features``."""
+        """Render the silhouette, masks, and polylines used by ``to_features``.
+
+        A body whose disc reaches past all four corners of the extended frame
+        is declined instead: the metadata records ``fills_extfov`` and nothing
+        is rendered, because the backplane over such a body is the largest one
+        a navigation builds and it would be built to draw a silhouette with no
+        edge in it.  ``to_features`` then emits nothing.
+        """
         start_time = now_dt()
         self._metadata.clear()
         self._metadata['start_time'] = start_time.isoformat()
@@ -444,7 +593,27 @@ class NavModelBody(NavModelBodyBase):
         self._metadata['elapsed_time_sec'] = None
         self._metadata['body_name'] = self._body_name
         with self.log_section(f'CREATE BODY MODEL FOR: {self._body_name}'):
-            self._render()
+            # Resolved here rather than in _render, which is what used to load
+            # it: gating the decline on a caller having supplied the record
+            # meant a caller who did not skipped the decline and then built the
+            # very backplane it exists to avoid.
+            if self._inventory is None:
+                self._inventory = self.obs.inventory([self._body_name], return_type='full')[
+                    self._body_name
+                ]
+            if body_fills_extfov(self.obs, self._inventory):
+                # Declined here rather than after rendering: the backplane over
+                # a body that covers the frame is the largest one a navigation
+                # builds, and it would be built to draw a silhouette with no
+                # edge in it.
+                self._metadata['fills_extfov'] = True
+                self._logger.info(
+                    'Body %s covers the extended frame; no limb or disc extent to '
+                    'measure, so no model is built',
+                    self._body_name,
+                )
+            else:
+                self._render()
             self._log_geometry_summary()
             end_time = now_dt()
             self._metadata['end_time'] = end_time.isoformat()
@@ -641,16 +810,57 @@ class NavModelBody(NavModelBodyBase):
         restr_u_max = u_max + 1 - 1.0 / (2 * oversample_u)
         restr_v_min = v_min + 1.0 / (2 * oversample_v)
         restr_v_max = v_max + 1 - 1.0 / (2 * oversample_v)
-        restr_meshgrid = Meshgrid.for_fov(
-            obs.fov,
-            origin=(restr_u_min, restr_v_min),
-            limit=(restr_u_max, restr_v_max),
+        # Evaluated a strip of rows at a time, and every quantity taken from
+        # each strip before it is dropped. A body larger than the frame has its
+        # box clipped to the frame, so this grid is the whole extended frame,
+        # and oops materializes its intermediates over the grid it is handed:
+        # Saturn overfilling a Cassini frame measured 7.5 GB here, more than
+        # every other stage of that navigation put together.
+        #
+        # All four quantities come from the same pass. Striping one of them and
+        # leaving the rest to a whole-box backplane pays for the whole box
+        # anyway and the strips on top, which measured worse than not striping.
+        want_lambert = bool(body_config.use_lambert)
+        incidence_parts: list[Any] = []
+        lambert_parts: list[Any] = []
+        resolution_parts: list[Any] = []
+        occluder_parts: list[NDArrayBoolType] = []
+        any_occluder = False
+        for strip_bp in _body_strips(
+            obs,
+            u_range=(restr_u_min, restr_u_max),
+            v_range=(restr_v_min, restr_v_max),
             oversample=(oversample_u, oversample_v),
-            swap=True,
-        )
-        restr_bp = Backplane(obs, meshgrid=restr_meshgrid)
-
-        oversampled_incidence_mvals = restr_bp.incidence_angle(body_name).mvals
+        ):
+            strip_incidence = strip_bp.incidence_angle(body_name).mvals
+            incidence_parts.append(strip_incidence)
+            if want_lambert:
+                lambert_parts.append(strip_bp.lambert_law(body_name).mvals.filled(0.0))
+            resolution_parts.append(strip_bp.resolution(body_name).mvals.filled(0.0))
+            strip_occluder = occluder_mask_for_body(
+                strip_bp,
+                body_name,
+                self._siblings,
+                self._subject_range_km,
+                oversample_v=oversample_v,
+                oversample_u=oversample_u,
+            )
+            if strip_occluder is None:
+                occluder_parts.append(
+                    np.zeros(
+                        (
+                            strip_incidence.shape[0] // oversample_v,
+                            strip_incidence.shape[1] // oversample_u,
+                        ),
+                        dtype=bool,
+                    )
+                )
+            else:
+                occluder_parts.append(strip_occluder)
+                any_occluder = True
+            del strip_bp, strip_incidence, strip_occluder
+            release_transient_memory()
+        oversampled_incidence_mvals = _stack(incidence_parts)
         downsampled_incidence_mvals = filter_downsample(
             oversampled_incidence_mvals, oversample_v, oversample_u
         )
@@ -692,8 +902,8 @@ class NavModelBody(NavModelBodyBase):
             local_model: NDArrayFloatType = np.zeros_like(body_mask_valid, dtype=np.float64)
             local_model[body_mask_valid] = 0.01
         else:
-            if body_config.use_lambert:
-                lambert_oversampled = restr_bp.lambert_law(body_name).mvals.filled(0.0)
+            if want_lambert:
+                lambert_oversampled = np.concatenate(lambert_parts, axis=0)
                 local_model = filter_downsample(lambert_oversampled, oversample_v, oversample_u)
                 local_model = local_model + 0.05
                 local_model[body_mask_invalid] = 0.0
@@ -727,7 +937,7 @@ class NavModelBody(NavModelBodyBase):
         # try to downsample an already-downsampled array, asserting on
         # the (downsampled-)shape vs oversample divisibility.
         if body_mask_valid.any():
-            km_per_pixel_arr = restr_bp.resolution(body_name).mvals.filled(0.0)
+            km_per_pixel_arr = np.concatenate(resolution_parts, axis=0)
             km_per_pixel_local = filter_downsample(km_per_pixel_arr, oversample_v, oversample_u)
         else:
             km_per_pixel_local = np.zeros_like(body_mask_valid, dtype=np.float64)
@@ -737,14 +947,7 @@ class NavModelBody(NavModelBodyBase):
         # never chases an arc the image does not show) and, promoted to extfov
         # coordinates, is trimmed out of the disc template (so the correlator
         # does not score against disc brightness that is not there).
-        occluder_local = occluder_mask_for_body(
-            restr_bp,
-            body_name,
-            self._siblings,
-            self._subject_range_km,
-            oversample_v=oversample_v,
-            oversample_u=oversample_u,
-        )
+        occluder_local = np.concatenate(occluder_parts, axis=0) if any_occluder else None
         occluder_ext = obs.make_extfov_false()
         if occluder_local is not None:
             occluder_ext[v_slice, u_slice] = occluder_local & body_mask_valid

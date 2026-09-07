@@ -536,16 +536,19 @@ asserts the generated half matches the registries.
   search margin, and `oops` sizes its intermediates by the meshgrid it is
   handed. The wide-margin instruments are therefore the expensive ones: a
   Voyager frame extends to 3.24 Mpx against a 1000x1000 detector. Bounding
-  Titan's two backplane boxes, striping the ring and Titan backplanes,
+  Titan's two backplane boxes, striping the ring, body and Titan backplanes,
   releasing each strip's memory back to the operating system, and holding
-  fewer correlation spectra at once are the mechanisms; the body model's
-  share follows separately. Striping alone bought nothing measurable until
-  the release was added, because oops intermediates live in reference cycles
-  and glibc retains freed arenas, so a striped pass grew by the sum of its
-  strips rather than the largest. What will remain once the whole chain is
-  in is #573: about four gigabytes of a ring render's resident size is held
-  by nothing the program can drop. Releasing more often does not help, and
-  the two placements measured to be worth nothing are recorded in
+  fewer correlation spectra at once bring Voyager Saturn frames from
+  16.7-26.0 GB to 7.47-7.72 GB with unchanged offsets and shorter runtimes,
+  which clears the 8 GB working target a cloud worker's instance size
+  implies. Striping alone bought nothing measurable until the release was
+  added, because oops intermediates live in reference cycles and glibc
+  retains freed arenas, so a striped pass grew by the sum of its strips
+  rather than the largest. What remains is #573: about four gigabytes of a
+  ring render's resident size is held by nothing the program can drop, so
+  the headroom above the target is roughly 0.3 GB against a run-to-run
+  spread of about 0.1 GB. Releasing more often does not help, and the two
+  placements measured to be worth nothing are recorded in
   `docs/dev_guide/dev_guide_memory.rst` so they are not tried again.
 
 - **#108** — audit every `sd_*` CLI for logging, cloud operation, and
