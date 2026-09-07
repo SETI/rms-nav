@@ -94,9 +94,8 @@ setting that does not apply to it.
 
 ``sd_results_index`` falls back to ``logs`` under the working directory
 instead. It reads a navigation results tree rather than writing to one, and its
-log under that root would be a file added to the tree its next pass enumerates
--- written, on a cloud root, at a network round trip per line. Naming
-``--log-root`` puts its log wherever you say, the results root included.
+log under that root would be a file added to the tree its next pass enumerates.
+Naming ``--log-root`` puts its log wherever you say, the results root included.
 
 A local root given as a relative path is resolved against the working directory
 once, at startup, and the absolute result is what every log file of that run is

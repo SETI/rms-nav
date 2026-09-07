@@ -164,9 +164,8 @@ directions:
 
 Both are answered by running ``sd_results_index ingest`` again, which is cheap
 over a tree that has barely changed: a document whose size and modification time still
-match is not read at all. Over a cloud bucket of 52,101 documents a cold pass
-measured 240 seconds and a pass with nothing changed 13 seconds, so re-ingesting
-before a run that depends on the answer is an ordinary thing to do. Every run that answers from a results index reports
+match is not read at all. Re-ingesting before a run that depends on the answer
+is an ordinary thing to do. Every run that answers from a results index reports
 when the pass that filled it finished and how long ago that was, so the age of
 the answer is in the run log beside the answer.
 
@@ -175,6 +174,28 @@ results index has no row at all for, a document rewritten in place --- the cases
 are enumerated in :doc:`user_guide_navigation` under the selection filters, and
 the reason vocabulary the backplane and reprojection stages report is in
 :doc:`user_guide_backplanes` and :doc:`user_guide_reprojection`.
+
+If a pass is slower than your storage should allow
+--------------------------------------------------
+
+The ``results_index`` configuration section sets how much of a pass a machine
+does at a time. Its shipped values were chosen against one machine, one
+network and one storage service, and the right values for yours may differ:
+a slower link, a service with its own limits, or a local disk are all reasons
+a different setting would serve you better.
+
+.. code-block:: yaml
+
+   results_index:
+     walk_threads: 32
+     walk_directories_at_once: 256
+     retrieve_threads: 64
+     retrieve_batch_size: 1024
+
+Nothing here needs setting for the program to work, and a local results tree
+is unaffected by any of it. ``retrieve_batch_size`` may not be smaller than
+``retrieve_threads``; a run that is asked for that combination says so and
+stops rather than running slowly for a reason nobody could see.
 
 How a results index is asked for
 ================================

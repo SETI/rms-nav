@@ -52,6 +52,7 @@ from pdslogger import PdsLogger
 
 from spindoctor.nav_records.document import METADATA_SUFFIX
 from spindoctor.nav_records.record import ListedRecord
+from spindoctor.nav_records.tuning import TreeTuning
 
 __all__ = [
     'WALK_DIRECTORIES_AT_ONCE',
@@ -61,35 +62,40 @@ __all__ = [
     'walk_from',
 ]
 
-WALK_THREADS = 32
-"""How many directories are listed at once.
+WALK_THREADS = TreeTuning().walk_threads
+"""How many directories are listed at once, where nothing says otherwise.
 
-A listing is one round trip, and on a cloud root it is entirely latency: a
-bucket of 853 directories measured about a tenth of a second each, so listing
-them one after another costs a minute and a half of waiting and no bandwidth at
-all.  That minute is paid by every pass, including one that goes on to read
-nothing because no document changed, which is what a re-ingest is.
+A listing is one round trip, and on a cloud root it is entirely latency: on the
+machine and bucket this was tuned against, a directory listing took about a
+tenth of a second and moved no bandwidth worth counting, so listing them one
+after another spends the whole pass waiting.  That wait is paid by every pass,
+including one that goes on to read nothing because no document changed, which
+is what a re-ingest is.  A local root pays no such latency, and listing a
+handful of directories at once costs it nothing either.
 
-A local root pays no such latency, and listing a handful of directories at once
-costs it nothing measurable either.
+How much overlap helps, and where it stops helping, belongs to a machine and
+its network rather than to this program.  This is the default;
+:class:`~spindoctor.nav_records.TreeTuning` is what a caller passes instead,
+and ``results_index.walk_threads`` is where a configuration says so.
 """
 
-WALK_DIRECTORIES_AT_ONCE = 256
-"""How many directories one round of the walk takes off the frontier.
+WALK_DIRECTORIES_AT_ONCE = TreeTuning().walk_directories_at_once
+"""How many directories one round takes off the frontier, by default.
 
 The walk holds the entries of the directories it is listing, so a round over
 everything at one level of a wide tree would hold that whole level in memory at
 once.  Taking a bounded slice keeps the walk streaming -- documents are yielded
-as each round finishes rather than at the end -- while still handing
-:data:`WALK_THREADS` enough work to stay busy.
+as each round finishes rather than at the end -- while still handing the
+listing threads enough work to stay busy.
 
-What the bound is worth in bytes: one listed entry measured 627 of them, so a
-round is bounded by this many directories times what each holds rather than by
-the tree.  A results tree is wide and shallow -- one directory per volume, and
-every document of that volume in it -- so a Cassini-scale root of 443,177
-documents over 126 volumes falls inside a single round either way, and holds
-about 280 MB while that round runs.  The bound is what stops a deeper or wider
-tree from being unbounded, not something the results trees themselves reach.
+The bound is on what a round holds, so what it is worth depends on how large an
+entry is and how much memory the machine has.  A results tree is wide and
+shallow -- one directory per volume, and every document of that volume in it --
+so the trees this was tuned against fall inside a single round either way.  The
+bound is what stops a deeper or wider tree from being unbounded, not something
+the results trees themselves reach.  ``results_index.walk_directories_at_once``
+is where a machine with a different amount of memory, or a tree of a different
+shape, says otherwise.
 """
 
 
@@ -270,6 +276,7 @@ def _claim(
         visited: Where this walk has already listed each directory it has
             listed, by identity, which this adds the directory to.
         logger: Logger for a directory reached a second way.
+        tuning: How much of the walk runs at once, or None for the defaults.
 
     Returns:
         True when the directory has not been listed under another name.  A
@@ -304,6 +311,7 @@ def walk_from(
     *,
     unlistable: type[UnlistableDirectoryError],
     logger: PdsLogger,
+    tuning: TreeTuning | None = None,
 ) -> Iterator[ListedRecord]:
     """Yield the documents under one directory, descending as it goes.
 
@@ -319,7 +327,7 @@ def walk_from(
 
     Yields:
         One entry per navigation document.  The order is the walk's own and is
-        not defined: directories are listed :data:`WALK_THREADS` at a time,
+        not defined: directories are listed several at a time,
         because a listing is a round trip and a tree of them is otherwise a
         minute of pure latency per pass.  No consumer reads an order from this
         -- the record seam promises none, and a caller wanting one sorts -- and
@@ -335,12 +343,13 @@ def walk_from(
             the refusal: the pass ends either way, having written nothing a
             later pass will not write again.
     """
+    tuning = TreeTuning() if tuning is None else tuning
     frontier: deque[tuple[FCPath, str, type[UnlistableDirectoryError]]] = deque(
         [(directory, prefix, unlistable)]
     )
     while frontier:
         round_directories: list[tuple[FCPath, str, type[UnlistableDirectoryError]]] = []
-        while frontier and len(round_directories) < WALK_DIRECTORIES_AT_ONCE:
+        while frontier and len(round_directories) < tuning.walk_directories_at_once:
             entry = frontier.popleft()
             if _claim(entry[0], visited, logger):
                 round_directories.append(entry)
@@ -357,7 +366,8 @@ def walk_from(
             # on the one round where it matters most.
             listings = [_entries_of(round_directories[0][0], round_directories[0][2])]
         else:
-            with ThreadPoolExecutor(max_workers=min(WALK_THREADS, len(round_directories))) as pool:
+            workers = min(tuning.walk_threads, len(round_directories))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
                 # Consuming the iterator raises the first refusal in frontier
                 # order, so which directory ends the pass does not depend on
                 # which thread happened to finish first.

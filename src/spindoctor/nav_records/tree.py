@@ -99,6 +99,7 @@ from spindoctor.nav_records.source import (
     root_for_stubs,
     selected_roots,
 )
+from spindoctor.nav_records.tuning import TreeTuning
 from spindoctor.nav_records.walk import (
     UnlistableDirectoryError,
     UnlistableRootError,
@@ -114,8 +115,8 @@ __all__ = [
     'TreeRecordSource',
 ]
 
-RETRIEVE_BATCH_SIZE = 1024
-"""How many documents are retrieved in one batched download.
+RETRIEVE_BATCH_SIZE = TreeTuning().retrieve_batch_size
+"""How many documents are retrieved in one batched download, by default.
 
 A cloud backend downloads a batch in parallel, so the batch size trades peak
 memory and per-request concurrency against the number of round trips.  A
@@ -123,26 +124,27 @@ navigation document is a few kilobytes, so peak memory is not what decides it:
 the batch has to be at least as large as :data:`RETRIEVE_THREADS` or the pool
 runs a fraction of the requests it could, and a batch several times that keeps
 the pool full across the whole of it rather than draining at each boundary.
-Measured over the same bucket (2026-09-04), at 64 threads: 131 documents a
-second at a batch of 128, 219 at 256, 347 at 512, 453 at 1024.
 
 An ingest batches within its commit chunk, so this above
 :data:`~spindoctor.cli.results_index.INGEST_COMMIT_CHUNK_SIZE` would be
-silently cut down to it.
+silently cut down to it.  ``results_index.retrieve_batch_size`` is where a
+configuration sets it.
 """
 
-RETRIEVE_THREADS = 64
-"""How many documents are fetched at once within one batch.
+RETRIEVE_THREADS = TreeTuning().retrieve_threads
+"""How many documents are fetched at once within one batch, by default.
 
-Measured against a bucket of 52,101 documents (2026-09-04): the eight threads a
-:class:`~filecache.FileCache` defaults to fetched 48 documents a second, which
-is 18 minutes of round trips for that bucket and almost no bandwidth.  Raising
-this to 64, with a batch large enough to feed it, measured 307 a second -- under
-three minutes, a factor of six.  Past this the rate falls again, and streaming
-the same documents without storing them measured 317, so what is left is the
-service's latency rather than anything the cache is doing.
+The eight threads a :class:`~filecache.FileCache` defaults to leave a cloud
+pass waiting on round trips and moving almost no bandwidth, so this raises it
+and the batch is sized to feed it.  Where the useful value stops rising is a
+property of the link and of what the service will do concurrently: on the
+machine and bucket this was tuned against, past this the rate fell again, and
+what was left matched what streaming the same documents without storing them
+managed -- the service's own latency rather than anything the cache was doing.
+Another machine, another provider, another day will find a different number.
 
 A local root retrieves without copying, so this costs nothing there.
+``results_index.retrieve_threads`` is where a configuration sets it.
 """
 
 NAMES_NO_INSTRUMENT = 'names no instrument to attribute it to a mission'
@@ -187,13 +189,21 @@ class TreeRecordSource:
     """
 
     def __init__(
-        self, roots: Sequence[str | Path | FCPath], *, logger: PdsLogger | None = None
+        self,
+        roots: Sequence[str | Path | FCPath],
+        *,
+        logger: PdsLogger | None = None,
+        tuning: TreeTuning | None = None,
     ) -> None:
         held = distinct_roots(roots)
         if not held:
             raise ValueError('a record source over the documents needs at least one results root')
         self._roots = tuple(held)
         self._logger = NullLogger() if logger is None else logger
+        # How much of a pass runs at once belongs to the machine and its
+        # network rather than to this class, so it arrives as an argument; a
+        # caller with no configuration to consult gets the shipped defaults.
+        self._tuning = TreeTuning() if tuning is None else tuning
         # What a walk answering a listing of named documents found, keyed by the
         # root and the top-level directory walked.  A scan asks in batches, so a
         # walk made for one batch answers every later batch of the same scan.
@@ -325,7 +335,7 @@ class TreeRecordSource:
     def records(self, selection: Selection) -> Iterator[NavRecord | UnreadableFile]:
         """Return the records the selection covers, yielded one at a time.
 
-        Documents are retrieved :data:`RETRIEVE_BATCH_SIZE` at a time and
+        Documents are retrieved in batches and
         yielded singly, so a caller holds one record where the source holds one
         batch.  What the selection asks for is checked before anything is read.
 
@@ -540,8 +550,7 @@ class TreeRecordSource:
             return self._checked(root, stubs)
         return self._found_in_a_walk(root, root_url, stubs)
 
-    @staticmethod
-    def _checked(root: FCPath, stubs: Sequence[str]) -> Iterator[ListedRecord]:
+    def _checked(self, root: FCPath, stubs: Sequence[str]) -> Iterator[ListedRecord]:
         """Ask the filesystem about each named document, a batch of paths at a time.
 
         The call that costs a syscall per file, which is what makes it the cheap
@@ -564,7 +573,7 @@ class TreeRecordSource:
             :attr:`~spindoctor.nav_records.ListedRecord.has_metrics` and finds
             them absent, rather than being handed a stand-in for them.
         """
-        for batch in in_batches(iter(stubs), RETRIEVE_BATCH_SIZE):
+        for batch in in_batches(iter(stubs), self._tuning.retrieve_batch_size):
             sub_paths: list[str | Path] = [f'{stub}{METADATA_SUFFIX}' for stub in batch]
             there = cast(list[bool], root.exists(sub_paths))
             for stub, found in zip(batch, there, strict=True):
@@ -656,6 +665,7 @@ class TreeRecordSource:
                     {},
                     unlistable=unlistable,
                     logger=self._logger,
+                    tuning=self._tuning,
                 )
             }
         except UnlistableDirectoryError as exc:
@@ -760,7 +770,12 @@ class TreeRecordSource:
         visited: dict[tuple[int, int], str] = {}
         if not subtrees:
             yield from walk_from(
-                root, '', visited, unlistable=UnlistableRootError, logger=self._logger
+                root,
+                '',
+                visited,
+                unlistable=UnlistableRootError,
+                logger=self._logger,
+                tuning=self._tuning,
             )
             return
         for subtree in subtrees:
@@ -770,6 +785,7 @@ class TreeRecordSource:
                 visited,
                 unlistable=UnlistableDirectoryError,
                 logger=self._logger,
+                tuning=self._tuning,
             )
 
     def _found_of_root(
@@ -791,14 +807,16 @@ class TreeRecordSource:
         Yields:
             One pair per listed document, read and unfiltered.
         """
-        for batch in in_batches(listed, RETRIEVE_BATCH_SIZE):
+        for batch in in_batches(listed, self._tuning.retrieve_batch_size):
             sub_paths: list[str | Path] = [f'{entry.stub}{METADATA_SUFFIX}' for entry in batch]
             # retrieve() rather than get_local_path(): on a cloud root the
             # latter names a file it never downloads.  exception_on_fail=False
             # keeps one file that never arrived from ending the pass.
             local_paths = cast(
                 list[Path | Exception],
-                root.retrieve(sub_paths, exception_on_fail=False, nthreads=RETRIEVE_THREADS),
+                root.retrieve(
+                    sub_paths, exception_on_fail=False, nthreads=self._tuning.retrieve_threads
+                ),
             )
             for entry, local_path in zip(batch, local_paths, strict=True):
                 found = self._read_of(root, entry.stub, local_path)

@@ -299,21 +299,31 @@ other.
 
 **On a cloud root, both halves of a pass are latency rather than bandwidth.** A
 listing is one round trip and a document is another, and neither moves enough
-bytes to matter: a navigation document is a few kilobytes. So the walk lists
-:data:`~spindoctor.nav_records.walk.WALK_THREADS` directories at once, taking
-:data:`~spindoctor.nav_records.walk.WALK_DIRECTORIES_AT_ONCE` off a frontier
-each round so it still streams and still holds only a slice of the tree; and
-retrieval passes ``nthreads=``:data:`~spindoctor.nav_records.RETRIEVE_THREADS`
-with a batch large enough to keep that pool full. On a bucket of 52,101
-documents measured 2026-09-04, the two together took a cold pass from about 21
-minutes to 240 seconds, and a pass with nothing changed --- which pays for the
-listings and reads no document --- from a minute and a half of listings to 13
-seconds. A local root pays neither latency, and neither setting costs it
-anything measurable.
+bytes to matter: a navigation document is a few kilobytes. Both halves
+therefore run in parallel, which is what makes a pass over a cloud root routine
+rather than something to plan around. The walk lists several directories at
+once, taking a bounded slice off a frontier each round so it still streams and
+still holds only part of the tree; retrieval fetches several documents at once,
+with a batch large enough to keep that pool full. A local root pays neither
+latency, and neither costs it anything.
 
-The ceiling is the service, not the settings: streaming the same documents
-without storing them measured 317 a second against ``retrieve()``'s 307, so
-what is left after the concurrency is the round trip itself.
+**How much of it runs at once is not a property of this program.** It belongs
+to a machine, its link to the root, and what the service will do concurrently:
+where the useful value stops rising is where that particular round trip becomes
+what is left, and another provider or another link puts it somewhere else. So
+the numbers are configuration rather than constants.
+:class:`~spindoctor.nav_records.TreeTuning` carries them,
+:class:`~spindoctor.nav_records.TreeRecordSource` takes one, and the shipped
+values -- tuned on one machine against one bucket -- are its defaults. The
+``results_index`` section of the configuration is where a machine says
+otherwise, and a value that would stop a pass rather than tune it, such as a
+batch too small to fill the download pool, is refused at startup naming the
+setting.
+
+The library does not read the configuration itself:
+:mod:`spindoctor.nav_records` answers about documents and roots and depends on
+nothing that decides policy, so the program that has a configuration reads it
+and passes what it says.
 
 **What a check cannot report is the size and the modification time.** Those come
 from a directory entry, and an entry a check produced carries neither and says
