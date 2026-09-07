@@ -800,18 +800,18 @@ class TestMaskedNccBidirectional:
         """
         # Reached by name rather than through the module attribute, which
         # strict typing reads as a re-export of numpy's.
-        real_fft2 = np.fft.fft2
+        real_rfft2 = np.fft.rfft2
         seen: list[weakref.ref[Any]] = []
         high = 0
 
-        def counting_fft2(a: Any, *args: Any, **kwargs: Any) -> Any:
+        def counting_rfft2(a: Any, *args: Any, **kwargs: Any) -> Any:
             nonlocal high
-            out = real_fft2(a, *args, **kwargs)
+            out = real_rfft2(a, *args, **kwargs)
             seen.append(weakref.ref(out))
             high = max(high, sum(1 for ref in seen if ref() is not None))
             return out
 
-        monkeypatch.setattr('spindoctor.support.correlate.fft2', counting_fft2)
+        monkeypatch.setattr('spindoctor.support.correlate.rfft2', counting_rfft2)
         rng = np.random.default_rng(11)
         rows, cols = 24, 20
         data_mask = rng.random((rows, cols)) > 0.25

@@ -531,25 +531,7 @@ asserts the generated half matches the registries.
 
 ### Cloud and scale
 
-- **Navigation memory, and #573** -- a navigation's resident size is bounded
-  by the extended frame, which is the detector plus twice the instrument's
-  search margin, and `oops` sizes its intermediates by the meshgrid it is
-  handed. The wide-margin instruments are therefore the expensive ones: a
-  Voyager frame extends to 3.24 Mpx against a 1000x1000 detector. Bounding
-  Titan's two backplane boxes, striping the ring, body and Titan backplanes,
-  releasing each strip's memory back to the operating system, and holding
-  fewer correlation spectra at once bring Voyager Saturn frames from
-  16.7-26.0 GB to 7.47-7.72 GB with unchanged offsets and shorter runtimes,
-  which clears the 8 GB working target a cloud worker's instance size
-  implies. Striping alone bought nothing measurable until the release was
-  added, because oops intermediates live in reference cycles and glibc
-  retains freed arenas, so a striped pass grew by the sum of its strips
-  rather than the largest. What remains is #573: about four gigabytes of a
-  ring render's resident size is held by nothing the program can drop, so
-  the headroom above the target is roughly 0.3 GB against a run-to-run
-  spread of about 0.1 GB. Releasing more often does not help, and the two
-  placements measured to be worth nothing are recorded in
-  `docs/dev_guide/dev_guide_memory.rst` so they are not tried again.
+- **Navigation memory** -- a navigation's resident size is bounded by the extended frame, which is the detector plus twice the instrument's search margin, and `oops` sizes its intermediates by the meshgrid it is handed. The wide-margin instruments are therefore the expensive ones: a Voyager frame extends to 3.24 Mpx against a 1000x1000 detector. Bounding Titan's two backplane boxes, striping the ring, body and Titan backplanes, releasing each strip's memory back to the operating system, dropping the observation's backplanes where the model stage ends, and correlating through half spectra bring the six Voyager frames that exceeded the 8 GB working target from 8.02-9.82 GB to 6.39-7.66 GB, with every offset and status unchanged and roughly half the runtime on the heaviest. Two of those findings cost more to reach than they should have. Striping bought nothing measurable until the release was added, because oops intermediates live in reference cycles and glibc retains freed arenas, so a striped pass grew by the sum of its strips rather than the largest. And the residue a ring render leaves was recorded as unreturnable fragmentation on a probe that cleared one cache on one of three live backplanes; it is held, by the backplane caches, and dropping them takes settled resident size from 6.80 GB to 1.77 GB. The model stage now sets the peak at 7.66 GB on the heaviest frame, which is 0.34 GB of headroom; #584 is the measured way to widen it and #585 is the question the padding raises.
 
 - **#108** — audit every `sd_*` CLI for logging, cloud operation, and
   working `cloud_tasks` variants; fix what the audit finds. The logging
